@@ -203,7 +203,8 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { Upload, MagicStick, Box, SuccessFilled } from '@element-plus/icons-vue';
-import { ElMessage, ElMessageBox } from 'element-plus';
+import { ElMessage } from "element-plus/es/components/message/index"
+import { ElMessageBox } from "element-plus/es/components/message-box/index";
 import SkillCard from '@/components/skills/SkillCard.vue';
 import SkillImportDialog from '@/components/skills/SkillImportDialog.vue';
 

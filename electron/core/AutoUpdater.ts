@@ -10,12 +10,19 @@
 import { app, BrowserWindow, dialog, ipcMain } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import { LogManager } from './LogManager';
+import { isOhos } from '../platform/detect';
 
 export class AutoUpdater {
   private log = LogManager.getInstance();
   private mainWindow: BrowserWindow | null = null;
 
   initialize(window: BrowserWindow): void {
+    // 鸿蒙 PC 走应用商店更新,禁用 electron-updater(避免运行时报错)
+    if (isOhos()) {
+      this.log.warn('[AutoUpdater] 鸿蒙 PC 走应用商店更新,禁用 electron-updater');
+      return;
+    }
+
     this.mainWindow = window;
 
     autoUpdater.autoDownload = false;

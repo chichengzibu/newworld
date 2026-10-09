@@ -13,8 +13,8 @@
 import { LogManager } from '../core/LogManager'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import { app } from 'electron'
 import { randomUUID } from 'node:crypto'
+import { getHost } from '../platform/runtime'
 
 export interface Workspace {
   id: string
@@ -33,7 +33,17 @@ export interface Workspace {
   }
 }
 
-const WORKSPACE_BASE = path.join(app.getPath('userData'), 'sandboxes')
+/**
+ * workspace 根目录(userData/sandboxes)。
+ * 改为惰性求值:避免模块被 import 时(早于 initHost)就调用 getHost() 而抛错。
+ */
+let _workspaceBase: string | null = null
+function getWorkspaceBase(): string {
+  if (_workspaceBase === null) {
+    _workspaceBase = path.join(getHost().getPath('userData'), 'sandboxes')
+  }
+  return _workspaceBase
+}
 
 /**
  * WorkspaceManager:sandbox workspace 抽象
@@ -47,8 +57,8 @@ export class WorkspaceManager {
   private indexPath: string
 
   private constructor() {
-    this.indexPath = path.join(WORKSPACE_BASE, 'index.json')
-    if (!fs.existsSync(WORKSPACE_BASE)) fs.mkdirSync(WORKSPACE_BASE, { recursive: true })
+    this.indexPath = path.join(getWorkspaceBase(), 'index.json')
+    if (!fs.existsSync(getWorkspaceBase())) fs.mkdirSync(getWorkspaceBase(), { recursive: true })
     this.loadFromDisk()
   }
 
@@ -60,7 +70,7 @@ export class WorkspaceManager {
   /** 创建新 workspace(host 目录自动建) */
   createWorkspace(opts?: { name?: string; type?: 'project' | 'data' | 'cache' }): Workspace {
     const id = randomUUID().slice(0, 8)
-    const hostPath = path.join(WORKSPACE_BASE, id, 'mnt')
+    const hostPath = path.join(getWorkspaceBase(), id, 'mnt')
     fs.mkdirSync(hostPath, { recursive: true })
     const workspace: Workspace = {
       id,

@@ -15,6 +15,7 @@ import { PermissionConfig } from '../permissions/PermissionConfig';
 import { ChatManager } from '../chat/ChatManager';
 import { TaskExecutor } from '../task/TaskExecutor';
 import { TaskLog } from '../task/TaskLog';
+import { ScheduleTaskManager } from '../task/ScheduleTask';
 import { RISK_LEVEL_MAP, HIGH_RISK_OPERATIONS } from '../task/TaskExecutionMode';
 import { FileParser } from '../utils/FileParser';
 import { ConversationExporter } from '../utils/ConversationExporter';
@@ -39,6 +40,7 @@ import { IMMessageRouter } from '../channel/IMMessageRouter';
 import { IMPermissionManager } from '../channel/IMPermissionManager';
 import { ChannelRouter } from '../channel/ChannelRouter';
 import { ClawHubManager } from '../skill/ClawHubManager';
+import { ClawHubRegistry } from '../skill/ClawHubRegistry';
 import { ModelRatingManager } from '../models/ModelRatingManager';
 import { ModelUsageTracker } from '../models/ModelUsageTracker';
 import type { RouteRule } from '../channel/ChannelTypes';
@@ -390,6 +392,30 @@ export class IpcServer {
         return { success: result.success, error: result.error, skillId: result.skillId, data: skills };
       } catch (error) {
         this.log.error('skills:importUrl 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    ipcMain.handle('skills:importZip', async (_, zipPath: string) => {
+      try {
+        const skillLoader = SkillLoader.getInstance();
+        const result = await skillLoader.importSkillFromZip(zipPath);
+        const skills = skillLoader.getAllSkills();
+        return { success: result.success, error: result.error, skillId: result.skillId, data: skills };
+      } catch (error) {
+        this.log.error('skills:importZip 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    ipcMain.handle('skills:importFolder', async (_, folderPath: string) => {
+      try {
+        const skillLoader = SkillLoader.getInstance();
+        const result = await skillLoader.importSkillFromFolder(folderPath);
+        const skills = skillLoader.getAllSkills();
+        return { success: result.success, error: result.error, skillId: result.skillId, data: skills };
+      } catch (error) {
+        this.log.error('skills:importFolder 失败', error);
         return { success: false, error: String(error) };
       }
     });
@@ -2067,6 +2093,37 @@ export class IpcServer {
       },
     )
 
+    // ClawHub 远程仓库 (registry): 列出可安装/可更新的技能
+    ipcMain.handle('skills:clawhub:registry:list', async (_, baseUrl?: string) => {
+      try {
+        const registry = ClawHubRegistry.getInstance()
+        const items = await registry.list(baseUrl)
+        return { success: true, data: items }
+      } catch (error) {
+        this.log.error('skills:clawhub:registry:list 失败', error)
+        return { success: false, error: String(error) }
+      }
+    })
+
+    // ClawHub 远程仓库 (registry): 下载 + 验签 + 安装某个技能
+    ipcMain.handle(
+      'skills:clawhub:registry:install',
+      async (_, entryId: string, baseUrl?: string) => {
+        try {
+          const registry = ClawHubRegistry.getInstance()
+          const result = await registry.install(entryId, baseUrl)
+          if (result.success) {
+            const skills = SkillLoader.getInstance().getAllSkills()
+            return { success: true, skillId: result.skillId, data: skills }
+          }
+          return { success: false, error: result.error }
+        } catch (error) {
+          this.log.error('skills:clawhub:registry:install 失败', error)
+          return { success: false, error: String(error) }
+        }
+      },
+    )
+
     // P1-08 模型社区评分
     ipcMain.handle('model:rate', (_, args: any) => {
       try {
@@ -2276,12 +2333,13 @@ export class IpcServer {
       try {
         const { IMConfigStore } = require('../channel/IMConfigStore')
         IMConfigStore.getInstance().set(args.platform as any, args.config)
-        let testModule: any
-        if (args.platform === 'im-feishu') testModule = require('../channel/FeishuChannel')
-        else if (args.platform === 'im-dingtalk') testModule = require('../channel/DingTalkChannel')
-        else if (args.platform === 'im-wechat-work') testModule = require('../channel/WechatWorkChannel')
-        else return { success: false, message: 'unknown platform' }
-        const channel = new testModule.default('test-' + Date.now())
+        const { createChannelByKind } = require('../channel/factory')
+        let channel: any
+        try {
+          channel = createChannelByKind(args.platform as any, 'test-' + Date.now())
+        } catch {
+          return { success: false, message: 'unknown platform' }
+        }
         const health = await channel.healthCheck()
         return {
           success: health.healthy,
@@ -2410,6 +2468,96 @@ export class IpcServer {
         return { ok: false, error: String(error) }
       }
     })
+
+    // ============ 定时任务 Schedule ============
+    // 注意: 前端 Schedule.vue 字段为 { cron, retryCount }, 后端 ScheduleTaskManager
+    // 字段为 { scheduleValue, maxRetries }, 此处做适配层。
+    ipcMain.handle('schedule:list', () => {
+      try {
+        const mgr = ScheduleTaskManager.getInstance();
+        return { success: true, data: mgr.listTasks() };
+      } catch (error) {
+        this.log.error('schedule:list 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    ipcMain.handle('schedule:add', (_, payload: any) => {
+      try {
+        const mgr = ScheduleTaskManager.getInstance();
+        const task = mgr.createTask({
+          name: payload.name,
+          description: payload.description ?? '',
+          instruction: payload.instruction,
+          scheduleType: payload.scheduleType,
+          scheduleValue: payload.cron ?? payload.scheduleValue ?? '',
+          enabled: payload.enabled ?? true,
+          maxRetries: payload.retryCount ?? 0
+        });
+        return { success: true, data: task };
+      } catch (error) {
+        this.log.error('schedule:add 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    ipcMain.handle('schedule:update', (_, payload: any) => {
+      try {
+        const mgr = ScheduleTaskManager.getInstance();
+        const updated = mgr.updateTask(payload.id, {
+          name: payload.name,
+          description: payload.description ?? '',
+          instruction: payload.instruction,
+          scheduleType: payload.scheduleType,
+          scheduleValue: payload.cron ?? payload.scheduleValue ?? '',
+          enabled: payload.enabled ?? true,
+          maxRetries: payload.retryCount ?? 0
+        });
+        return { success: !!updated, data: updated };
+      } catch (error) {
+        this.log.error('schedule:update 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    ipcMain.handle('schedule:remove', (_, id: string) => {
+      try {
+        const mgr = ScheduleTaskManager.getInstance();
+        return { success: mgr.deleteTask(id) };
+      } catch (error) {
+        this.log.error('schedule:remove 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    ipcMain.handle('schedule:setEnabled', (_, { id, enabled }: { id: string; enabled: boolean }) => {
+      try {
+        const mgr = ScheduleTaskManager.getInstance();
+        const task = mgr.listTasks().find((t) => t.id === id);
+        if (!task) return { success: false, error: '任务不存在' };
+        if (task.enabled !== enabled) mgr.toggleTask(id);
+        return { success: true };
+      } catch (error) {
+        this.log.error('schedule:setEnabled 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    ipcMain.handle('schedule:history', (_, taskId?: string) => {
+      try {
+        const mgr = ScheduleTaskManager.getInstance();
+        const data = mgr.getHistory(taskId).map((h: any) => ({
+          executedAt: h.startTime ? new Date(h.startTime).toLocaleString() : '-',
+          status: h.status,
+          duration: h.duration != null ? `${h.duration}ms` : '-',
+          errorMessage: h.error || ''
+        }));
+        return { success: true, data };
+      } catch (error) {
+        this.log.error('schedule:history 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
 
     this.log.info('IPC处理器注册完成');
   }

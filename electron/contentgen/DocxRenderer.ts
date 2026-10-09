@@ -6,9 +6,10 @@
  */
 
 import { LogManager } from '../core/LogManager'
+import { getHost } from '../platform/runtime'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import { app } from 'electron'
+
 
 export interface RenderRequest {
   /** 源 markdown 文本 */
@@ -51,7 +52,7 @@ export class DocxRenderer {
     const format = 'docx'
     try {
       const outPath =
-        req.outputPath ?? path.join(app.getPath('userData'), 'output', `${Date.now()}.${format}`)
+        req.outputPath ?? path.join(getHost().getPath('userData'), 'output', `${Date.now()}.${format}`)
       fs.mkdirSync(path.dirname(outPath), { recursive: true })
       fs.writeFileSync(outPath, req.source, 'utf-8')
       const sizeBytes = fs.statSync(outPath).size

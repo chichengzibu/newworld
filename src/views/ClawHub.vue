@@ -7,7 +7,15 @@
 
     <el-tabs v-model="activeTab" class="clawhub-tabs">
       <!-- Tab 1: 浏览市场(P1-05 搜索/发现) -->
-      <el-tab-pane label="浏览市场" name="browse">
+      <el-tab-pane label="浏览市场(本地)" name="browse">
+        <el-alert
+          type="warning"
+          :closable="false"
+          show-icon
+          title="本地演示模式"
+          description="此市场为单机本地存储（未接入共享后端），数据仅存于本机、不与他人同步。要获取社区共享技能，请使用「远程仓库」标签页（支持签名校验的一键安装）。"
+          style="margin-bottom: 12px"
+        />
         <div class="filter-bar">
           <el-input v-model="searchQuery" placeholder="搜索技能名/描述/标签" clearable style="width: 300px" @keyup.enter="doSearch" />
           <el-select v-model="searchCategory" placeholder="分类" clearable style="width: 160px">
@@ -52,7 +60,15 @@
       </el-tab-pane>
 
       <!-- Tab 2: 发布技能(P1-03) -->
-      <el-tab-pane label="发布技能" name="publish">
+      <el-tab-pane label="发布技能(本地)" name="publish">
+        <el-alert
+          type="warning"
+          :closable="false"
+          show-icon
+          title="本地演示模式"
+          description="发布仅写入本机本地存储，不会真正进入共享市场。要对外发布技能，请用 scripts/build-registry.mjs 打包签名后托管到远端仓库。"
+          style="margin-bottom: 12px"
+        />
         <el-card class="publish-card">
           <h3>发布你的技能</h3>
           <el-form :model="publishForm" label-width="120px">
@@ -79,7 +95,15 @@
       </el-tab-pane>
 
       <!-- Tab 3: 审核队列(P1-04) -->
-      <el-tab-pane label="审核队列" name="review">
+      <el-tab-pane label="审核队列(本地)" name="review">
+        <el-alert
+          type="warning"
+          :closable="false"
+          show-icon
+          title="本地演示模式"
+          description="审核队列为单机本地存储，无真实后台流转。仅用于界面演示。"
+          style="margin-bottom: 12px"
+        />
         <el-table :data="pendingList" stripe>
           <el-table-column label="技能" prop="name" />          <el-table-column label="作者" prop="authorName" width="120" />
           <el-table-column label="描述" prop="description" show-overflow-tooltip />
@@ -134,6 +158,64 @@
                 @click="openInstantiateDialog(tpl)"
               >
                 一键实例化
+              </el-button>
+            </el-card>
+          </el-col>
+        </el-row>
+      </el-tab-pane>
+
+      <!-- Tab 5: 远程仓库 (registry: 作者推送 / 一键安装) -->
+      <el-tab-pane label="远程仓库" name="registry">
+        <div class="registry-header">
+          <el-input
+            v-model="registryBaseUrl"
+            placeholder="registry 基址,留空用默认/环境变量"
+            clearable
+            style="width: 360px"
+          />
+          <el-button type="primary" :loading="registryLoading" @click="loadRegistry">
+            {{ registryList.length ? '检查更新' : '连接仓库' }}
+          </el-button>
+          <span v-if="registryList.length" class="registry-meta">
+            共 {{ registryList.length }} 个 · 可更新 {{ registryList.filter((r) => r.hasUpdate).length }} 个
+          </span>
+          <span v-else-if="!registryLoading" class="registry-meta registry-meta--muted">
+            未连接或离线。先在远端放好 index.json 与签名 .zip。
+          </span>
+        </div>
+
+        <div v-if="registryList.length === 0 && registryLoading" class="empty-state">
+          <el-skeleton :rows="3" animated />
+        </div>
+
+        <el-row v-else :gutter="16" class="registry-grid">
+          <el-col v-for="r in registryList" :key="r.id" :xs="24" :sm="12" :md="8" :lg="6">
+            <el-card class="registry-card" shadow="hover">
+              <div class="registry-card-header">
+                <h4>{{ r.name }}</h4>
+                <el-tag size="small" type="info">{{ r.category }}</el-tag>
+              </div>
+              <p class="registry-desc">{{ r.description }}</p>
+              <div class="registry-tags">
+                <el-tag v-for="t in r.tags" :key="t" size="small" effect="plain">{{ t }}</el-tag>
+              </div>
+              <div class="registry-version">
+                <span>远端 v{{ r.version }}</span>
+                <span v-if="r.installedVersion">
+                  · 已装 v{{ r.installedVersion }}
+                  <el-tag v-if="r.hasUpdate" size="small" type="warning">可更新</el-tag>
+                  <el-tag v-else size="small" type="success">已最新</el-tag>
+                </span>
+                <span v-else>· 未安装</span>
+              </div>
+              <el-button
+                type="primary"
+                size="small"
+                class="registry-install-btn"
+                :loading="installingId === r.id"
+                @click="installFromRegistry(r)"
+              >
+                {{ r.installedVersion ? (r.hasUpdate ? '更新' : '重装') : '安装' }}
               </el-button>
             </el-card>
           </el-col>
@@ -203,7 +285,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from "element-plus/es/components/message/index"
 
 const activeTab = ref('browse')
 const searchQuery = ref('')
@@ -229,6 +311,53 @@ const instantiateDialogVisible = ref(false)
 const instantiatingTemplate = ref<any | null>(null)
 const instantiating = ref(false)
 const instantiateForm = reactive({ customName: '', authorId: 'current-user', authorName: 'You' })
+
+// Tab 5: 远程仓库 (registry)
+const registryList = ref<any[]>([])
+const registryLoading = ref(false)
+const registryBaseUrl = ref('')
+const installingId = ref<string | null>(null)
+
+async function loadRegistry(): Promise<void> {
+  registryLoading.value = true
+  try {
+    const r = await (window as any).electronAPI.channel.clawhubRegistryList(
+      registryBaseUrl.value.trim() || undefined,
+    )
+    if (r?.success) {
+      registryList.value = r.data || []
+      if (registryList.value.length === 0) {
+        ElMessage.info('仓库为空或暂不可达')
+      }
+    } else {
+      ElMessage.error('连接仓库失败: ' + (r?.error || '未知错误'))
+    }
+  } catch (e) {
+    ElMessage.error('连接仓库失败: ' + String(e))
+  } finally {
+    registryLoading.value = false
+  }
+}
+
+async function installFromRegistry(entry: any): Promise<void> {
+  installingId.value = entry.id
+  try {
+    const r = await (window as any).electronAPI.channel.clawhubRegistryInstall(
+      entry.id,
+      registryBaseUrl.value.trim() || undefined,
+    )
+    if (r?.success) {
+      ElMessage.success(`已安装: ${entry.name}`)
+      await loadRegistry()
+    } else {
+      ElMessage.error('安装失败: ' + (r?.error || '未知错误'))
+    }
+  } catch (e) {
+    ElMessage.error('安装失败: ' + String(e))
+  } finally {
+    installingId.value = null
+  }
+}
 
 async function loadTemplates(): Promise<void> {
   try {
@@ -553,5 +682,79 @@ onMounted(() => {
 .tpl-desc-inline {
   font-size: 13px;
   color: var(--text-regular, #444);
+}
+
+/* Tab 5: 远程仓库 */
+.registry-header {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 16px;
+}
+.registry-meta {
+  font-size: 12px;
+  color: var(--text-secondary, #999);
+}
+.registry-meta--muted {
+  color: var(--text-secondary, #bbb);
+}
+.registry-grid {
+  margin-top: 8px;
+}
+.registry-card {
+  margin-bottom: 16px;
+  height: 230px;
+  display: flex;
+  flex-direction: column;
+}
+.registry-card :deep(.el-card__body) {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  padding: 14px;
+}
+.registry-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+}
+.registry-card-header h4 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.registry-desc {
+  font-size: 13px;
+  color: var(--text-regular, #444);
+  margin: 0 0 6px;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+.registry-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 8px;
+}
+.registry-version {
+  font-size: 12px;
+  color: var(--text-secondary, #999);
+  margin-top: auto;
+  margin-bottom: 8px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+.registry-install-btn {
+  width: 100%;
 }
 </style>

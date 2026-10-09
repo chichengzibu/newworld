@@ -5,9 +5,10 @@
  */
 
 import { LogManager } from '../core/LogManager'
+import { getHost } from '../platform/runtime'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import { app } from 'electron'
+
 import type { RenderRequest, RenderResult } from './DocxRenderer'
 
 /**
@@ -28,7 +29,7 @@ export class PptxRenderer {
     const format = 'pptx'
     try {
       const outPath =
-        req.outputPath ?? path.join(app.getPath('userData'), 'output', `${Date.now()}.${format}`)
+        req.outputPath ?? path.join(getHost().getPath('userData'), 'output', `${Date.now()}.${format}`)
       fs.mkdirSync(path.dirname(outPath), { recursive: true })
       // W7 stub: 把 markdown 文本当 slides 内容, append stub marker
       const slides = req.source.split(/\n---\n/).map((s, i) => `Slide ${i + 1}: ${s}`).join('\n')

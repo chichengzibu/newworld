@@ -7,7 +7,19 @@
     <title>PiPiClaw - AI自动化助手</title>
   </head>
   <body>
-    <div id="app"></div>
+    <div id="app">
+      <div
+        id="boot-splash"
+        style="position:fixed;inset:0;z-index:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;background:#0f1115;color:#e5e7eb;font-family:-apple-system,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif"
+      >
+        <div style="font-size:22px;font-weight:600;letter-spacing:0.5px;color:#e5e7eb">PiPiClaw</div>
+        <div
+          class="boot-spinner"
+          style="width:26px;height:26px;border-radius:50%;border:3px solid rgba(255,255,255,0.15);border-top-color:#4f8cff"
+          aria-label="加载中"
+        ></div>
+      </div>
+    </div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

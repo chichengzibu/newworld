@@ -1,7 +1,8 @@
 import { LogManager } from '../core/LogManager'
+import { getHost } from '../platform/runtime'
 import { EventBus } from '../runtime/bridge/EventBus'
 import { createHash, createHmac, randomBytes } from 'node:crypto'
-import { app, safeStorage } from 'electron'
+import {safeStorage} from 'electron'
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'node:fs'
 import { join } from 'node:path'
 
@@ -29,7 +30,7 @@ const SIGNER_KEY_FILE = 'skill-signer-key.json'
  * - 文件存在但解密失败: 重新生成 (旧签名全部失效,慎用)
  */
 function loadOrCreateKey(log: ReturnType<typeof LogManager.getInstance>): string {
-  const keyPath = join(app.getPath('userData'), SIGNER_KEY_FILE)
+  const keyPath = join(getHost().getPath('userData'), SIGNER_KEY_FILE)
   // 1. 尝试读取已有 key
   try {
     if (existsSync(keyPath)) {

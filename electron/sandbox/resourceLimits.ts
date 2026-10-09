@@ -13,10 +13,11 @@
  */
 
 import { LogManager } from '../core/LogManager'
+import { getHost } from '../platform/runtime'
 import { EventBus } from '../runtime/bridge/EventBus'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import { app } from 'electron'
+
 
 export interface ResourceLimits {
   /** CPU 核数(0.5 / 1 / 2) */
@@ -48,7 +49,7 @@ export class ResourceLimitsManager {
   private activeSandboxes: Set<string> = new Set()
 
   private constructor() {
-    this.storePath = path.join(app.getPath('userData'), 'resource-limits.json')
+    this.storePath = path.join(getHost().getPath('userData'), 'resource-limits.json')
     this.limits = this.loadFromDisk()
   }
 

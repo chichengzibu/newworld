@@ -18,9 +18,8 @@ export class Constants {
   public static readonly SIDE_NAV_WIDTH = 200;
   
   // ==================== 路由配置 ====================
-  
+
   public static readonly ROUTES = {
-    DASHBOARD: '/dashboard',
     CHAT: '/chat',
     TASKS: '/tasks',
     MODELS: '/models',

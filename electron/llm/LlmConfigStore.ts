@@ -1,7 +1,8 @@
 import { LogManager } from '../core/LogManager'
+import { getHost } from '../platform/runtime'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import { app, safeStorage } from 'electron'
+import {safeStorage} from 'electron'
 import type { LlmConfig, LlmProvider } from './types'
 
 export class LlmConfigStore {
@@ -11,7 +12,7 @@ export class LlmConfigStore {
   private configs: Map<string, LlmConfig> = new Map()
 
   private constructor() {
-    this.storePath = path.join(app.getPath('userData'), 'llm-config.json.enc')
+    this.storePath = path.join(getHost().getPath('userData'), 'llm-config.json.enc')
     this.loadFromDisk()
   }
 
@@ -68,7 +69,7 @@ export class LlmConfigStore {
   }
 
   private migrateFromLegacyPlaintext(): void {
-    const legacyPath = path.join(app.getPath('userData'), 'llm-config.json')
+    const legacyPath = path.join(getHost().getPath('userData'), 'llm-config.json')
     if (!fs.existsSync(legacyPath)) return
     try {
       const data = fs.readFileSync(legacyPath, 'utf-8')

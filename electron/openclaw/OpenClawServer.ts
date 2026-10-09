@@ -13,8 +13,9 @@
  */
 
 import { createServer, IncomingMessage, ServerResponse } from 'http';
+import { getHost } from '../platform/runtime'
 import { URL } from 'url';
-import { app, safeStorage } from 'electron';
+import {safeStorage} from 'electron';
 import { randomBytes } from 'crypto';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { join } from 'path';
@@ -142,7 +143,7 @@ export class OpenClawServer {
 
     // 鉴权 token: 启动时从 userData/openclaw-token.json 加载或新生成
     if (this.config.tokenFile !== false) {
-      const tokenPath = this.config.tokenFile || join(app.getPath('userData'), 'openclaw-token.json');
+      const tokenPath = this.config.tokenFile || join(getHost().getPath('userData'), 'openclaw-token.json');
       this.authToken = loadOrCreateToken(tokenPath, this.log);
     } else {
       this.log.warn('[OpenClawServer] ⚠️ token 鉴权已禁用 (PIPICLAW_OPENCLAW_NO_AUTH=1)');

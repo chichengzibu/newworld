@@ -10,9 +10,10 @@
  */
 
 import * as fs from 'fs';
+import { getHost } from '../platform/runtime'
 import * as path from 'path';
 import { execFile } from 'child_process';
-import { shell, clipboard, app, BrowserWindow } from 'electron';
+import {shell, clipboard,  BrowserWindow} from 'electron';
 import { promisify } from 'util';
 import { LogManager } from '../core/LogManager';
 import { PermissionManager } from '../permissions/PermissionManager';
@@ -740,7 +741,7 @@ export class OpenClawGateway {
       }
     } else {
       // 默认 cwd = sandbox 目录
-      const defaultSandbox = path.join(app.getPath('userData'), 'sandbox');
+      const defaultSandbox = path.join(getHost().getPath('userData'), 'sandbox');
       try {
         fs.mkdirSync(defaultSandbox, { recursive: true });
         resolvedCwd = defaultSandbox;
@@ -768,7 +769,7 @@ export class OpenClawGateway {
    */
   private isCwdInSandbox(resolvedCwd: string): boolean {
     try {
-      const userData = app.getPath('userData');
+      const userData = getHost().getPath('userData');
       const userDataReal = fs.realpathSync(userData);
       const sandboxRoot = path.join(userDataReal, 'sandbox');
       const workspaceRoot = path.join(userDataReal, 'workspace');
@@ -973,7 +974,7 @@ export class OpenClawGateway {
     for (const prefix of desktopPrefixes) {
       if (resolved.startsWith(prefix)) {
         try {
-          const desktopPath = app.getPath('desktop');
+          const desktopPath = getHost().getPath('desktop');
           resolved = path.join(desktopPath, resolved.slice(prefix.length));
           break;
         } catch {

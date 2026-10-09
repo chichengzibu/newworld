@@ -45,7 +45,7 @@
 
 <script setup lang="ts">
 import { reactive, computed, ref, watch } from 'vue';
-import { ElMessage } from 'element-plus';
+import { ElMessage } from "element-plus/es/components/message/index";
 import { WarningFilled } from '@element-plus/icons-vue';
 
 interface FormData {

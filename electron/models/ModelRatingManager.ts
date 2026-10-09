@@ -10,8 +10,9 @@
  */
 
 import { LogManager } from '../core/LogManager'
+import { getHost } from '../platform/runtime'
 import { EventBus } from '../runtime/bridge/EventBus'
-import { app } from 'electron'
+
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -46,7 +47,7 @@ export class ModelRatingManager {
   private ratings: ModelRating[] = []
 
   private constructor() {
-    const userData = app.getPath('userData')
+    const userData = getHost().getPath('userData')
     if (!fs.existsSync(userData)) fs.mkdirSync(userData, { recursive: true })
     this.storePath = path.join(userData, 'model-ratings.json')
     this.load()

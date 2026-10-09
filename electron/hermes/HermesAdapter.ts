@@ -3,7 +3,9 @@ import { MemoryVectorStore } from './MemoryVectorStore'
 import { EmbeddingService } from './EmbeddingService'
 import { KeywordRetriever } from './KeywordRetriever'
 import { LogManager } from '../core/LogManager'
+import { ConfigStore } from '../core/ConfigStore'
 import type { HermesMemory as HermesMemoryInterface, Memory, RecallOptions, CuratorReport, EvolutionReport } from '../contracts/types'
+import type { EmbeddingModel } from './EmbeddingService'
 import { randomUUID } from 'node:crypto'
 
 export interface AdapterRecallOptions extends RecallOptions {
@@ -27,6 +29,7 @@ export class HermesAdapter implements HermesMemoryInterface {
   private vectorStore = MemoryVectorStore.getInstance()
   private embedder = EmbeddingService.getInstance()
   private keywordRetriever = KeywordRetriever.getInstance()
+  private configStore = ConfigStore.getInstance()
 
   private constructor() {}
 
@@ -59,14 +62,15 @@ export class HermesAdapter implements HermesMemoryInterface {
 
     let vecResults: Array<{ memory: Memory; score: number }> = []
     if (useVector) {
+      const model = this.embeddingModel()
       const inStoreIds = new Set(this.vectorStore.list().map(e => e.id))
       for (const m of candidates) {
         if (!inStoreIds.has(m.id)) {
-          const v = await this.embedder.embedMemory(m)
-          await this.vectorStore.upsert(m, v)
+          const v = await this.embedder.embedMemory(m, { model })
+          await this.vectorStore.upsert(m, v, model)
         }
       }
-      const qVec = await this.embedder.embedText(query)
+      const qVec = await this.embedder.embedText(query, { model })
       const raw = await this.vectorStore.search(qVec, topK * 2, minScore)
       vecResults = raw.map(r => ({ memory: r.entry.memory, score: r.score }))
     }
@@ -93,8 +97,19 @@ export class HermesAdapter implements HermesMemoryInterface {
 
   async store(memory: Memory): Promise<void> {
     this.legacy.addExperienceMemory(memory.content, [])
-    const vec = await this.embedder.embedText(memory.content)
-    await this.vectorStore.upsert(memory, vec)
+    const model = this.embeddingModel()
+    const vec = await this.embedder.embedText(memory.content, { model })
+    await this.vectorStore.upsert(memory, vec, model)
+  }
+
+  /** 读取当前启用的嵌入模型(stub / ollama / openai / zhipu),默认 stub */
+  private embeddingModel(): EmbeddingModel {
+    const cfg = this.configStore.get('hermes.embedding') as { provider?: string } | undefined
+    if (!cfg?.provider) return 'stub-deterministic'
+    if (cfg.provider === 'ollama') return 'ollama-nomic'
+    if (cfg.provider === 'openai') return 'openai-ada'
+    if (cfg.provider === 'zhipu') return 'zhipu-embedding'
+    return 'stub-deterministic'
   }
 
   async curate(): Promise<CuratorReport> {

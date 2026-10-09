@@ -11,7 +11,8 @@
  */
 
 import { LogManager } from '../core/LogManager'
-import { app } from 'electron'
+import { getHost } from '../platform/runtime'
+
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 
@@ -78,7 +79,7 @@ export class ModelUsageTracker {
   private static readonly MAX_HISTORY = 5000
 
   private constructor() {
-    const userData = app.getPath('userData')
+    const userData = getHost().getPath('userData')
     if (!fs.existsSync(userData)) fs.mkdirSync(userData, { recursive: true })
     this.storePath = path.join(userData, 'model-usage.json')
     this.load()

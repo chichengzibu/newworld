@@ -13,8 +13,9 @@
  * - forceResetToPermissive 保留,仅 IPC `force:true` 或 PIPICLAW_RESET_PERMISSIONS=1 触发
  */
 
-import { app } from 'electron';
+
 import { join } from 'path';
+import { getHost } from '../platform/runtime'
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { LogManager } from '../core/LogManager';
 import { EventBus } from '../runtime/bridge/EventBus';
@@ -46,7 +47,7 @@ export class PermissionConfig {
    */
   private getAppVersion(): string {
     try {
-      const v = app.getVersion();
+      const v = getHost().getVersion();
       // dev mode 标识: 30.5.1 是 electron version, 不是 app version
       if (v && v !== '30.5.1') return v;
       // fallback: 读 root package.json
@@ -68,14 +69,14 @@ export class PermissionConfig {
       reason: opts.reason,
       via: opts.via,
       ts: Date.now(),
-      version: app.getVersion(),
+      version: getHost().getVersion(),
     };
     void this.bus.publish('permission:mode-changed', payload);
     this.log.info('[PermissionConfig] permission:mode-changed', payload);
   }
 
   private constructor() {
-    const userDataPath = app.getPath('userData');
+    const userDataPath = getHost().getPath('userData');
     this.configPath = join(userDataPath, 'permissions.json');
     this.loadConfig();
   }
@@ -89,7 +90,7 @@ export class PermissionConfig {
 
   private loadConfig(): void {
     try {
-      const dir = app.getPath('userData');
+      const dir = getHost().getPath('userData');
       if (!existsSync(dir)) {
         mkdirSync(dir, { recursive: true });
       }
@@ -110,7 +111,7 @@ export class PermissionConfig {
         // 如果用户在老版本里主动切到 standard/safe/permissive → 保留用户选择
         // dev 模式下 app.getVersion() 返 electron version (30.5.1) 不是 app version — 用 fallback
         let currentVersion: string;
-        try { currentVersion = app.getVersion(); } catch { currentVersion = 'unknown'; }
+        try { currentVersion = getHost().getVersion(); } catch { currentVersion = 'unknown'; }
         if (!currentVersion || currentVersion === '30.5.1' || /^\d+\.\d+\.\d+$/.test(currentVersion) && !currentVersion.includes('-')) {
           // dev mode: 读 root package.json
           try {

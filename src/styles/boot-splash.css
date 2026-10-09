@@ -1,0 +1,13 @@
+/* 启动骨架屏:基础 reset + boot-spin 旋转动画
+   独立文件,避免 vite 6.4.x 的 html-inline-proxy plugin 在 <style> 块上挂掉 */
+
+html, body { margin: 0; padding: 0; height: 100%; background: #0f1115; }
+#app { height: 100%; }
+
+.boot-spinner {
+  animation: boot-spin 0.8s linear infinite;
+}
+
+@keyframes boot-spin {
+  to { transform: rotate(360deg); }
+}

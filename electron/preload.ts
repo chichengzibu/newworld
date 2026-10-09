@@ -9,6 +9,9 @@
 
 import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron';
 
+// Sentry 渲染↔主进程桥接:必须在 preload 顶部引入,使渲染端事件能转发到主进程上报。
+import '@sentry/electron/preload';
+
 // ========== IPC通道定义 ==========
 
 const IpcChannels = {
@@ -155,6 +158,7 @@ const IpcChannels = {
   SKILLS_RELOAD: 'skills:reload',
   SKILLS_IMPORT_FILE: 'skills:importFile',
   SKILLS_IMPORT_URL: 'skills:importUrl',
+  SKILLS_IMPORT_ZIP: 'skills:importZip',
   SKILLS_MERGE_CANDIDATES: 'skills:merge-candidates',
   SKILLS_PERFORM_MERGE: 'skills:perform-merge',
   SKILLS_IMPORT_FOLDER: 'skills:importFolder',
@@ -223,6 +227,10 @@ const IpcChannels = {
   CLAWHUB_LIST_TEMPLATE_CATEGORIES: 'clawhub:list-template-categories',
   CLAWHUB_INSTANTIATE_TEMPLATE: 'clawhub:instantiate-template',
 
+  // ClawHub 远程仓库 (registry)
+  CLAWHUB_REGISTRY_LIST: 'skills:clawhub:registry:list',
+  CLAWHUB_REGISTRY_INSTALL: 'skills:clawhub:registry:install',
+
   // 模型评分
   MODEL_RATE: 'model:rate',
   MODEL_LIST_RATINGS: 'model:list-ratings',
@@ -272,7 +280,15 @@ const IpcChannels = {
   AUTO_UPDATER_GET_VERSION: 'autoUpdater:getVersion',
   AUTO_UPDATER_ON_UPDATE_AVAILABLE: 'autoUpdater:onUpdateAvailable',
   AUTO_UPDATER_ON_UPDATE_DOWNLOADED: 'autoUpdater:onUpdateDownloaded',
-  AUTO_UPDATER_ON_ERROR: 'autoUpdater:onError'
+  AUTO_UPDATER_ON_ERROR: 'autoUpdater:onError',
+
+  // ========== 定时任务 Schedule ==========
+  SCHEDULE_LIST: 'schedule:list',
+  SCHEDULE_ADD: 'schedule:add',
+  SCHEDULE_UPDATE: 'schedule:update',
+  SCHEDULE_REMOVE: 'schedule:remove',
+  SCHEDULE_SET_ENABLED: 'schedule:setEnabled',
+  SCHEDULE_HISTORY: 'schedule:history'
 } as const;
 
 type IpcCallback = (event: IpcRendererEvent, ...args: any[]) => void;
@@ -957,6 +973,9 @@ const electronAPI = {
       importUrl: (url: string): Promise<IpcResponse<any>> =>
         ipcRenderer.invoke(IpcChannels.SKILLS_IMPORT_URL, url),
 
+      importZip: (zipPath: string): Promise<IpcResponse<any>> =>
+        ipcRenderer.invoke(IpcChannels.SKILLS_IMPORT_ZIP, zipPath),
+
       importFolder: (sourcePath: string): Promise<IpcResponse<any>> =>
         ipcRenderer.invoke(IpcChannels.SKILLS_IMPORT_FOLDER, sourcePath),
 
@@ -1116,6 +1135,12 @@ const electronAPI = {
       authorName: string
     }): Promise<IpcResponse<any>> => ipcRenderer.invoke(IpcChannels.CLAWHUB_INSTANTIATE_TEMPLATE, args),
 
+    // ClawHub 远程仓库 (registry): 检查更新 / 一键安装
+    clawhubRegistryList: (baseUrl?: string): Promise<IpcResponse<any[]>> =>
+      ipcRenderer.invoke(IpcChannels.CLAWHUB_REGISTRY_LIST, baseUrl),
+    clawhubRegistryInstall: (entryId: string, baseUrl?: string): Promise<IpcResponse<any>> =>
+      ipcRenderer.invoke(IpcChannels.CLAWHUB_REGISTRY_INSTALL, entryId, baseUrl),
+
     // P1-08 模型评分
     modelRate: (args: any): Promise<IpcResponse<any>> => ipcRenderer.invoke(IpcChannels.MODEL_RATE, args),
     modelListRatings: (opts?: { modelId?: string }): Promise<IpcResponse<any[]>> =>
@@ -1231,6 +1256,17 @@ const electronAPI = {
       ipcRenderer.on(IpcChannels.AUTO_UPDATER_ON_ERROR, handler);
       return () => ipcRenderer.removeListener(IpcChannels.AUTO_UPDATER_ON_ERROR, handler);
     }
+  },
+
+  // ========== 定时任务 Schedule ==========
+  schedule: {
+    list: (): Promise<IpcResponse<any[]>> => ipcRenderer.invoke(IpcChannels.SCHEDULE_LIST),
+    add: (payload: any): Promise<IpcResponse<any>> => ipcRenderer.invoke(IpcChannels.SCHEDULE_ADD, payload),
+    update: (payload: any): Promise<IpcResponse<any>> => ipcRenderer.invoke(IpcChannels.SCHEDULE_UPDATE, payload),
+    remove: (id: string): Promise<IpcResponse<boolean>> => ipcRenderer.invoke(IpcChannels.SCHEDULE_REMOVE, id),
+    setEnabled: (id: string, enabled: boolean): Promise<IpcResponse<boolean>> =>
+      ipcRenderer.invoke(IpcChannels.SCHEDULE_SET_ENABLED, { id, enabled }),
+    history: (taskId?: string): Promise<IpcResponse<any[]>> => ipcRenderer.invoke(IpcChannels.SCHEDULE_HISTORY, taskId)
   }
 };
 

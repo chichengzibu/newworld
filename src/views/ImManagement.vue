@@ -340,7 +340,8 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from "element-plus/es/components/message/index"
+import { ElMessageBox } from "element-plus/es/components/message-box/index"
 import { Plus, Warning, CircleCheck, CircleClose, ChatDotRound, Connection, Promotion, OfficeBuilding } from '@element-plus/icons-vue'
 import Skeleton from '@/components/common/Skeleton.vue'
 

@@ -16,8 +16,9 @@
  * 同时:可选上传到 telemetry endpoint(默认禁用,需 opt-in)
  */
 
-import { app } from 'electron'
+
 import * as fs from 'node:fs'
+import { getHost } from '../platform/runtime'
 import * as path from 'node:path'
 import { LogManager } from '../core/LogManager'
 import { EventBus } from '../runtime/bridge/EventBus'
@@ -43,7 +44,7 @@ export class CrashReportCollector {
   private installed = false
 
   private constructor() {
-    this.reportsDir = path.join(app.getPath('userData'), 'crash-reports')
+    this.reportsDir = path.join(getHost().getPath('userData'), 'crash-reports')
     this.ensureDir()
   }
 
@@ -93,7 +94,7 @@ export class CrashReportCollector {
         stack: err.stack,
       },
       context,
-      appVersion: app.getVersion(),
+      appVersion: getHost().getVersion(),
       platform: process.platform,
       arch: process.arch,
       nodeVersion: process.version,

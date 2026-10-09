@@ -5,9 +5,10 @@
  */
 
 import { LogManager } from '../core/LogManager'
+import { getHost } from '../platform/runtime'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import { app } from 'electron'
+
 import type { RenderRequest, RenderResult } from './DocxRenderer'
 
 /**
@@ -28,7 +29,7 @@ export class PdfRenderer {
     const format = 'pdf'
     try {
       const outPath =
-        req.outputPath ?? path.join(app.getPath('userData'), 'output', `${Date.now()}.${format}`)
+        req.outputPath ?? path.join(getHost().getPath('userData'), 'output', `${Date.now()}.${format}`)
       fs.mkdirSync(path.dirname(outPath), { recursive: true })
       // W7 stub: 把 markdown 文本当内容,append 一行 pdf stub marker
       const payload = `%PDF-1.4 (stub)\n${req.source}\n%%EOF\n`

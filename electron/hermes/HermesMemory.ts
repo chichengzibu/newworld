@@ -3,8 +3,9 @@
  */
 
 import * as fs from 'fs';
+import { getHost } from '../platform/runtime'
 import * as path from 'path';
-import { app } from 'electron';
+
 import { LogManager } from '../core/LogManager';
 import { ConfigStore } from '../core/ConfigStore';
 
@@ -28,7 +29,7 @@ export class HermesMemory {
 
   private constructor() {
     // 初始化记忆目录
-    this.memoryDir = path.join(app.getPath('userData'), 'hermes-memory');
+    this.memoryDir = path.join(getHost().getPath('userData'), 'hermes-memory');
     this.coreMemoryPath = path.join(this.memoryDir, 'USER.md');
     this.experienceMemoryPath = path.join(this.memoryDir, 'MEMORY.md');
     

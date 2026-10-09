@@ -8,8 +8,9 @@
  * 安全: 走 OpenClawGateway 的 resolvePath() 强制在 userData/{sandbox,workspace} 内, 拒绝 ~/.ssh / C:\Windows\ 等敏感路径.
  */
 import * as fs from 'node:fs/promises'
+import { getHost } from '../../platform/runtime'
 import * as path from 'node:path'
-import { app } from 'electron'
+
 import { LogManager } from '../../core/LogManager'
 import type { PiPiTool, ToolExecResult } from './Tool'
 
@@ -24,7 +25,7 @@ function resolveSafePath(input: string): string {
   if (/[\0&|`$<>(){}\\]/.test(input) && !path.isAbsolute(input)) {
     throw new Error(`ReadTool: file_path 含非法字符: ${input.slice(0, 60)}`)
   }
-  const userData = app.getPath('userData')
+  const userData = getHost().getPath('userData')
   const sandboxRoot = path.join(userData, 'sandbox')
   const workspaceRoot = path.join(userData, 'workspace')
   const cwd = process.cwd()

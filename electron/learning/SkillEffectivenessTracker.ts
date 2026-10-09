@@ -1,8 +1,9 @@
 import { LogManager } from '../core/LogManager'
+import { getHost } from '../platform/runtime'
 import { EventBus } from '../runtime/bridge/EventBus'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import { app } from 'electron'
+
 
 export interface SkillUsageStat {
   skillName: string
@@ -37,7 +38,7 @@ export class SkillEffectivenessTracker {
   private maxRecords = 1000
 
   private constructor() {
-    this.storePath = path.join(app.getPath('userData'), 'skill-stats.json')
+    this.storePath = path.join(getHost().getPath('userData'), 'skill-stats.json')
     this.loadFromDisk()
   }
 

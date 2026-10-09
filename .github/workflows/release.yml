@@ -38,6 +38,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Linux rpm target 需要 rpmbuild(默认 ubuntu runner 不带)
+      - name: Install rpm tooling (linux only)
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y rpm
+
       - name: Resolve tag (workflow_dispatch)
         if: github.event_name == 'workflow_dispatch'
         id: tag
@@ -79,6 +84,8 @@ jobs:
           name: pipiclaw-linux-x64
           path: |
             release/*.AppImage
+            release/*.deb
+            release/*.rpm
             release/*.blockmap
             release/latest-linux.yml
 
@@ -113,6 +120,8 @@ jobs:
             dist-release/**/*.exe
             dist-release/**/*.dmg
             dist-release/**/*.AppImage
+            dist-release/**/*.deb
+            dist-release/**/*.rpm
             dist-release/**/*.yml
             dist-release/**/*.blockmap
         env:

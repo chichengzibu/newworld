@@ -11,8 +11,9 @@
  *   - 原子写: 先读原内容 → 替换 → 写新文件; 写失败回滚 (备份原内容)
  */
 import * as fs from 'node:fs/promises'
+import { getHost } from '../../platform/runtime'
 import * as path from 'node:path'
-import { app } from 'electron'
+
 import { LogManager } from '../../core/LogManager'
 import type { PiPiTool, ToolExecResult } from './Tool'
 
@@ -20,7 +21,7 @@ function resolveSafePath(input: string): string {
   if (!input || typeof input !== 'string') {
     throw new Error('EditTool: file_path 不能为空')
   }
-  const userData = app.getPath('userData')
+  const userData = getHost().getPath('userData')
   const sandboxRoot = path.join(userData, 'sandbox')
   const workspaceRoot = path.join(userData, 'workspace')
   const cwd = process.cwd()

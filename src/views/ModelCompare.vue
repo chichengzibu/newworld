@@ -131,7 +131,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
+import { ElMessage } from "element-plus/es/components/message/index"
 
 const activeTab = ref('compare')
 const searchQuery = ref('')

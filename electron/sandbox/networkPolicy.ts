@@ -9,10 +9,11 @@
  */
 
 import { LogManager } from '../core/LogManager'
+import { getHost } from '../platform/runtime'
 import { EventBus } from '../runtime/bridge/EventBus'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import { app } from 'electron'
+
 
 export type NetworkDomainCategory = 'package-manager' | 'ai-api' | 'web-content' | 'custom'
 
@@ -60,7 +61,7 @@ export class NetworkPolicy {
   private config: NetworkPolicyConfig
 
   private constructor() {
-    this.storePath = path.join(app.getPath('userData'), 'network-policy.json')
+    this.storePath = path.join(getHost().getPath('userData'), 'network-policy.json')
     this.config = this.loadFromDisk()
   }
 

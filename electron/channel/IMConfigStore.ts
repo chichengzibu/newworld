@@ -5,9 +5,10 @@
  */
 
 import { LogManager } from '../core/LogManager'
+import { getHost } from '../platform/runtime'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import { app, safeStorage } from 'electron'
+import {safeStorage} from 'electron'
 import type { ChannelKind } from './ChannelTypes'
 
 export interface IMConfig {
@@ -38,7 +39,7 @@ export class IMConfigStore {
   private configs: Map<string, IMConfig> = new Map()
 
   private constructor() {
-    this.storePath = path.join(app.getPath('userData'), 'im-config.json.enc')
+    this.storePath = path.join(getHost().getPath('userData'), 'im-config.json.enc')
     this.loadFromDisk()
   }
 
@@ -94,7 +95,7 @@ export class IMConfigStore {
   }
 
   private migrateFromLegacyPlaintext(): void {
-    const legacyPath = path.join(app.getPath('userData'), 'im-config.json')
+    const legacyPath = path.join(getHost().getPath('userData'), 'im-config.json')
     if (!fs.existsSync(legacyPath)) return
     try {
       const data = fs.readFileSync(legacyPath, 'utf-8')

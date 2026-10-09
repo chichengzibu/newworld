@@ -7,6 +7,17 @@
       </div>
     </div>
 
+    <!-- 网关状态:居中显示 小圆点 + 端口号,无文字装饰 -->
+    <div
+      v-if="gatewayStore.status.port"
+      class="gateway-indicator"
+      :class="`is-${gatewayStore.status.state}`"
+      :title="stateTitle"
+    >
+      <span class="gateway-dot"></span>
+      <span class="gateway-port">{{ gatewayStore.status.port }}</span>
+    </div>
+
     <div class="window-controls">
       <button
         class="control-btn minimize"
@@ -51,10 +62,24 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, onMounted, onUnmounted, computed } from 'vue';
 import { Minus, FullScreen, Close, Setting } from '@element-plus/icons-vue';
+import { useGatewayStore } from '@/stores/gateway';
 
 const isMaximized = ref(false);
+const gatewayStore = useGatewayStore();
+
+// 圆点 hover 提示:仅状态语义,不额外装饰
+const stateTitle = computed(() => {
+  const map: Record<string, string> = {
+    running: '网关运行中',
+    starting: '网关启动中',
+    stopping: '网关停止中',
+    stopped: '网关已停止',
+    failed: '网关启动失败'
+  };
+  return map[gatewayStore.status.state] ?? '网关';
+});
 
 const handleMinimize = async (): Promise<void> => {
   try {
@@ -130,6 +155,51 @@ onUnmounted(() => {
   align-items: center;
   height: 100%;
   padding-left: 12px;
+}
+
+// 右上角(最小化按钮左侧)网关状态:小圆点 + 端口号,无文字装饰
+.gateway-indicator {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-right: 8px;
+  padding-right: 4px;
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+.gateway-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--fg-muted, #9ca3af);
+  box-shadow: 0 0 0 0 transparent;
+  transition: background-color var(--duration-fast) var(--ease-standard);
+}
+
+.gateway-port {
+  font-size: 11px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.3px;
+  color: var(--fg-secondary);
+}
+
+// 状态着色 (仅圆点)
+.gateway-indicator.is-running .gateway-dot {
+  background: #22c55e;
+  box-shadow: 0 0 6px 0 rgba(34, 197, 94, 0.55);
+}
+.gateway-indicator.is-stopped .gateway-dot {
+  background: #6b7280;
+}
+.gateway-indicator.is-starting .gateway-dot,
+.gateway-indicator.is-stopping .gateway-dot {
+  background: #f59e0b;
+}
+.gateway-indicator.is-failed .gateway-dot {
+  background: #ef4444;
+  box-shadow: 0 0 6px 0 rgba(239, 68, 68, 0.55);
 }
 
 .app-title {

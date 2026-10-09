@@ -13,10 +13,11 @@
  *   - timeout 上限 60s (LLM 误用不会卡死)
  */
 import { execFile } from 'node:child_process'
+import { getHost } from '../../platform/runtime'
 import { promisify } from 'node:util'
 import * as path from 'node:path'
 import * as fs from 'node:fs'
-import { app } from 'electron'
+
 import { LogManager } from '../../core/LogManager'
 import type { PiPiTool, ToolExecResult } from './Tool'
 
@@ -38,7 +39,7 @@ const COMMAND_ALLOWLIST: ReadonlySet<string> = new Set([
 
 function isCwdInSandbox(resolvedCwd: string): boolean {
   try {
-    const userData = app.getPath('userData')
+    const userData = getHost().getPath('userData')
     const userDataReal = fs.realpathSync(userData)
     const sandboxRoot = path.join(userDataReal, 'sandbox')
     const workspaceRoot = path.join(userDataReal, 'workspace')
@@ -114,7 +115,7 @@ export class BashTool implements PiPiTool {
       }
     } else {
       // 默认 cwd: userData/sandbox
-      const userData = app.getPath('userData')
+      const userData = getHost().getPath('userData')
       const sandboxRoot = path.join(userData, 'sandbox')
       fs.mkdirSync(sandboxRoot, { recursive: true })
       resolvedCwd = sandboxRoot

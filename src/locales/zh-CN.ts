@@ -56,7 +56,6 @@ export default {
   },
   nav: {
     home: '首页',
-    dashboard: '工作台',
     chat: 'AI对话',
     tasks: '自动化任务',
     schedule: '定时任务',

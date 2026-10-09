@@ -66,12 +66,14 @@ export function runWithBwrap(command: string[], opts: BwrapOptions = {}): BwrapR
   const startMs = Date.now()
 
   if (!isBwrapAvailable()) {
-    log.warn('Bwrap: 不可用,降级 stub(W9 阶段不阻断)')
+    log.warn('Bwrap: 不可用, L1 隔离无法应用, 明确返回失败(不可假成功)')
+    // 与 Windows Job Object stub 一致:隔离机制缺失时返回 ok:false,
+    // 让调用方清楚知道命令未被执行、L1 隔离未生效,而非误判成功。
     return {
-      ok: true,
-      exitCode: 0,
+      ok: false,
+      exitCode: 1,
       stdout: '',
-      stderr: 'bwrap not available, fallback stub',
+      stderr: 'bwrap not available — 命令未执行, L1 隔离未应用',
       durationMs: 0,
       fallback: true,
     }

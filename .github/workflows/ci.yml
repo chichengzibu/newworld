@@ -29,6 +29,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Linux rpm target 需要 rpmbuild(默认 ubuntu runner 不带)
+      - name: Install rpm tooling (linux only)
+        if: matrix.os == 'ubuntu-latest'
+        run: sudo apt-get update && sudo apt-get install -y rpm
+
       - name: TypeScript typecheck (node)
         run: npx tsc --noEmit -p tsconfig.node.json
 

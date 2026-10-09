@@ -2,7 +2,7 @@
  * PiPiClaw - Toast提示工具
  * 轻量提示功能
  */
-import { ElMessage } from 'element-plus'
+import { ElMessage } from "element-plus/es/components/message/index"
 
 /**
  * 显示待开发提示

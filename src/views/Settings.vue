@@ -562,7 +562,8 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted, computed, nextTick, watch } from 'vue';
-import { ElMessage, ElMessageBox } from 'element-plus';
+import { ElMessage } from "element-plus/es/components/message/index"
+import { ElMessageBox } from "element-plus/es/components/message-box/index";
 import { useI18n } from 'vue-i18n';
 import ShortcutRecorder from '@/components/settings/ShortcutRecorder.vue';
 import FeedbackModal from '@/components/common/FeedbackModal.vue';

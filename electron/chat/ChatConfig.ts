@@ -6,8 +6,9 @@
  * 2. 聊天设置的存储
  */
 
-import { app } from 'electron';
+
 import { join } from 'path';
+import { getHost } from '../platform/runtime'
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { LogManager } from '../core/LogManager';
 import { Conversation, ChatMessage, ChatSettings, DEFAULT_CHAT_SETTINGS } from './ChatTypes';
@@ -22,7 +23,7 @@ export class ChatConfig {
   private lastModelId: string | null = null;
 
   private constructor() {
-    const userDataPath = app.getPath('userData');
+    const userDataPath = getHost().getPath('userData');
     this.configPath = join(userDataPath, 'chat.json');
     this.loadConfig();
   }
@@ -36,7 +37,7 @@ export class ChatConfig {
 
   private loadConfig(): void {
     try {
-      const dir = app.getPath('userData');
+      const dir = getHost().getPath('userData');
       if (!existsSync(dir)) {
         mkdirSync(dir, { recursive: true });
       }
@@ -137,7 +138,7 @@ export class ChatConfig {
   private saveConfig(): void {
     try {
       const data = JSON.stringify({
-        version: app.getVersion(),
+        version: getHost().getVersion(),
         conversations: Array.from(this.conversations.values()),
         settings: this.settings,
         lastProviderId: this.lastProviderId,

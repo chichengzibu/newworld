@@ -9,6 +9,7 @@
 import { BrowserWindow, screen, app } from 'electron';
 import { join } from 'path';
 import { LogManager } from './LogManager';
+import { isOhos } from '../platform/detect';
 
 export class MiniWindow {
   private static instance: MiniWindow;
@@ -31,6 +32,12 @@ export class MiniWindow {
   public create(): BrowserWindow {
     if (this.miniWindow && !this.miniWindow.isDestroyed()) {
       return this.miniWindow;
+    }
+
+    // 鸿蒙 PC:无独立悬浮窗(多窗口代理不存在),降级为主窗口内路由,不创建 MiniWindow
+    if (isOhos()) {
+      this.log.warn('[MiniWindow] 鸿蒙 PC 不支持独立悬浮窗,降级为主窗口内路由');
+      return this.miniWindow as unknown as BrowserWindow;
     }
 
     const isDev = !app.isPackaged;
@@ -58,7 +65,10 @@ export class MiniWindow {
         preload: join(__dirname, 'preload.js'),
         nodeIntegration: false,
         contextIsolation: true,
-        sandbox: false
+        sandbox: false,
+        // 显式声明,与 WindowManager 主窗口保持一致。
+        // 不依赖 Electron 默认值,跨版本(30 / 34 / 鸿蒙 34.6.x runtime)行为固定。
+        webSecurity: true
       }
     });
 

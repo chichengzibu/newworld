@@ -17,8 +17,9 @@
  */
 
 import { LogManager } from '../core/LogManager'
+import { getHost } from '../platform/runtime'
 import { EventBus } from '../runtime/bridge/EventBus'
-import { app } from 'electron'
+
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -148,7 +149,7 @@ export class ClawHubManager {
   private templates: Map<string, ClawHubTemplate> = new Map()
 
   private constructor() {
-    const userData = app.getPath('userData')
+    const userData = getHost().getPath('userData')
     if (!fs.existsSync(userData)) fs.mkdirSync(userData, { recursive: true })
     this.skillsPath = path.join(userData, 'clawhub-skills.json')
     this.reviewsPath = path.join(userData, 'clawhub-reviews.json')
@@ -504,7 +505,7 @@ export class ClawHubManager {
     const now = Date.now()
     const name = args.customName?.trim() || `${tpl.name} (我的副本)`
     // 把模板内容写到 userData/templates/<skill-id>/skill.md
-    const userData = app.getPath('userData')
+    const userData = getHost().getPath('userData')
     const dir = path.join(userData, 'templates', `skill-${randomUUID().slice(0, 8)}`)
     fs.mkdirSync(dir, { recursive: true })
     const manifestPath = path.join(dir, 'skill.md')

@@ -9,6 +9,37 @@
 
 import log from 'electron-log';
 import { app } from 'electron';
+import { getHost } from '../platform/runtime'
+
+// getHost() 在 initHost() 之前可能尚未注入(本模块顶层即实例化 Logger)。
+// 统一兜底到 electron app,避免应用启动极早期抛 "PlatformHost 尚未初始化"。
+function safeUserData(): string {
+  try {
+    return getHost().getPath('userData');
+  } catch {
+    /* host 未就绪,fallback 到 app */
+  }
+  try {
+    return app.getPath('userData');
+  } catch {
+    /* app 未 ready(极早期),再 fallback 到环境变量 */
+  }
+  return process.env.APPDATA || process.env.USERPROFILE || process.cwd();
+}
+
+function safeIsPackaged(): boolean {
+  try {
+    return getHost().isPackaged();
+  } catch {
+    /* host 未就绪,fallback 到 app */
+  }
+  try {
+    return app.isPackaged;
+  } catch {
+    return true;
+  }
+}
+
 import { join } from 'path';
 import { execSync } from 'child_process';
 import type { LogMessage } from 'electron-log';
@@ -35,7 +66,7 @@ export class LogManager {
       } catch {}
     }
 
-    const userDataPath = app.getPath('userData');
+    const userDataPath = safeUserData();
     const logPath = join(userDataPath, 'logs');
 
     log.transports.file.resolvePathFn = () => join(logPath, 'pipiclaw.log');
@@ -58,7 +89,7 @@ export class LogManager {
       };
     }
 
-    if (!app.isPackaged) {
+    if (!safeIsPackaged()) {
       log.transports.file.level = 'debug';
       log.transports.console.level = 'debug';
     } else {
@@ -84,7 +115,7 @@ export class LogManager {
   }
 
   public getLogPath(): string {
-    return join(app.getPath('userData'), 'logs');
+    return join(safeUserData(), 'logs');
   }
 }
 

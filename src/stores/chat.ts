@@ -9,7 +9,7 @@
 
 import { defineStore } from 'pinia';
 import { ref, computed, watch } from 'vue';
-import { ElMessage } from 'element-plus';
+import { ElMessage } from "element-plus/es/components/message/index";
 
 // ========== 类型定义 ==========
 

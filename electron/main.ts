@@ -7,7 +7,7 @@
  * 3. 更好的错误处理和日志记录
  */
 
-import { app, BrowserWindow, Menu, shell, ipcMain } from 'electron';
+import { app, BrowserWindow, Menu, shell, ipcMain, dialog, session } from 'electron';
 import { WindowManager } from './core/WindowManager';
 import { IpcServer } from './core/IpcServer';
 import { LogManager } from './core/LogManager';
@@ -20,6 +20,7 @@ import { PermissionConfig } from './permissions/PermissionConfig';
 import { AutoUpdater } from './core/AutoUpdater';
 import { McpManager } from './mcp/McpManager';
 import type { McpServerConfig } from './mcp/types';
+import { initChannels } from './channel/bootstrap';
 
 // ============ W7.0.1 boot wiring: 串接 W3+ 子系统 ============
 import { CapabilityRegistry } from './contracts/CapabilityRegistry';
@@ -34,8 +35,52 @@ import { registerD5RecordingToSkill } from './skill/builtin/D5RecordingToSkill';
 // 避免运行时 require() 找不到 dist-electron/agent/LlmAgentBrain.js 的路径问题.
 // 若 LlmClient 不可用,getInstance()/构造函数会抛错,因此包在 try 中。
 import { LlmAgentBrain } from './agent/LlmAgentBrain';
+import { initHost, isOhos } from './platform';
+
+// ============ 真实用户监控 (Sentry / Electron 主进程) ============
+// 主进程统一持有 Sentry client;渲染端经 preload 桥接转发事件到此上报。
+// DSN 来自 SENTRY_DSN 环境变量;未配置则完全不初始化(dev/内网零上报,零开销)。
+import * as Sentry from '@sentry/electron/main';
+const SENTRY_DSN = process.env.SENTRY_DSN;
+if (SENTRY_DSN) {
+  Sentry.init({
+    dsn: SENTRY_DSN,
+    environment: app.isPackaged ? 'production' : 'development',
+    tracesSampleRate: 0.1,
+    sampleRate: 1.0,
+  });
+
+  // 渲染进程崩溃/消失:真实用户监控闭环——主进程侧捕获并上报
+  app.on('web-contents-created', (_e, contents) => {
+    contents.on('crashed', (event, ...rest) => {
+      try {
+        Sentry.captureException(new Error('webContents crashed'), {
+          extra: { details: rest?.[0] ?? String(event) },
+        });
+      } catch { /* swallow */ }
+    });
+  });
+  app.on('render-process-gone', (_e, _wc, details) => {
+    try {
+      Sentry.captureException(new Error('render-process-gone'), {
+        extra: { reason: details?.reason, exitCode: details?.exitCode },
+      });
+    } catch { /* swallow */ }
+  });
+}
 
 const log = LogManager.getInstance();
+
+// 鸿蒙 PC:禁用 GPU 硬件加速(仅 ohos),避免 ArkWeb GPU 进程反复重启。
+// 必须在 app ready 之前调用。标准 Electron 平台不受影响。
+if (isOhos()) {
+  try {
+    app.disableHardwareAcceleration();
+    log.info('[main] ohos: disableHardwareAcceleration 已启用');
+  } catch (e) {
+    log.warn('[main] ohos: disableHardwareAcceleration 调用失败(非致命)', e);
+  }
+}
 
 let windowManager: WindowManager;
 let ipcServer: IpcServer;
@@ -55,9 +100,21 @@ ipcMain.on('open-devtools', () => {
 });
 
 app.whenReady().then(async () => {
+  // W12: localhost 直连旁路。开发机常开着 Clash/V2RayN 等代理(如 127.0.0.1:7890),
+  // Electron 默认继承系统代理,会把 loadURL('http://localhost:5173') 转给代理导致
+  // ERR_CONNECTION_RESET。让 localhost/127.0.0.1 直连,外部请求仍走系统代理(不影响生产调 LLM)。
+  try {
+    await session.defaultSession.setProxy({ proxyBypassRules: 'localhost;127.0.0.1' });
+  } catch (e) {
+    log.warn('[main] 设置代理旁路失败(非致命)', e);
+  }
+
   log.info('========== PiPiClaw 应用启动 ==========', { version: app.getVersion(), isDev });
 
   try {
+    // 0. 初始化平台宿主抽象层(Phase 2 解耦:core 经 getHost() 取平台能力)
+    initHost();
+
     // 1. 设置应用菜单
     setupAppMenu();
 
@@ -170,6 +227,13 @@ app.whenReady().then(async () => {
       // 6. D5 录屏转技能 skill 注册
       registerD5RecordingToSkill();
 
+      // 6.bis W8: 注册已启用的 IM 通道到 ChannelRouter(使 channel:send 可用)
+      try {
+        initChannels();
+      } catch (e) {
+        log.warn('[main] initChannels 失败(非致命)', e);
+      }
+
       log.info('[main] W3+ 子系统 wire 完成');
     } catch (e) {
       log.error('[main] W7.0.1 W3+ wire 失败(非致命)', e);
@@ -253,7 +317,9 @@ app.on('before-quit', async () => {
 process.on('uncaughtException', (error) => {
   log.error('未捕获的异常', error);
   if (!isDev) {
-    const { dialog } = require('electron');
+    // 用顶部静态 import 的 dialog,不要在这里 require('electron'):
+    // 主进程产物若切到 ESM(Electron 28+ 已支持,鸿蒙 34.x runtime 同样),
+    // 裸 require 会直接 ReferenceError,导致崩溃兜底弹窗自己先崩。
     dialog.showErrorBox('应用错误', `发生未知错误: ${error.message}`);
   }
 });

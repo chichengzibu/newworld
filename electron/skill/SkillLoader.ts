@@ -11,7 +11,8 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
-import { app } from 'electron';
+import * as os from 'os';
+import { getHost } from '../platform/runtime';
 import { LogManager } from '../core/LogManager';
 import { ConfigStore } from '../core/ConfigStore';
 import { ModelManager } from '../models/ModelManager';
@@ -75,7 +76,7 @@ export class SkillLoader {
     this.skillsDir = SkillManager.getSkillsDir();
     
     // 如果用户数据目录下没有技能，尝试从项目根目录复制
-    const projectSkillsDir = path.join(app.getAppPath(), '..', 'skills');
+    const projectSkillsDir = path.join(getHost().getAppPath(), '..', 'skills');
     if (fs.existsSync(projectSkillsDir) && !fs.existsSync(this.skillsDir)) {
       this.log.info('[SkillLoader] 发现项目技能目录，正在复制到用户数据目录', { 
         source: projectSkillsDir,
@@ -181,42 +182,61 @@ export class SkillLoader {
     }
   }
 
+  /**
+   * 解析技能 Markdown——双格式兼容：
+   * 1) PiPiClaw 原生：# 名称 / ## 描述 / ## 触发关键词 / ## 操作步骤（中文无 frontmatter）
+   * 2) OpenClaw / Claude Code 风：YAML frontmatter(name/description) + ## Triggers / ## Steps
+   */
   private parseSkillMd(skillId: string, content: string): SkillDefinition | null {
     try {
-      const lines = content.split('\n');
+      const fm = this.parseFrontmatter(content);
+      let body = content;
       let name = skillId;
       let description = '';
       const triggerKeywords: string[] = [];
       const operationSteps: string[] = [];
-      
+
+      if (fm) {
+        name = fm.name || skillId;
+        description = fm.description || '';
+        body = fm.body;
+      }
+
+      const lines = body.split('\n');
       let currentSection = '';
-      
+
       for (let i = 0; i < lines.length; i++) {
         const line = lines[i].trim();
-        
+        const lower = line.toLowerCase();
+
         if (line.startsWith('# ')) {
-          name = line.substring(2).trim();
-        } else if (line.startsWith('## 描述')) {
-          currentSection = 'description';
-        } else if (line.startsWith('## 触发关键词')) {
-          currentSection = 'keywords';
-        } else if (line.startsWith('## 操作步骤')) {
-          currentSection = 'steps';
-        } else if (line && !line.startsWith('##')) {
+          if (!fm) name = line.substring(2).trim();
+          continue;
+        }
+
+        if (line.startsWith('##')) {
+          if (lower.includes('描述') || lower.includes('description')) {
+            currentSection = 'description';
+          } else if (lower.includes('触发') || lower.includes('trigger')) {
+            currentSection = 'keywords';
+          } else if (
+            lower.includes('步骤') || lower.includes('step') ||
+            lower.includes('操作') || lower.includes('instruction') || lower.includes('指令')
+          ) {
+            currentSection = 'steps';
+          }
+          continue;
+        }
+
+        if (line && !line.startsWith('#')) {
           if (currentSection === 'description' && line) {
             description += (description ? '\n' : '') + line;
           } else if (currentSection === 'keywords') {
-            // 解析关键词列表 - 支持 - 或 * 开头的列表
             const keyword = line.replace(/^[-*]\s*/, '').trim();
-            if (keyword) {
-              triggerKeywords.push(keyword);
-            }
+            if (keyword) triggerKeywords.push(keyword);
           } else if (currentSection === 'steps') {
-            // 解析操作步骤 - 支持数字开头或 - 开头
             const step = line.replace(/^\d+\.\s*/, '').replace(/^[-*]\s*/, '').trim();
-            if (step) {
-              operationSteps.push(step);
-            }
+            if (step) operationSteps.push(step);
           }
         }
       }
@@ -225,13 +245,12 @@ export class SkillLoader {
         this.log.warn('[SkillLoader] 技能缺少触发关键词', { skillId });
       }
 
-      // 生成完整指令
       const fullInstructions = this.generateFullInstructions(name, description, operationSteps);
 
       return {
         id: skillId,
         name,
-        description: description || skillId,
+        description: description || name,
         triggerKeywords,
         operationSteps,
         fullInstructions
@@ -239,6 +258,91 @@ export class SkillLoader {
     } catch (error) {
       this.log.error('[SkillLoader] 解析 skill.md 失败', { skillId, error });
       return null;
+    }
+  }
+
+  /**
+   * 解析 YAML frontmatter（OpenClaw / Claude Code 风格）
+   * 形如：
+   * ---
+   * name: foo
+   * description: bar
+   * ---
+   */
+  private parseFrontmatter(content: string): { name?: string; description?: string; body: string } | null {
+    const m = content.match(/^---\s*\n([\s\S]*?)\n---\s*\n?([\s\S]*)$/);
+    if (!m) return null;
+
+    const fmText = m[1];
+    const body = m[2];
+    const result: { name?: string; description?: string } = {};
+
+    const nameMatch = fmText.match(/^name:\s*(.+)$/m);
+    if (nameMatch) result.name = nameMatch[1].trim().replace(/^['"]|['"]$/g, '');
+
+    const descMatch = fmText.match(/^description:\s*([\s\S]+?)(?:\n[a-zA-Z_-]+:|$)/m);
+    if (descMatch) result.description = descMatch[1].trim().replace(/^['"]|['"]$/g, '');
+
+    return { name: result.name, description: result.description, body };
+  }
+
+  /**
+   * 在解压/解包后的目录里查找技能文档（兼容 skill.md / SKILL.md，大小写不敏感，深度 3 层内）
+   */
+  private findSkillDoc(rootDir: string): string | null {
+    const candidates: string[] = [];
+
+    const walk = (dir: string, depth: number) => {
+      if (depth > 3) return;
+      let entries: fs.Dirent[];
+      try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      for (const e of entries) {
+        const full = path.join(dir, e.name);
+        if (e.isDirectory()) {
+          walk(full, depth + 1);
+        } else if (/^skill\.md$/i.test(e.name)) {
+          candidates.push(full);
+        }
+      }
+    };
+
+    walk(rootDir, 0);
+    if (candidates.length === 0) return null;
+
+    // 优先最浅层（根目录 > 子目录），同名时取首个
+    candidates.sort((a, b) => a.split(path.sep).length - b.split(path.sep).length);
+    return candidates[0];
+  }
+
+  /**
+   * 由技能文档路径推导技能ID（用所在文件夹名或文件名，保证可读且唯一）
+   */
+  private resolveSkillId(skillDocPath: string): string {
+    const parentBase = path.basename(path.dirname(skillDocPath));
+    const base =
+      parentBase && parentBase !== '.' && parentBase.toLowerCase() !== 'skills' && parentBase !== path.basename(this.skillsDir)
+        ? parentBase
+        : path.basename(skillDocPath, path.extname(skillDocPath));
+    const safe = base.replace(/[^a-zA-Z0-9_-]/g, '_').toLowerCase() || 'skill';
+    return `imported_${safe}_${Date.now()}`;
+  }
+
+  /** 递归复制目录（保留脚本/资源等附带文件） */
+  private copyDir(src: string, dest: string): void {
+    fs.mkdirSync(dest, { recursive: true });
+    const entries = fs.readdirSync(src, { withFileTypes: true });
+    for (const e of entries) {
+      const s = path.join(src, e.name);
+      const d = path.join(dest, e.name);
+      if (e.isDirectory()) {
+        this.copyDir(s, d);
+      } else {
+        fs.copyFileSync(s, d);
+      }
     }
   }
 
@@ -407,34 +511,170 @@ export class SkillLoader {
 
   /**
    * 导入技能（从URL）
+   * - 支持 .md / .markdown 文本：直接下载解析
+   * - 支持 .zip 技能包：下载到临时文件后委托 importSkillFromZip（双格式 + 整包保留）
    */
   public async importSkillFromUrl(url: string): Promise<{ success: boolean; error?: string; skillId?: string }> {
     try {
+      if (!url || !/^https?:\/\//i.test(url)) {
+        return { success: false, error: '请提供合法的 http(s) 链接' };
+      }
       this.log.info('[SkillLoader] 从URL导入技能', { url });
-      
-      // 简单的下载实现
-      // 实际项目中可能需要用 axios 或 node-fetch
-      // 这里仅作为示例
-      const content = `# 导入的技能\n\n## 描述\n从 ${url} 导入的技能\n\n## 触发关键词\n- 示例关键词\n\n## 操作步骤\n1. 示例步骤`;
-      
+
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), 30000);
+      let res: Response;
+      try {
+        res = await fetch(url, { signal: controller.signal });
+      } finally {
+        clearTimeout(timer);
+      }
+
+      if (!res.ok) {
+        return { success: false, error: `下载失败: HTTP ${res.status} ${res.statusText}` };
+      }
+
+      const isZip = /\.zip(\?.*)?$/i.test(url);
+      if (isZip) {
+        const buf = Buffer.from(await res.arrayBuffer());
+        const tmpZip = path.join(os.tmpdir(), `pipiclaw-url-${Date.now()}.zip`);
+        fs.writeFileSync(tmpZip, buf);
+        try {
+          return await this.importSkillFromZip(tmpZip);
+        } finally {
+          fs.rmSync(tmpZip, { force: true });
+        }
+      }
+
+      const content = await res.text();
+      if (!content || !content.trim()) {
+        return { success: false, error: '链接内容为空，确认是否为技能 .md 文件' };
+      }
+
       const skillId = `imported_${Date.now()}`;
       const skill = this.parseSkillMd(skillId, content);
-      
+
       if (!skill) {
-        return { success: false, error: '技能解析失败' };
+        return { success: false, error: '技能解析失败（确认链接指向 skill.md / SKILL.md）' };
       }
-      
+
       const skillDir = path.join(this.skillsDir, skillId);
       fs.mkdirSync(skillDir, { recursive: true });
-      
+
       const skillMdPath = path.join(skillDir, 'skill.md');
       fs.writeFileSync(skillMdPath, content, 'utf-8');
-      
+
       this.loadSkill(skillId);
-      
+
       return { success: true, skillId };
     } catch (error: any) {
+      if (error?.name === 'AbortError') {
+        return { success: false, error: '下载超时（30s）' };
+      }
       this.log.error('[SkillLoader] 从URL导入技能失败', error);
+      return { success: false, error: error.message || '导入失败' };
+    }
+  }
+
+  /**
+   * 从压缩包导入技能（跨平台技能包载体）
+   * - 兼容 .zip，解包后查找 skill.md / SKILL.md（双格式均可）
+   * - 整包保留附带脚本/资源，可吃下 OpenClaw / Claude Code 的技能包
+   */
+  public async importSkillFromZip(zipPath: string): Promise<{ success: boolean; error?: string; skillId?: string }> {
+    try {
+      if (!fs.existsSync(zipPath)) {
+        return { success: false, error: '压缩包不存在' };
+      }
+      if (!/\.zip$/i.test(zipPath)) {
+        return { success: false, error: '仅支持 .zip 格式的技能包' };
+      }
+
+      const JSZip = (await import('jszip')).default;
+      const buffer = fs.readFileSync(zipPath);
+      const zip = await JSZip.loadAsync(buffer);
+
+      const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pipiclaw-skill-'));
+
+      const writes: Promise<void>[] = [];
+      zip.forEach((relativePath, file) => {
+        if (file.dir) return;
+        const dest = path.join(tmpRoot, relativePath);
+        fs.mkdirSync(path.dirname(dest), { recursive: true });
+        writes.push(file.async('nodebuffer').then((buf: Buffer) => fs.writeFileSync(dest, buf)));
+      });
+      await Promise.all(writes);
+
+      const skillDoc = this.findSkillDoc(tmpRoot);
+      if (!skillDoc) {
+        fs.rmSync(tmpRoot, { recursive: true, force: true });
+        return { success: false, error: '压缩包中未找到 skill.md / SKILL.md 技能文档' };
+      }
+
+      const skillId = this.resolveSkillId(skillDoc);
+      const skillDir = path.join(this.skillsDir, skillId);
+      fs.mkdirSync(skillDir, { recursive: true });
+
+      // 复制整包（含脚本/资源），以技能文档所在目录为根
+      this.copyDir(path.dirname(skillDoc), skillDir);
+
+      const content = fs.readFileSync(skillDoc, 'utf-8');
+      const skill = this.parseSkillMd(skillId, content);
+      if (!skill) {
+        fs.rmSync(skillDir, { recursive: true, force: true });
+        fs.rmSync(tmpRoot, { recursive: true, force: true });
+        return { success: false, error: '技能文档解析失败' };
+      }
+
+      // 统一保存为 skill.md，便于后续管理
+      fs.writeFileSync(path.join(skillDir, 'skill.md'), content, 'utf-8');
+
+      this.loadSkill(skillId);
+      fs.rmSync(tmpRoot, { recursive: true, force: true });
+
+      this.log.info('[SkillLoader] 压缩包技能导入成功', { skillId, name: skill.name });
+      return { success: true, skillId };
+    } catch (error: any) {
+      this.log.error('[SkillLoader] 压缩包技能导入失败', error);
+      return { success: false, error: error.message || '导入失败' };
+    }
+  }
+
+  /**
+   * 从文件夹导入技能（直接拖整个技能目录）
+   */
+  public async importSkillFromFolder(folderPath: string): Promise<{ success: boolean; error?: string; skillId?: string }> {
+    try {
+      if (!fs.existsSync(folderPath) || !fs.statSync(folderPath).isDirectory()) {
+        return { success: false, error: '文件夹不存在' };
+      }
+
+      const skillDoc = this.findSkillDoc(folderPath);
+      if (!skillDoc) {
+        return { success: false, error: '文件夹中未找到 skill.md / SKILL.md 技能文档' };
+      }
+
+      const skillId = this.resolveSkillId(skillDoc);
+      const skillDir = path.join(this.skillsDir, skillId);
+      fs.mkdirSync(skillDir, { recursive: true });
+
+      this.copyDir(path.dirname(skillDoc), skillDir);
+
+      const content = fs.readFileSync(skillDoc, 'utf-8');
+      const skill = this.parseSkillMd(skillId, content);
+      if (!skill) {
+        fs.rmSync(skillDir, { recursive: true, force: true });
+        return { success: false, error: '技能文档解析失败' };
+      }
+
+      fs.writeFileSync(path.join(skillDir, 'skill.md'), content, 'utf-8');
+
+      this.loadSkill(skillId);
+
+      this.log.info('[SkillLoader] 文件夹技能导入成功', { skillId, name: skill.name });
+      return { success: true, skillId };
+    } catch (error: any) {
+      this.log.error('[SkillLoader] 文件夹技能导入失败', error);
       return { success: false, error: error.message || '导入失败' };
     }
   }

@@ -10,11 +10,12 @@
  */
 
 import * as fs from 'fs';
+import { getHost } from '../platform/runtime'
 import * as path from 'path';
 import https from 'https';
 import http from 'http';
 import { URL } from 'url';
-import { app, BrowserWindow } from 'electron';
+import {BrowserWindow} from 'electron';
 import { LogManager } from '../core/LogManager';
 import { ConfigStore } from '../core/ConfigStore';
 import { SkillLoader } from '../skill/SkillLoader';
@@ -67,7 +68,7 @@ export class SelfLearner {
 
   private constructor() {
     // 初始化学习数据目录
-    this.learningDir = path.join(app.getPath('userData'), 'hermes-learning');
+    this.learningDir = path.join(getHost().getPath('userData'), 'hermes-learning');
     this.ensureLearningDir();
     this.loadObservations();
   }
@@ -692,7 +693,7 @@ export class SelfLearner {
     let needsRestart = false;
     
     try {
-      const skillsDir = path.join(app.getAppPath(), '..', 'skills');
+      const skillsDir = path.join(getHost().getAppPath(), '..', 'skills');
       let skillDir = path.join(skillsDir, proposal.id);
       
       // 检查目录是否已存在，如果存在则添加时间戳后缀

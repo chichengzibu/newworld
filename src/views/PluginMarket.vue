@@ -77,7 +77,7 @@
 
 <script setup lang="ts">
 import { ref } from 'vue';
-import { ElMessage } from 'element-plus';
+import { ElMessage } from "element-plus/es/components/message/index";
 import { User, Download, Star } from '@element-plus/icons-vue';
 import Breadcrumb from '@/components/layout/Breadcrumb.vue';
 

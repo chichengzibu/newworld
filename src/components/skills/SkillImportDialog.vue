@@ -9,22 +9,37 @@
     <el-tabs v-model="activeTab">
       <el-tab-pane label="从本地导入" name="file">
         <div class="upload-area">
-          <!-- 简单的点击触发文件选择 -->
-          <div class="upload-drop-zone" @click="openFileDialog">
+          <div
+            class="upload-drop-zone"
+            :class="{ 'is-dragover': dragover }"
+            @click="openFileDialog"
+            @dragover.prevent="onDragOver"
+            @dragleave.prevent="onDragLeave"
+            @drop.prevent="onDrop"
+          >
             <el-icon class="upload-icon"><Upload /></el-icon>
             <div class="upload-text">
-              点击选择文件
+              点击选择，或将技能包拖入此处
             </div>
             <div class="upload-tip">
-              只支持 .md (Markdown) 格式的技能文件
+              支持 .md 单文件，或 .zip 跨平台技能包（含 OpenClaw / Claude Code 技能）
             </div>
           </div>
-          
+
           <div v-if="selectedFilePath" class="selected-file">
             <el-icon><Document /></el-icon>
             <span class="file-name">{{ selectedFilePath.split(/[\/\\]/).pop() }}</span>
+            <el-tag v-if="selectedFileType === 'zip'" size="small" type="success">压缩包</el-tag>
+            <el-tag v-else-if="selectedFileType === 'md'" size="small" type="info">Markdown</el-tag>
+            <el-tag v-else-if="selectedFileType === 'folder'" size="small" type="warning">文件夹</el-tag>
             <el-button size="small" text @click="clearFile">
               <el-icon><Close /></el-icon>
+            </el-button>
+          </div>
+
+          <div class="upload-secondary">
+            <el-button text type="primary" @click="openFolderDialog">
+              <el-icon><Folder /></el-icon> 选择技能文件夹
             </el-button>
           </div>
         </div>
@@ -69,8 +84,8 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue';
-import { Upload, Document, Close, Link, InfoFilled } from '@element-plus/icons-vue';
-import { ElMessage } from 'element-plus';
+import { Upload, Document, Close, Link, InfoFilled, Folder } from '@element-plus/icons-vue';
+import { ElMessage } from "element-plus/es/components/message/index";
 
 const props = defineProps<{
   modelValue: boolean;
@@ -85,8 +100,10 @@ const visible = computed({
 
 const activeTab = ref('file');
 const selectedFilePath = ref<string | null>(null);
+const selectedFileType = ref<'md' | 'zip' | 'folder' | ''>('');
 const skillUrl = ref('');
 const importing = ref(false);
+const dragover = ref(false);
 
 const canImport = computed(() => {
   if (activeTab.value === 'file') {
@@ -96,47 +113,92 @@ const canImport = computed(() => {
   }
 });
 
-const openFileDialog = async () => {
-  const dialogResult = await (window as any).electronAPI?.dialog?.openFile({
-    filters: [{ name: 'Markdown', extensions: ['md'] }],
-    properties: ['openFile']
-  });
-  
-  if (dialogResult && !dialogResult.canceled && dialogResult.filePaths && dialogResult.filePaths.length > 0) {
-    selectedFilePath.value = dialogResult.filePaths[0];
-  }
+const setSelected = (filePath: string, type: 'md' | 'zip' | 'folder') => {
+  selectedFilePath.value = filePath;
+  selectedFileType.value = type;
 };
 
 const clearFile = () => {
   selectedFilePath.value = null;
+  selectedFileType.value = '';
+};
+
+const openFileDialog = async () => {
+  const dialogResult = await (window as any).electronAPI?.dialog?.openFile({
+    filters: [
+      { name: '技能包', extensions: ['zip', 'md'] },
+      { name: 'Markdown', extensions: ['md'] },
+      { name: '压缩包', extensions: ['zip'] }
+    ],
+    properties: ['openFile']
+  });
+
+  if (dialogResult && !dialogResult.canceled && dialogResult.filePaths && dialogResult.filePaths.length > 0) {
+    const p = dialogResult.filePaths[0];
+    setSelected(p, /\.zip$/i.test(p) ? 'zip' : 'md');
+  }
+};
+
+const openFolderDialog = async () => {
+  const dialogResult = await (window as any).electronAPI?.dialog?.openFile({
+    properties: ['openDirectory']
+  });
+
+  if (dialogResult && !dialogResult.canceled && dialogResult.filePaths && dialogResult.filePaths.length > 0) {
+    setSelected(dialogResult.filePaths[0], 'folder');
+  }
+};
+
+const onDragOver = () => {
+  dragover.value = true;
+};
+
+const onDragLeave = () => {
+  dragover.value = false;
+};
+
+const onDrop = (e: DragEvent) => {
+  dragover.value = false;
+  const file = e.dataTransfer?.files?.[0];
+  if (!file) return;
+  const p = (file as any).path || file.name;
+  if (/\.zip$/i.test(file.name)) {
+    setSelected(p, 'zip');
+  } else if (/\.md$/i.test(file.name)) {
+    setSelected(p, 'md');
+  } else {
+    ElMessage.warning('请拖入 .zip 技能包或 .md 技能文件');
+  }
 };
 
 const handleImport = async () => {
   if (!canImport.value) return;
 
   importing.value = true;
-  
+
   try {
     let result: any;
-    
+
     if (activeTab.value === 'file') {
-      // 从文件导入
-      if (selectedFilePath.value) {
-        result = await (window as any).electronAPI?.skills?.importFile(selectedFilePath.value);
-      } else {
-        ElMessage.warning('请选择一个文件');
+      if (!selectedFilePath.value) {
+        ElMessage.warning('请选择文件或文件夹');
         return;
       }
+      if (selectedFileType.value === 'zip') {
+        result = await (window as any).electronAPI?.skills?.importZip(selectedFilePath.value);
+      } else if (selectedFileType.value === 'folder') {
+        result = await (window as any).electronAPI?.skills?.importFolder(selectedFilePath.value);
+      } else {
+        result = await (window as any).electronAPI?.skills?.importFile(selectedFilePath.value);
+      }
     } else if (activeTab.value === 'url' && skillUrl.value) {
-      // 从URL导入
       result = await (window as any).electronAPI?.skills?.importUrl(skillUrl.value);
     }
-    
+
     if (result?.success) {
       ElMessage.success('技能导入成功');
       visible.value = false;
-      
-      // 如果返回了技能列表，通过 emit 传递
+
       if (result?.data) {
         emit('success', result.data);
       } else {
@@ -154,6 +216,7 @@ const handleImport = async () => {
 
 const handleClosed = () => {
   selectedFilePath.value = null;
+  selectedFileType.value = '';
   skillUrl.value = '';
   activeTab.value = 'file';
 };
@@ -176,6 +239,16 @@ const handleClosed = () => {
     border-color: var(--el-color-primary);
     background-color: var(--el-fill-color-light);
   }
+
+  &.is-dragover {
+    border-color: var(--el-color-success);
+    background-color: var(--el-color-success-light-9);
+  }
+}
+
+.upload-secondary {
+  margin-top: 12px;
+  text-align: center;
 }
 
 .upload-icon {

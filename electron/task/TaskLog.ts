@@ -7,8 +7,9 @@
  * 3. 任务重试历史记录
  */
 
-import { app } from 'electron';
+
 import { join } from 'path';
+import { getHost } from '../platform/runtime'
 import * as fs from 'fs';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, appendFileSync } from 'fs';
 import { LogManager } from '../core/LogManager';
@@ -83,7 +84,7 @@ export class TaskLog {
   private currentTaskId: string | null = null;
 
   private constructor() {
-    const userDataPath = app.getPath('userData');
+    const userDataPath = getHost().getPath('userData');
     this.logsDir = join(userDataPath, 'task-logs');
     this.logsFile = join(this.logsDir, 'task-logs.json');
     

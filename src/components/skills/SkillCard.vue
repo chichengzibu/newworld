@@ -48,7 +48,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
 import { View, CircleCheck, Document, Box } from '@element-plus/icons-vue';
-import { ElMessage } from 'element-plus';
+import { ElMessage } from "element-plus/es/components/message/index";
 
 interface SkillProps {
   skill: {

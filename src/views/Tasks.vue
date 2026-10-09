@@ -225,7 +225,8 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
-import { ElMessage, ElMessageBox } from 'element-plus';
+import { ElMessage } from "element-plus/es/components/message/index"
+import { ElMessageBox } from "element-plus/es/components/message-box/index";
 import { useI18n } from 'vue-i18n';
 import { Document } from '@element-plus/icons-vue';
 import Breadcrumb from '@/components/layout/Breadcrumb.vue';

@@ -6,10 +6,11 @@
  */
 
 import { LogManager } from '../core/LogManager'
+import { getHost } from '../platform/runtime'
 import { EventBus } from '../runtime/bridge/EventBus'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import { app } from 'electron'
+
 import { randomUUID } from 'node:crypto'
 import type { AgentCheckpointState } from './AgentTypes'
 
@@ -20,7 +21,7 @@ export class AgentCheckpointStore {
   private storeDir: string
 
   private constructor() {
-    this.storeDir = path.join(app.getPath('userData'), 'checkpoints')
+    this.storeDir = path.join(getHost().getPath('userData'), 'checkpoints')
     if (!fs.existsSync(this.storeDir)) {
       fs.mkdirSync(this.storeDir, { recursive: true })
     }

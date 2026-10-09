@@ -10,6 +10,12 @@
 import { Tray, Menu, nativeImage, app, BrowserWindow } from 'electron';
 import { join } from 'path';
 import { LogManager } from './LogManager';
+// 静态 import 替换原先 3 处 require('./WindowManager')(与 IpcServer.ts 同一约定):
+// 主进程产物若切到 ESM(Electron 28+ 支持,鸿蒙 34.6.x runtime 同样),裸 require 会 ReferenceError。
+// WindowManager 不反向依赖 TrayManager,无循环引用;模块加载期无副作用,行为不变。
+import { WindowManager } from './WindowManager';
+import { isOhos } from '../platform/detect';
+import { getHost } from '../platform/runtime';
 
 export class TrayManager {
   private static instance: TrayManager;
@@ -31,6 +37,12 @@ export class TrayManager {
    */
   public create(): void {
     if (this.tray) return;
+
+    // 鸿蒙 PC 无系统托盘,降级跳过(不创建 Tray,避免运行时报错)
+    if (isOhos()) {
+      this.log.warn('[TrayManager] 鸿蒙 PC 无系统托盘,降级跳过');
+      return;
+    }
 
     try {
       const iconPath = this.getIconPath();
@@ -144,7 +156,7 @@ export class TrayManager {
         label: '退出',
         click: () => {
           this.isQuitting = true;
-          app.quit();
+          getHost().quit();
         }
       }
     ]);
@@ -156,7 +168,6 @@ export class TrayManager {
    * 显示主窗口
    */
   public showMainWindow(): void {
-    const { WindowManager } = require('./WindowManager');
     const windowManager = WindowManager.getInstance();
     const win = windowManager.getMainWindow();
 
@@ -170,7 +181,6 @@ export class TrayManager {
    * 隐藏主窗口到托盘
    */
   public hideMainWindow(): void {
-    const { WindowManager } = require('./WindowManager');
     const windowManager = WindowManager.getInstance();
     const win = windowManager.getMainWindow();
 
@@ -183,7 +193,6 @@ export class TrayManager {
    * 切换主窗口
    */
   public toggleMainWindow(): void {
-    const { WindowManager } = require('./WindowManager');
     const windowManager = WindowManager.getInstance();
     const win = windowManager.getMainWindow();
 

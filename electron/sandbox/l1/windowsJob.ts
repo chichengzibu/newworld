@@ -39,12 +39,15 @@ export function isWindowsJobAvailable(): boolean {
 export function runWithWindowsJob(command: string[], _config: WindowsJobConfig = {}): WindowsJobResult {
   const log = LogManager.getInstance()
   const startMs = Date.now()
-  log.warn('WindowsJob: W9 stub,Windows 平台 W9 暂不实装,W10+ 评估')
+  log.warn('WindowsJob: W9 stub, Windows 平台 W9 暂不实装, W10+ 评估; 命令未执行')
+  // 这是 W9 占位 stub,Job Object 隔离并未真正实现。
+  // 绝不能返回 ok:true —— 否则调用方会把"未执行"误判为"执行成功"(假阳性)。
+  // capability() 已把 windows-job 标记为 available:false,这里保持一致返回 ok:false。
   return {
-    ok: true,
-    exitCode: 0,
+    ok: false,
+    exitCode: 1,
     stdout: '',
-    stderr: 'Windows Job Object W9 stub',
+    stderr: 'Windows Job Object W9 stub — 未实现,命令未执行',
     durationMs: Date.now() - startMs,
     fallback: true,
   }

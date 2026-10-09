@@ -152,13 +152,8 @@ const recentConversations = computed<CommandItem[]>(() => {
 const navigationCommands = computed<CommandItem[]>(() => {
   const items: CommandItem[] = [
     {
-      id: 'nav-dashboard', kind: 'nav', title: '工作台', subtitle: '回到首页', icon: 'House',
-      keywords: ['home', '首页', '工作台', '概览'],
-      action: () => router.push('/dashboard'),
-    },
-    {
       id: 'nav-chat', kind: 'nav', title: 'AI 对话', subtitle: '开启新对话或继续历史', icon: 'ChatDotRound',
-      keywords: ['chat', '对话', '聊天', 'ai'],
+      keywords: ['chat', '对话', '聊天', 'ai', 'home', '首页'],
       action: () => router.push('/chat'),
     },
     {

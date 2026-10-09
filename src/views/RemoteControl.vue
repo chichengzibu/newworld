@@ -107,7 +107,7 @@
 
 <script setup lang="ts">
 import { reactive } from 'vue';
-import { ElMessage } from 'element-plus';
+import { ElMessage } from "element-plus/es/components/message/index";
 import Breadcrumb from '@/components/layout/Breadcrumb.vue';
 
 interface RemoteControlConfig {

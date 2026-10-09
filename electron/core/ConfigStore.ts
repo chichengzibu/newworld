@@ -7,6 +7,7 @@
  */
 
 import { app } from 'electron';
+import { getHost } from '../platform/runtime'
 import { join } from 'path';
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { LogManager } from './LogManager';
@@ -27,7 +28,7 @@ export class ConfigStore {
   // 私有构造函数（单例模式）
   private constructor() {
     // 配置文件路径：用户数据目录下的config.json
-    const userDataPath = app.getPath('userData');
+    const userDataPath = getHost().getPath('userData');
     this.configPath = join(userDataPath, 'config.json');
     
     this.loadConfig();
@@ -49,7 +50,7 @@ export class ConfigStore {
   private loadConfig(): void {
     try {
       // 确保目录存在
-      const dir = app.getPath('userData');
+      const dir = getHost().getPath('userData');
       if (!existsSync(dir)) {
         mkdirSync(dir, { recursive: true });
       }
@@ -126,7 +127,7 @@ export class ConfigStore {
       firstRun: true,
       
       // 版本信息
-      version: app.getVersion()
+      version: getHost().getVersion()
     };
   }
 

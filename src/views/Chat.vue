@@ -25,7 +25,7 @@
             </div>
           </div>
 
-           <div class="messages-container" ref="messagesContainer">
+           <div class="messages-container" ref="messagesContainer" @scroll="handleScroll">
              <!-- Hermes 记忆管理抽屉 — 已抽出到 src/components/chat/HermesMemoryDrawer.vue -->
              <HermesMemoryDrawer />
 
@@ -105,16 +105,26 @@
               </div>
             </div>
 
-            <div class="messages-list" ref="messagesContainer" @scroll="handleScroll">
-              <TransitionGroup name="message">
+            <!-- 虚拟滚动列表:长对话只渲染可视区+缓冲,避免全量 DOM (大厂 Chat 体感优化) -->
+            <div class="messages-list" @scroll="handleScroll">
+              <div
+                class="messages-virtual-inner"
+                :style="{ height: `${virtualizer.getTotalSize()}px`, position: 'relative', width: '100%' }"
+              >
                 <div
-                  v-for="message in chatStore.currentConversation.messages"
-                  :key="message.id"
-                  class="message"
-                  :class="[message.role, { streaming: message.status === 'streaming' }]"
+                  v-for="row in virtualRows"
+                  :key="row.message.id"
+                  :data-index="row.index"
+                  :ref="(el) => virtualizer.measureElement(el)"
+                  class="message-outer"
+                  :style="{ position: 'absolute', top: 0, left: 0, width: '100%', transform: `translateY(${row.start}px)` }"
                 >
-                  <div class="message-avatar" :class="message.role">
-                    <span v-if="message.role === 'assistant'" class="pixel-avatar">
+                  <div
+                    class="message"
+                    :class="[row.message.role, { streaming: row.message.status === 'streaming' }]"
+                  >
+                  <div class="message-avatar" :class="row.message.role">
+                    <span v-if="row.message.role === 'assistant'" class="pixel-avatar">
                       <div class="pixel-avatar-inner">
                         <el-icon class="pixel-pip" :size="20" color="var(--accent-base)"><MagicStick /></el-icon>
                       </div>
@@ -125,42 +135,42 @@
                   <!-- P1-4: thinking 可视化改用 ThinkingBlock (替代原 inline 实现) -->
                   <!-- TODO v4.4: 接入 LLM 流式后,补 message.thinkingDurationMs / thinkingTokens 字段 -->
                   <ThinkingBlock
-                    v-if="message.thinking"
-                    :reasoning="message.thinking"
-                    :streaming="message.status === 'streaming'"
+                    v-if="row.message.thinking"
+                    :reasoning="row.message.thinking"
+                    :streaming="row.message.status === 'streaming'"
                   />
                   <!-- 任务执行结果详情 -->
                   <TaskResultCard 
-                    v-if="message.taskResult"
-                    :success="message.taskResult.success"
-                    :duration="message.taskResult.duration"
-                    :summary="message.taskResult.summary"
-                    :error="message.taskResult.error"
-                    :steps="message.taskResult.steps || []"
+                    v-if="row.message.taskResult"
+                    :success="row.message.taskResult.success"
+                    :duration="row.message.taskResult.duration"
+                    :summary="row.message.taskResult.summary"
+                    :error="row.message.taskResult.error"
+                    :steps="row.message.taskResult.steps || []"
                     :defaultExpanded="false"
                   />
                   <!-- 普通消息文本 -->
-                  <div class="message-text" v-if="message.content && !message.taskResult">
-                    <span v-html="renderMarkdown(message.content)"></span>
-                    <span v-if="message.status === 'streaming'" class="typing-cursor">▋</span>
+                  <div class="message-text" v-if="row.message.content && !row.message.taskResult">
+                    <span v-html="renderMarkdown(row.message.content)"></span>
+                    <span v-if="row.message.status === 'streaming'" class="typing-cursor">▋</span>
                   </div>
-                  <div class="message-text loading" v-else-if="message.status === 'streaming'">
+                  <div class="message-text loading" v-else-if="row.message.status === 'streaming'">
                     <span class="typing-cursor">▋</span>
                   </div>
-                  <div class="message-text loading" v-else-if="message.status === 'sending'">
+                  <div class="message-text loading" v-else-if="row.message.status === 'sending'">
                     <span class="loading-dots">...</span>
                   </div>
-                  <div class="message-error" v-if="message.error">
-                    {{ message.error }}
+                  <div class="message-error" v-if="row.message.error">
+                    {{ row.message.error }}
                   </div>
-                  <div class="message-actions" v-if="message.role === 'assistant' && message.content">
-                    <el-tooltip :content="message.thinking ? '复制全部（含思考过程）' : '复制'">
-                      <el-button size="small" text @click="handleCopy(message)">
+                  <div class="message-actions" v-if="row.message.role === 'assistant' && row.message.content">
+                    <el-tooltip :content="row.message.thinking ? '复制全部（含思考过程）' : '复制'">
+                      <el-button size="small" text @click="handleCopy(row.message)">
                         <el-icon><CopyDocument /></el-icon>
                       </el-button>
                     </el-tooltip>
                     <el-tooltip content="重新生成">
-                      <el-button size="small" text @click="handleRegenerate(message.id)" :disabled="chatStore.sending">
+                      <el-button size="small" text @click="handleRegenerate(row.message.id)" :disabled="chatStore.sending">
                         <el-icon><RefreshRight /></el-icon>
                       </el-button>
                     </el-tooltip>
@@ -171,30 +181,31 @@
                     </el-tooltip>
                   </div>
                   <!-- 用户消息操作按钮 -->
-                  <div class="message-actions" v-if="message.role === 'user' && message.content">
+                  <div class="message-actions" v-if="row.message.role === 'user' && row.message.content">
                     <el-tooltip content="复制">
-                      <el-button size="small" text @click="handleCopy(message)">
+                      <el-button size="small" text @click="handleCopy(row.message)">
                         <el-icon><CopyDocument /></el-icon>
                       </el-button>
                     </el-tooltip>
                     <!-- 暂时隐藏未完善的功能 -->
                   </div>
                   <div class="message-meta">
-                    <span class="message-time">{{ formatTime(message.timestamp) }}</span>
-                    <el-tag v-if="message.modelId" size="small" type="info" class="model-tag">
-                      {{ getModelName(message.providerId, message.modelId) }}
+                    <span class="message-time">{{ formatTime(row.message.timestamp) }}</span>
+                    <el-tag v-if="row.message.modelId" size="small" type="info" class="model-tag">
+                      {{ getModelName(row.message.providerId, row.message.modelId) }}
                     </el-tag>
                     <!-- 消息状态标签 -->
-                    <span v-if="message.role === 'assistant'" class="message-status-tag">
-                      <el-icon v-if="message.status === 'streaming'" class="status-icon"><Loading /></el-icon>
-                      <span v-if="message.status === 'streaming'"> 生成中</span>
-                      <span v-else-if="message.status === 'stopped'" class="status-stopped">（已停止生成）</span>
-                      <span v-else-if="message.status === 'error'" class="status-error">{{ message.error }}</span>
+                    <span v-if="row.message.role === 'assistant'" class="message-status-tag">
+                      <el-icon v-if="row.message.status === 'streaming'" class="status-icon"><Loading /></el-icon>
+                      <span v-if="row.message.status === 'streaming'"> 生成中</span>
+                      <span v-else-if="row.message.status === 'stopped'" class="status-stopped">（已停止生成）</span>
+                      <span v-else-if="row.message.status === 'error'" class="status-error">{{ row.message.error }}</span>
                     </span>
                   </div>
                 </div>
+                </div>
+                </div>
               </div>
-            </TransitionGroup>
             </div>
           </div>
 
@@ -447,8 +458,10 @@
 
 <script setup lang="ts">
 import { ref, computed, reactive, onMounted, watch, nextTick, onUnmounted } from 'vue';
+import { useVirtualizer } from '@tanstack/vue-virtual';
 import { useRoute, useRouter } from 'vue-router';
-import { ElMessage, ElMessageBox } from 'element-plus';
+import { ElMessage } from "element-plus/es/components/message/index"
+import { ElMessageBox } from "element-plus/es/components/message-box/index";
 import { Plus, Promotion, CopyDocument, RefreshRight, DArrowRight, Search, Close, Loading, Setting, WarningFilled, Memo, EditPen, MagicStick, ChatDotRound, Lightning, User, Sunny, CircleCheck, CircleClose, Refresh, Clock } from '@element-plus/icons-vue';
 // P1-6: marked + highlight.js 改动态导入,避免 vendor-text 988KB 进首屏
 // (用户进入 Chat 页才会触发首条消息渲染,延迟加载 ≈0 感知)
@@ -649,6 +662,24 @@ const ALLOWED_EXTENSIONS = new Set([
 
 const showSettings = ref(false);
 const messagesContainer = ref<HTMLElement | null>(null);
+
+// ============ 虚拟滚动 (大厂 Chat 体感优化) ============
+// 长对话只渲染可视区 + overscan 缓冲,避免全量 DOM 导致滚动卡顿。
+const messages = computed(() => chatStore.currentConversation?.messages ?? []);
+const virtualizer = useVirtualizer({
+  count: computed(() => messages.value.length),
+  getScrollElement: () => messagesContainer.value,
+  estimateSize: () => 140,
+  overscan: 8,
+  getItemKey: (index) => messages.value[index]?.id ?? index,
+});
+// 把每条消息对象挂到虚拟行上,模板用 row.message 访问
+const virtualRows = computed(() =>
+  virtualizer.getVirtualItems().map((vi) => ({
+    ...vi,
+    message: messages.value[vi.index],
+  }))
+);
 // (P1-4: expandedThinking 移除 — ThinkingBlock 内部管理展开状态)
 const isAtBottom = ref(true); // 用户是否在聊天底部
 
@@ -885,19 +916,16 @@ function checkIsAtBottom(): boolean {
  */
 function scrollToBottom(force = false, instant = false): void {
   nextTick(() => {
-    if (!messagesContainer.value) return;
-    
-    const container = messagesContainer.value;
-    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
-    
+    const len = messages.value.length;
+    if (len === 0) return;
     // 智能判断：如果用户向上滚动超过 50px，且不是强制滚动，则不滚动
-    if (!force && distanceFromBottom > 50) {
+    if (!force && !checkIsAtBottom()) {
       return;
     }
-    
-    container.scrollTo({
-      top: container.scrollHeight,
-      behavior: instant ? 'instant' : 'smooth'
+    // 虚拟滚动:滚动到最后一条(对齐底部),流式输出时持续跟随
+    virtualizer.scrollToIndex(len - 1, {
+      align: 'end',
+      behavior: instant ? 'auto' : 'smooth',
     });
     isAtBottom.value = true;
   });
@@ -1478,9 +1506,15 @@ async function handleSaveSettings(): Promise<void> {
 }
 
 .messages-list {
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-lg);
+  /* 虚拟化透传容器: 实际滚动发生在外层 .messages-container */
+  display: block;
+  width: 100%;
+}
+
+/* 虚拟行: 用 padding-bottom 模拟原 flex gap 间距, 保证 measureElement 测到行高包含间距 */
+.message-outer {
+  box-sizing: border-box;
+  padding-bottom: var(--space-lg);
 }
 
 .message {

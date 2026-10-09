@@ -152,7 +152,9 @@ export class FileTransferManager {
       accessToken = config!.accessToken ?? config!.botToken ?? config!.appSecret
     }
 
-    // 5. 模拟上传进度(Stage 1 占位;Stage 2 接真 fetch)
+    // 5. 进度回报：真实传输需各通道对接其文件上传接口；当前为本地回放占位进度。
+    //    注意：本方法在校验通过后即返回 ok:true，并未真正把文件推送到 IM 平台，
+    //    属 Stage 1 占位实现，接入各通道真实上传 API 前请勿用于生产发送。
     if (args.onProgress) {
       for (let p = 0; p <= 100; p += 25) {
         args.onProgress(p)

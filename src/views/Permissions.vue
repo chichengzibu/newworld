@@ -232,7 +232,8 @@
 
 <script setup lang="ts">
 import { ref, reactive, onMounted, computed } from 'vue';
-import { ElMessage, ElMessageBox } from 'element-plus';
+import { ElMessage } from "element-plus/es/components/message/index"
+import { ElMessageBox } from "element-plus/es/components/message-box/index";
 import { useI18n } from 'vue-i18n';
 import Breadcrumb from '@/components/layout/Breadcrumb.vue';
 import { Plus, InfoFilled, Lock, Promotion, Unlock, EditPen, Document, Folder, Connection, Operation, Monitor, Lightning, Tools, Box } from '@element-plus/icons-vue';

@@ -113,7 +113,7 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue';
 import { useRouter } from 'vue-router';
-import { ElMessage } from 'element-plus';
+import { ElMessage } from "element-plus/es/components/message/index";
 import { MagicStick, Box, Search, Setting, Lock, Tools, Promotion, SuccessFilled } from '@element-plus/icons-vue';
 import { useAppStore } from '@/stores/app';
 

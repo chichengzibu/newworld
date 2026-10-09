@@ -33,7 +33,7 @@
 
 <script setup lang="ts">
 import { onMounted, onUnmounted } from 'vue';
-import { ElMessage } from 'element-plus';
+import { ElMessage } from "element-plus/es/components/message/index";
 import { useAppStore } from '@/stores/app';
 import { useGatewayStore } from '@/stores/gateway';
 import TitleBar from './TitleBar.vue';

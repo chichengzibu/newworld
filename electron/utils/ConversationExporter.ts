@@ -7,8 +7,9 @@
  */
 
 import * as fs from 'fs';
+import { getHost } from '../platform/runtime'
 import * as path from 'path';
-import { app } from 'electron';
+
 import { LogManager } from '../core/LogManager';
 import { PermissionManager } from '../permissions/PermissionManager';
 import type { Conversation } from '../chat/ChatTypes';
@@ -52,7 +53,7 @@ export class ConversationExporter {
       let outputPath = options.outputPath;
       
       if (!outputPath) {
-        const downloadsPath = app.getPath('downloads');
+        const downloadsPath = getHost().getPath('downloads');
         const timestamp = new Date().getTime();
         const safeTitle = conversation.title.replace(/[^a-zA-Z0-9\u4e00-\u9fa5]/g, '_').substring(0, 20);
         

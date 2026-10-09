@@ -6,8 +6,9 @@
  * 2. 提供配置的读取、写入接口
  */
 
-import { app } from 'electron';
+
 import { join } from 'path';
+import { getHost } from '../platform/runtime'
 import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { LogManager } from '../core/LogManager';
 import { ProviderConfig } from './ModelProvider';
@@ -19,7 +20,7 @@ export class ModelConfig {
   private providers: Map<string, ProviderConfig> = new Map();
 
   private constructor() {
-    const userDataPath = app.getPath('userData');
+    const userDataPath = getHost().getPath('userData');
     this.configPath = join(userDataPath, 'models.json');
     this.loadConfig();
   }
@@ -33,7 +34,7 @@ export class ModelConfig {
 
   private loadConfig(): void {
     try {
-      const dir = app.getPath('userData');
+      const dir = getHost().getPath('userData');
       if (!existsSync(dir)) {
         mkdirSync(dir, { recursive: true });
       }
@@ -60,7 +61,7 @@ export class ModelConfig {
   private saveConfig(): void {
     try {
       const data = JSON.stringify({
-        version: app.getVersion(),
+        version: getHost().getVersion(),
         providers: Array.from(this.providers.values())
       }, null, 2);
       writeFileSync(this.configPath, data, 'utf-8');

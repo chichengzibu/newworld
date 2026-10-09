@@ -41,7 +41,7 @@
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
-  House, ChatDotRound, Box, Cpu, List, ChatLineRound, Calendar, Setting
+  ChatDotRound, Box, Cpu, ChatLineRound, Calendar, Setting
 } from '@element-plus/icons-vue'
 
 const { t } = useI18n()
@@ -50,17 +50,18 @@ const route = useRoute()
 interface NavItem {
   path: string
   titleKey: string
-  icon: string
+  icon: any
 }
 
-/** v4-mockup 风:6 个核心 (Home / Chat / Models / Skills / IM / Schedule) + 底部 Settings */
+/** v4.5: 5 个核心 (Chat / Models / Skills / IM / Schedule) + 底部 Settings。
+ *  主页就是 Chat(顶级首项),不再有 Dashboard 中转。
+ *  icon 必须是组件引用(不是字符串),否则 <component :is="..."> 渲染不出。 */
 const navItems: NavItem[] = [
-  { path: '/dashboard',     titleKey: 'nav.dashboard',     icon: 'House' },
-  { path: '/chat',          titleKey: 'nav.chat',          icon: 'ChatDotRound' },
-  { path: '/models',        titleKey: 'nav.models',        icon: 'Cpu' },
-  { path: '/skills',        titleKey: 'nav.skills',        icon: 'Box' },
-  { path: '/im-management', titleKey: 'nav.imManagement',  icon: 'ChatLineRound' },
-  { path: '/schedule',      titleKey: 'nav.schedule',      icon: 'Calendar' },
+  { path: '/chat',          titleKey: 'nav.chat',          icon: ChatDotRound },
+  { path: '/models',        titleKey: 'nav.models',        icon: Cpu },
+  { path: '/skills',        titleKey: 'nav.skills',        icon: Box },
+  { path: '/im-management', titleKey: 'nav.imManagement',  icon: ChatLineRound },
+  { path: '/schedule',      titleKey: 'nav.schedule',      icon: Calendar },
 ]
 
 const settingsPath = '/settings'

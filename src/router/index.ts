@@ -11,17 +11,11 @@ import { createRouter, createWebHashHistory, RouteRecordRaw } from 'vue-router';
 
 const routes: RouteRecordRaw[] = [
   {
+    // v4.5: 主页直接是 Chat,不再经过 Dashboard。
+    // 符合 ChatGPT / Claude / Cursor / WorkBuddy 等现代 AI 客户端惯例:
+    // 打开就是对话框,无需多余点击。
     path: '/',
-    redirect: '/dashboard'
-  },
-  {
-    path: '/dashboard',
-    name: 'Dashboard',
-    component: () => import('@/views/Dashboard.vue'),
-    meta: {
-      title: '首页',
-      icon: 'HomeFilled'
-    }
+    redirect: '/chat'
   },
   {
     path: '/chat',
@@ -167,10 +161,10 @@ const router = createRouter({
 // devOnly 路由:生产构建不导出 + 导航守卫拦截
 const isDev = (import.meta as { env?: { DEV?: boolean } })?.env?.DEV
 if (!isDev) {
-  // 生产模式:把 devOnly 路由重定向到首页,避免用户通过 URL 访问
+  // 生产模式:把 devOnly 路由重定向到主页 /chat(原本 /dashboard 已删除)
   router.beforeEach((to, _from, next) => {
     if (to.meta?.devOnly) {
-      next('/dashboard')
+      next('/chat')
     } else {
       next()
     }
@@ -185,5 +179,38 @@ router.beforeEach((to, _, next) => {
   }
   next();
 });
+
+// 大厂做法: 空闲时预载高频路由 chunk,减少路由切换白屏。
+// 使用字面量动态 import 复用 routes 中相同的 chunk(基于模块路径去重)。
+const PREFETCH_VIEWS = [
+  () => import('@/views/Chat.vue'),
+  () => import('@/views/SkillsView.vue'),
+  () => import('@/views/Models.vue'),
+  () => import('@/views/Settings.vue'),
+  () => import('@/views/ImManagement.vue'),
+  () => import('@/views/ClawHub.vue'),
+];
+
+/**
+ * 应用启动后空闲预载高频路由。建议 App 根 mounted 后调用。
+ * requestIdleCallback 在浏览器空闲时预载,避免与首屏渲染争抢资源;
+ * 不支持时降级为 setTimeout 3s。
+ */
+export function prefetchRoutes() {
+  if (typeof window === 'undefined') return;
+  const run = () => {
+    PREFETCH_VIEWS.forEach((load) => {
+      try { void load(); } catch { /* ignore */ }
+    });
+  };
+  const w = window as unknown as {
+    requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => void;
+  };
+  if (typeof w.requestIdleCallback === 'function') {
+    w.requestIdleCallback(run, { timeout: 4000 });
+  } else {
+    window.setTimeout(run, 3000);
+  }
+}
 
 export default router;

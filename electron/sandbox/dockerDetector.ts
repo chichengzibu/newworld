@@ -53,11 +53,10 @@ export class DockerDetector {
     const platform = os.platform() as NodeJS.Platform
     const result: DockerDetectResult = { status: 'unsupported', platform }
 
-    if (platform === 'win32') {
-      result.status = 'unsupported'
-      result.error = 'Windows 平台 W9 暂不实装,W10+ 评估'
-      return result
-    }
+    // 注意:早期版本在此对 win32 直接返回 unsupported(W9 占位),
+    // 这会导致 Windows 上"启动沙箱"永远探测不到 Docker Desktop。
+    // 现统一走 docker --version 探测:Windows 装了 Docker Desktop 即可正常识别。
+    // 鸿蒙 PC 既无 docker 也无 docker desktop,探测会自然落到 not-installed / 后续降级。
 
     let version: string
     try {

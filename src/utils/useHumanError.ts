@@ -11,7 +11,8 @@
  *   // 或带跳转按钮 (路由)
  *   showErrorWithRoute(e, '/models', '去配置模型')
  */
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from "element-plus/es/components/message/index"
+import { ElMessageBox } from "element-plus/es/components/message-box/index"
 import { humanizeError, type HumanizedError } from './humanizeError'
 
 export interface ShowErrorOpts {

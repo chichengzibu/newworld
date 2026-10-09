@@ -3,8 +3,9 @@
  */
 
 import * as fs from 'fs';
+import { getHost } from '../platform/runtime'
 import * as path from 'path';
-import { app } from 'electron';
+
 import { LogManager } from '../core/LogManager';
 import { ConfigStore } from '../core/ConfigStore';
 import { PermissionManager } from '../permissions/PermissionManager';
@@ -20,7 +21,7 @@ export class SkillManager {
 
   /** W7.0.4: 路径单点 — 其它模块应使用这个而非自己 join(userData,'skills') */
   public static getSkillsDir(): string {
-    const userDataPath = app.getPath('userData');
+    const userDataPath = getHost().getPath('userData');
     const dir = path.join(userDataPath, 'skills');
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });

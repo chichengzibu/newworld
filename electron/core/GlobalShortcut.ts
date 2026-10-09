@@ -10,6 +10,7 @@
 import { globalShortcut, BrowserWindow } from 'electron';
 import { LogManager } from './LogManager';
 import { ConfigStore } from './ConfigStore';
+import { isOhos } from '../platform/detect';
 // ============ W5.3 added (additive,不改既有 import) ============
 import { handleD1Shortcut } from '../skill/builtin/D1ScreenshotQA';
 
@@ -40,6 +41,12 @@ export class GlobalShortcut {
    * 注册所有默认快捷键
    */
   public registerAll(): void {
+    // 鸿蒙 PC 无全局快捷键能力,降级跳过(不阻断启动)
+    if (isOhos()) {
+      this.log.warn('[GlobalShortcut] 鸿蒙 PC 无全局快捷键,降级跳过');
+      return;
+    }
+
     this.log.info('[GlobalShortcut] 注册全局快捷键...');
 
     const config = this.getShortcutConfig();
@@ -230,6 +237,11 @@ export class GlobalShortcut {
 // ============ W5.3 新增:D1 截屏问答快捷键 (additive,不改既有快捷键) ============
 export function registerD1ScreenshotShortcut(): boolean {
   try {
+    // 鸿蒙 PC 无全局快捷键能力,跳过注册
+    if (isOhos()) {
+      LogManager.getInstance().warn('[GlobalShortcut][D1] 鸿蒙 PC 无全局快捷键,跳过注册');
+      return false;
+    }
     const accelerator = 'CommandOrControl+Shift+S'
     if (globalShortcut.isRegistered(accelerator)) {
       globalShortcut.unregister(accelerator);

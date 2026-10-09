@@ -7,10 +7,11 @@
  */
 
 import { LogManager } from '../core/LogManager'
+import { getHost } from '../platform/runtime'
 import { EventBus } from '../runtime/bridge/EventBus'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
-import { app } from 'electron'
+
 import { randomUUID } from 'node:crypto'
 
 export interface UsageEntry {
@@ -45,7 +46,7 @@ export class CostTracker {
   private storePath: string
 
   private constructor() {
-    this.storePath = path.join(app.getPath('userData'), 'cost-log.json')
+    this.storePath = path.join(getHost().getPath('userData'), 'cost-log.json')
     this.loadFromDisk()
     this.seedDefaultPricing()
   }

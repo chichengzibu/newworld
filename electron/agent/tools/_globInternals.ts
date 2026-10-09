@@ -4,11 +4,12 @@
  * Glob / Grep 工具共享的辅助函数: 安全 cwd 解析 + glob 段正则.
  */
 import * as fs from 'node:fs/promises'
+import { getHost } from '../../platform/runtime'
 import * as path from 'node:path'
-import { app } from 'electron'
+
 
 export function resolveSafeCwd(input: string | undefined): string {
-  const userData = app.getPath('userData')
+  const userData = getHost().getPath('userData')
   const sandboxRoot = path.join(userData, 'sandbox')
   const workspaceRoot = path.join(userData, 'workspace')
   const roots = [sandboxRoot, workspaceRoot]

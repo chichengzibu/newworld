@@ -42,7 +42,6 @@ export default {
   },
   nav: {
     home: 'Home',
-    dashboard: 'Dashboard',
     chat: 'AI Chat',
     tasks: 'Automation Tasks',
     schedule: 'Schedule',
