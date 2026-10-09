@@ -3,11 +3,16 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
 import { nextTick } from 'vue'
 
-// Mock element-plus 的静态方法(ElMessage / ElMessageBox)
-vi.mock('element-plus', () => ({
-  ElMessage: { success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() },
-  ElMessageBox: { confirm: vi.fn().mockResolvedValue('confirm') },
+// Mock element-plus 静态方法(ElMessage / ElMessageBox)。
+// 视图从 element-plus 子路径取用(src/views/Settings.vue:565-566),
+// vi.hoisted 共享同一对象,保证主模块与子路径 spy 一致生效
+const { ElMessageMock, ElMessageBoxMock } = vi.hoisted(() => ({
+  ElMessageMock: { success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() },
+  ElMessageBoxMock: { confirm: vi.fn().mockResolvedValue('confirm') },
 }))
+vi.mock('element-plus', () => ({ ElMessage: ElMessageMock, ElMessageBox: ElMessageBoxMock }))
+vi.mock('element-plus/es/components/message/index', () => ({ ElMessage: ElMessageMock }))
+vi.mock('element-plus/es/components/message-box/index', () => ({ ElMessageBox: ElMessageBoxMock }))
 
 // electronAPI mock + store import 之前必须就绪
 const { api } = vi.hoisted(() => {
@@ -236,10 +241,11 @@ describe('Settings.vue', () => {
     const wrapper = mountComponent()
     await flushPromises()
     const vm: any = wrapper.vm
-    expect(vm.getProviderIcon('openai')).toBe('🤖')
-    expect(vm.getProviderIcon('anthropic')).toBe('🧠')
-    expect(vm.getProviderIcon('volc_ark')).toBe('🌋')
-    expect(vm.getProviderIcon('zzz')).toBe('📦')
+    // 图标自迁移起为 element-plus 组件名(MagicStick 等),非旧版 emoji
+    expect(vm.getProviderIcon('openai')).toBe('MagicStick')
+    expect(vm.getProviderIcon('anthropic')).toBe('Memo')
+    expect(vm.getProviderIcon('volc_ark')).toBe('Lightning')
+    expect(vm.getProviderIcon('zzz')).toBe('Box')
     expect(vm.getProviderTypeName('openai')).toBe('OpenAI')
     expect(vm.getProviderTypeName('anthropic')).toBe('Anthropic Claude')
     wrapper.unmount()

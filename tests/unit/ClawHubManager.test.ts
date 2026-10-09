@@ -21,7 +21,9 @@ vi.mock('electron-log', () => ({
 
 import { ClawHubManager } from '../../electron/skill/ClawHubManager'
 
-const TEST_USER_DATA = '/tmp/pipiclaw-clawhub-test'
+// 持久化断言必须用 TestHost 的真实目录(见 tests/unit/electron-setup.ts 注释:
+// 此处 vi.mock('electron') 因陈旧绑定不生效,硬编码假路径清不到真目录)
+import { TEST_USER_DATA } from './test-host'
 
 describe('P1-03: ClawHubManager.publish', () => {
   beforeEach(() => {

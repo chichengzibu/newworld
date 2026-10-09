@@ -46,6 +46,14 @@ function copyMcpBinPlugin() {
 }
 
 export default defineConfig({
+  // 鸿蒙 PC 适配:相对 base 避免 HAP 包内资源根路径错乱导致白屏。
+  // 对 win/mac/linux 同样安全(资源按相对路径加载)。
+  base: './',
+  // 注入构建信息,供 DevPanel / 关于页展示 (大厂可观测性: 构建产物可追溯)
+  define: {
+    __APP_VERSION__: JSON.stringify((process.env as Record<string, string>).npm_package_version || 'dev'),
+    __BUILD_TIME__: JSON.stringify(new Date().toLocaleString('zh-CN')),
+  },
   // E2E-Bugfix: 让浏览器 fetch /ollama/* 代理到 localhost:11434, 绕过 CORS
   server: {
     proxy: {
@@ -61,6 +69,13 @@ export default defineConfig({
     copyMcpBinPlugin(),
     // P1-6: Element Plus 组件按需自动导入 — 替代全量 app.use(ElementPlus)
     // 期望效果: vendor-element-plus chunk 915KB → < 300KB
+    // P1-6: Element Plus 组件按需自动导入 — 替代全量 app.use(ElementPlus)
+    // 期望效果: vendor-element-plus chunk 按需,首屏不拉全库
+    // 注意: 不能把 .vue 放进 exclude(无论是 /\.vue$/ 还是 /\.vue\?vue/),
+    // 否则 unplugin 的 transform 跳过 .vue 文件, ElementPlusResolver 不注入 import。
+    // 只排除样式/非模板资源即可。
+    // 回归防护: scripts/build-report.mjs 会扫描产物残留的裸 el-* 组件名字符串,
+    // 一旦 ElementPlusResolver 失效(误改 exclude / 误删 resolvers)即中断构建。
     Components({
       resolvers: [
         ElementPlusResolver({
@@ -69,7 +84,7 @@ export default defineConfig({
       ],
       dirs: ['src/components', 'src/views'],
       extensions: ['vue'],
-      exclude: [/\.[jt]sx?$/, /\.vue$/, /\.vue\?vue/, /\.scss$/],
+      exclude: [/\.(scss|sass|less|css)$/],
       dts: false,
     }),
     electron([
@@ -131,18 +146,27 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
+    // 提速: 跳过 gzip/brotli 压缩体积计算(仅影响日志,不影响产物)
+    reportCompressedSize: false,
+    // 现代语法目标,esbuild 产出更小更快
+    target: 'es2020',
+    chunkSizeWarningLimit: 1500,
+    cssCodeSplit: true,
     rollupOptions: {
       output: {
-        // P1-6: 手动分 chunk
-        // 重要: element-plus 已由 unplugin-vue-components 自动按需导入,
-        // 让 rollup 自然分块到各路由 (而不是强制合并成 vendor-element-plus)
+        // 性能优化 (v4.5): 显式分块,让首屏只加载必要代码
+        // - vendor-framework: vue/pinia/vue-router (小,优先加载)
+        // - vendor-element-plus: element-plus 按需后的组件 (独立 chunk,可并行)
+        // - 其余 node_modules (marked/highlight.js 等) 自然合并
         manualChunks(id) {
           if (id.includes('node_modules')) {
+            if (id.includes('element-plus') || id.includes('@element-plus')) {
+              return 'vendor-element-plus';
+            }
             if (id.includes('vue') || id.includes('pinia') || id.includes('@vue') || id.includes('vue-router')) {
               return 'vendor-framework';
             }
-            // marked / highlight.js / element-plus / 其余: 自然分块
-            return undefined;
+            return 'vendor';
           }
           return undefined;
         },

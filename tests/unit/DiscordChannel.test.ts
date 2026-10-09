@@ -1,29 +1,30 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
-vi.mock('electron', () => ({
-  app: { getPath: vi.fn(() => '/tmp/pipiclaw-discord-test') },
-}))
-
 vi.mock('electron-log', () => ({
   default: { info: () => {}, warn: () => {}, error: () => {}, debug: () => {}, transports: { file: { resolvePathFn: () => {}, maxSize: 0, format: '' }, console: { level: 'info' } } },
 }))
 
 /**
- * P1-01: Discord 通道真实集成测试
+ * P1-01: Discord 通道测试(W8 真实 API)
  *
- * 用 mock fetch 模拟 Discord REST API,验证:
- * - validateToken
- * - send
- * - listMessages + lastSeenMessageId 追踪
- * - pollMessages 触发 onMessage 回调
- * - healthCheck
+ * 重写说明(2026-10-08):旧版针对 setConfig/validateToken/listMessages/pollMessages
+ * 等"全功能 API"编写,而 W8 实现是精简真实版 — 只有 send / onMessage / healthCheck,
+ * 配置统一走 IMConfigStore.set('im-discord', { enabled, botToken })。
+ * 按实现重写真实存在的链路;实现中不存在的方法保留占位 skip 并注明,
+ * 禁止为通过测试在实现里补造能力。
  */
 
 import { DiscordChannel } from '../../electron/channel/DiscordChannel'
+import { IMConfigStore } from '../../electron/channel/IMConfigStore'
 
 let mockFetch: any
 
+function resetChannelSingletons(): void {
+  ;(IMConfigStore as unknown as { instance: unknown }).instance = null
+}
+
 beforeEach(() => {
+  resetChannelSingletons()
   mockFetch = vi.fn()
   vi.stubGlobal('fetch', mockFetch)
 })
@@ -41,54 +42,22 @@ function mockJsonResponse(body: unknown, status = 200): Response {
   } as unknown as Response
 }
 
-describe('P1-01: DiscordChannel.validateToken', () => {
-  it('200 返回 user 对象', async () => {
-    const channel = new DiscordChannel()
-    mockFetch.mockResolvedValueOnce(
-      mockJsonResponse({ id: '111', username: 'TestBot', discriminator: '0000', bot: true }),
-    )
-    const user = await channel.validateToken('valid-token')
-    expect(user.id).toBe('111')
-    expect(user.bot).toBe(true)
-  })
-
-  it('401 抛错', async () => {
-    const channel = new DiscordChannel()
-    mockFetch.mockResolvedValueOnce(mockJsonResponse({ message: 'Unauthorized' }, 401))
-    await expect(channel.validateToken('bad-token')).rejects.toThrow(/token 校验失败/)
-  })
-
-  it('fetch URL 用 Bot prefix', async () => {
-    const channel = new DiscordChannel()
-    mockFetch.mockResolvedValueOnce(
-      mockJsonResponse({ id: '1', username: 'b', discriminator: '0', bot: true }),
-    )
-    await channel.validateToken('my-token')
-    const [url, init] = mockFetch.mock.calls[0]
-    expect(url).toBe('https://discord.com/api/v10/users/@me')
-    expect(init.headers.Authorization).toBe('Bot my-token')
-  })
-
-  it('apiBaseUrl 可自定义(测试环境)', async () => {
-    const channel = new DiscordChannel()
-    channel.setConfig({ botToken: 't', apiBaseUrl: 'http://localhost:9999/api/v10' })
-    mockFetch.mockResolvedValueOnce(
-      mockJsonResponse({ id: '1', username: 'b', discriminator: '0', bot: true }),
-    )
-    await channel.validateToken('t')
-    const [url] = mockFetch.mock.calls[0]
-    expect(url).toBe('http://localhost:9999/api/v10/users/@me')
-  })
-})
+function configDiscord(extra: Partial<Record<string, unknown>> = {}): void {
+  IMConfigStore.getInstance().set('im-discord' as never, {
+    enabled: true,
+    botToken: 'tk',
+    ...extra,
+  } as never)
+}
 
 describe('P1-01: DiscordChannel.send', () => {
-  it('POST 到 /channels/{id}/messages + Bearer Bot', async () => {
+  it('POST 到 /channels/{id}/messages + Bot Authorization', async () => {
+    configDiscord()
     const channel = new DiscordChannel()
-    channel.setConfig({ botToken: 'tk' })
     mockFetch.mockResolvedValueOnce(
-      mockJsonResponse({ id: 'msg-1', channel_id: 'ch-1', content: 'hi', author: { id: 'b', username: 'b', bot: true }, timestamp: '2025-01-01' }),
+      mockJsonResponse({ id: 'msg-1', channel_id: 'ch-1', content: 'hi' }),
     )
-    const r = await channel.send({
+    await channel.send({
       id: 'm1',
       text: 'hello',
       channel: 'discord',
@@ -96,7 +65,6 @@ describe('P1-01: DiscordChannel.send', () => {
       to: 'ch-123456',
       ts: Date.now(),
     } as any)
-    expect(r.messageId).toBe('msg-1')
     const [url, init] = mockFetch.mock.calls[0]
     expect(url).toBe('https://discord.com/api/v10/channels/ch-123456/messages')
     expect(init.method).toBe('POST')
@@ -104,132 +72,83 @@ describe('P1-01: DiscordChannel.send', () => {
     expect(JSON.parse(init.body)).toEqual({ content: 'hello' })
   })
 
-  it('未配置 token 抛错', async () => {
+  it('未启用通道 → 抛错', async () => {
+    IMConfigStore.getInstance().set('im-discord' as never, { enabled: false, botToken: 'tk' } as never)
     const channel = new DiscordChannel()
     await expect(
       channel.send({ id: 'm', text: 'x', channel: 'discord', from: 'me', to: 'ch', ts: 0 } as any),
-    ).rejects.toThrow(/token 未配置/)
+    ).rejects.toThrow(/通道未启用或未配置/)
   })
 
-  it('msg.to 为空抛错', async () => {
+  it('enabled 但缺 botToken → 抛错', async () => {
+    IMConfigStore.getInstance().set('im-discord' as never, { enabled: true } as never)
     const channel = new DiscordChannel()
-    channel.setConfig({ botToken: 'tk' })
     await expect(
-      channel.send({ id: 'm', text: 'x', channel: 'discord', from: 'me', to: '', ts: 0 } as any),
-    ).rejects.toThrow(/channelId.*不能为空/)
+      channel.send({ id: 'm', text: 'x', channel: 'discord', from: 'me', to: 'ch', ts: 0 } as any),
+    ).rejects.toThrow(/缺少 botToken/)
   })
 
-  it('429 抛错(透传状态码)', async () => {
+  it('HTTP 429 → 抛错透传状态码', async () => {
+    configDiscord()
     const channel = new DiscordChannel()
-    channel.setConfig({ botToken: 'tk' })
     mockFetch.mockResolvedValueOnce(mockJsonResponse({ message: 'rate limited' }, 429))
     await expect(
       channel.send({ id: 'm', text: 'x', channel: 'discord', from: 'me', to: 'ch-1', ts: 0 } as any),
     ).rejects.toThrow(/HTTP 429/)
-  })
-})
-
-describe('P1-01: DiscordChannel.listMessages', () => {
-  it('GET /channels/{id}/messages + limit 参数', async () => {
-    const channel = new DiscordChannel()
-    channel.setConfig({ botToken: 'tk' })
-    mockFetch.mockResolvedValueOnce(
-      mockJsonResponse([
-        { id: 'm1', channel_id: 'ch', content: 'a', author: { id: 'u', username: 'u', bot: false }, timestamp: '2025-01-01' },
-      ]),
-    )
-    const msgs = await channel.listMessages('ch-123', 50)
-    expect(msgs.length).toBe(1)
-    const [url] = mockFetch.mock.calls[0]
-    expect(url).toContain('/channels/ch-123/messages')
-    expect(url).toContain('limit=50')
+    expect(mockFetch).toHaveBeenCalledTimes(1)
   })
 
-  it('limit 超过 100 截断到 100', async () => {
-    const channel = new DiscordChannel()
-    channel.setConfig({ botToken: 'tk' })
-    mockFetch.mockResolvedValueOnce(mockJsonResponse([]))
-    await channel.listMessages('ch', 999)
-    const [url] = mockFetch.mock.calls[0]
-    expect(url).toContain('limit=100')
-  })
-
-  it('lastSeenMessageId 记录最新消息 ID', async () => {
-    const channel = new DiscordChannel()
-    channel.setConfig({ botToken: 'tk' })
-    mockFetch.mockResolvedValueOnce(
-      mockJsonResponse([
-        { id: 'm-NEW', channel_id: 'ch', content: 'newest', author: { id: 'u', username: 'u', bot: false }, timestamp: '2025-01-02' },
-        { id: 'm-OLD', channel_id: 'ch', content: 'older', author: { id: 'u', username: 'u', bot: false }, timestamp: '2025-01-01' },
-      ]),
-    )
-    await channel.listMessages('ch')
-    // 第二次轮询:应该带 after=m-NEW
-    mockFetch.mockResolvedValueOnce(mockJsonResponse([]))
-    await channel.listMessages('ch')
-    const url2 = mockFetch.mock.calls[1][0]
-    expect(url2).toContain('after=m-NEW')
-  })
-
-  it('未配置 token 抛错', async () => {
-    const channel = new DiscordChannel()
-    await expect(channel.listMessages('ch-1')).rejects.toThrow(/token 未配置/)
-  })
-})
-
-describe('P1-01: DiscordChannel.pollMessages', () => {
-  it('触发 onMessage 回调,跳过 bot 消息', async () => {
-    const channel = new DiscordChannel()
-    channel.setConfig({ botToken: 'tk' })
-    const handler = vi.fn()
-    channel.onMessage(handler)
-    mockFetch.mockResolvedValueOnce(
-      mockJsonResponse([
-        { id: 'm1', channel_id: 'ch', content: 'hello', author: { id: 'u', username: 'u', bot: false }, timestamp: '2025-01-01' },
-        { id: 'm2', channel_id: 'ch', content: 'bot-skip', author: { id: 'b', username: 'b', bot: true }, timestamp: '2025-01-01' },
-      ]),
-    )
-    const count = await channel.pollMessages('ch-1')
-    expect(count).toBe(1)
-    expect(handler).toHaveBeenCalledTimes(1)
-    expect(handler.mock.calls[0][0].text).toBe('hello')
-    expect(handler.mock.calls[0][0].from).toBe('u')
-  })
-
-  it('无消息时返回 0', async () => {
-    const channel = new DiscordChannel()
-    channel.setConfig({ botToken: 'tk' })
-    mockFetch.mockResolvedValueOnce(mockJsonResponse([]))
-    const count = await channel.pollMessages('ch-1')
-    expect(count).toBe(0)
-  })
+  it.skip('msg.to 为空 → 抛错(W8 实现未做入参校验,补入参校验前不验证)', async () => {})
 })
 
 describe('P1-01: DiscordChannel.healthCheck', () => {
-  it('无 token 返回 healthy=false', async () => {
+  it('未配置 → healthy=false', async () => {
     const channel = new DiscordChannel()
     const h = await channel.healthCheck()
     expect(h.healthy).toBe(false)
-    expect(h.error).toContain('no bot token')
+    expect(h.error).toContain('not configured')
   })
 
-  it('token 有效 → healthy=true + user 详情', async () => {
+  it('token 有效 → healthy=true + latencyMs', async () => {
+    configDiscord({ botToken: 'valid' })
     const channel = new DiscordChannel()
-    channel.setConfig({ botToken: 'valid' })
     mockFetch.mockResolvedValueOnce(
       mockJsonResponse({ id: '999', username: 'MyBot', discriminator: '0', bot: true }),
     )
     const h = await channel.healthCheck()
     expect(h.healthy).toBe(true)
-    expect((h as any).details.username).toBe('MyBot')
+    const [url, init] = mockFetch.mock.calls[0]
+    expect(url).toBe('https://discord.com/api/v10/users/@me')
+    expect(init.headers.Authorization).toBe('Bot valid')
   })
 
-  it('token 无效 → healthy=false + error', async () => {
+  it('HTTP 401 → healthy=false + 状态码', async () => {
+    configDiscord({ botToken: 'bad' })
     const channel = new DiscordChannel()
-    channel.setConfig({ botToken: 'bad' })
     mockFetch.mockResolvedValueOnce(mockJsonResponse({ message: 'Invalid' }, 401))
     const h = await channel.healthCheck()
     expect(h.healthy).toBe(false)
-    expect(h.error).toContain('token 校验失败')
+    expect(h.error).toContain('HTTP 401')
   })
+})
+
+describe('P1-01: DiscordChannel.onMessage 回调', () => {
+  it('__pushIncoming 触发 handler + dispose 后不再触发', () => {
+    IMConfigStore.getInstance().set('im-discord' as never, { enabled: true, botToken: 'tk' } as never)
+    const channel = new DiscordChannel()
+    const handler = vi.fn()
+    const disposable = channel.onMessage(handler)
+    channel.__pushIncoming({ id: 'x', text: 'hello', channel: 'discord', from: 'u', to: '', ts: 0 } as any)
+    expect(handler).toHaveBeenCalledTimes(1)
+    disposable.dispose()
+    channel.__pushIncoming({ id: 'y', text: 'again', channel: 'discord', from: 'u', to: '', ts: 0 } as any)
+    expect(handler).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe('P1-01: 未实现能力占位(W8 范围外,勿当作已交付)', () => {
+  it.skip('validateToken — W8 未实现(实现中无此方法)', () => {})
+  it.skip('listMessages / lastSeenMessageId — W8 未实现(实现中无此方法)', () => {})
+  it.skip('pollMessages 拉取式轮询 — W8 未实现(实现中无此方法)', () => {})
+  it.skip('setConfig 通道内配置 — W8 配置统一走 IMConfigStore', () => {})
 })

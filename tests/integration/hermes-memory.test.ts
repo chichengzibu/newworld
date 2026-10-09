@@ -24,8 +24,11 @@ vi.mock('electron-log', () => ({
  */
 
 import { HermesMemory } from '../../electron/hermes/HermesMemory'
+import { getHost } from '../../electron/platform/runtime'
 
-const TEST_USER_DATA = '/tmp/pipiclaw-hermes-test'
+// 实现走 getHost().getPath('userData'),以 TestHost 真实值为准
+// (文件内 electron mock 因陈旧绑定不生效,见 tests/unit/electron-setup.ts 注释)
+const TEST_USER_DATA = getHost().getPath('userData')
 
 describe('P2-T2.1/T2.4: Hermes memory store / recall / prompt', () => {
   beforeEach(() => {

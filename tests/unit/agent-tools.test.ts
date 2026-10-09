@@ -4,27 +4,19 @@
  * 覆盖: Read / Edit / Bash / Glob / Grep
  * 策略: 用 os.tmpdir() 下建真目录, 然后在 beforeAll 用 vi.spyOn(app, 'getPath') 把 userData 指到那.
  */
-import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import * as fs from 'node:fs/promises'
 import * as fsSync from 'node:fs'
 import * as path from 'node:path'
-import * as os from 'node:os'
-import { app } from 'electron'
 
-// 真实测试根目录, 避免污染项目目录
-const TEST_ROOT = fsSync.mkdtempSync(path.join(os.tmpdir(), 'agent-tools-test-'))
+// 真实测试根目录 = TestHost 指向的共享目录(getHost().getPath('userData') 与此一致,
+// 见 tests/unit/electron-setup.ts)。旧版在此 vi.spyOn(app,'getPath') 指向 mkdtemp
+// 随机目录,该 spy 因模块陈旧绑定不生效,工具实际落到真 userData,测试文件却在
+// 假目录里找文件,Read/Edit/Glob 全挂。
+import { TEST_USER_DATA } from './test-host'
+const TEST_ROOT = TEST_USER_DATA
 const SANDBOX_DIR = path.join(TEST_ROOT, 'sandbox')
 const WORKSPACE_DIR = path.join(TEST_ROOT, 'workspace')
-fsSync.mkdirSync(SANDBOX_DIR, { recursive: true })
-fsSync.mkdirSync(WORKSPACE_DIR, { recursive: true })
-
-beforeAll(() => {
-  // 强制 app.getPath('userData') 返 TEST_ROOT (覆盖 electron-setup.ts 的默认 mock)
-  vi.spyOn(app, 'getPath').mockImplementation((k: string) => {
-    if (k === 'userData') return TEST_ROOT
-    return TEST_ROOT
-  })
-})
 
 import { ReadTool, ReadToolMetadata } from '../../electron/agent/tools/ReadTool'
 import { EditTool, EditToolMetadata } from '../../electron/agent/tools/EditTool'

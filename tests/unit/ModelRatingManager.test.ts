@@ -21,7 +21,8 @@ vi.mock('electron-log', () => ({
 
 import { ModelRatingManager } from '../../electron/models/ModelRatingManager'
 
-const TEST_USER_DATA = '/tmp/pipiclaw-modelrate-test'
+// 路径以 TestHost 真实值为准(实现走 getHost().getPath('userData'))
+import { TEST_USER_DATA } from './test-host'
 
 describe('P1-08: ModelRatingManager', () => {
   beforeEach(() => {

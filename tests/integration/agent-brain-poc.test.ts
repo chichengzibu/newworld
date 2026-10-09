@@ -12,33 +12,29 @@
  *
  * 真链路 (Ollama 11434) 端到端留给 scripts/agent-tool-call-poc.mjs (在 dist-electron 跑)
  */
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
-import { app } from 'electron'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import * as fsSync from 'node:fs'
-import * as fs from 'node:fs/promises'
 import * as path from 'node:path'
-import * as os from 'node:os'
 
-// 真实测试根目录, 避免污染项目目录
-const TEST_ROOT = fsSync.mkdtempSync(path.join(os.tmpdir(), 'agent-brain-poc-'))
+// 路径必须与实现一致:工具走 getHost().getPath('userData') → TestHost 目录。
+// 旧版此处 mkdtemp + vi.spyOn(app,'getPath') 因模块陈旧绑定不生效,
+// 工具落到真 userData、测试在假目录找文件,全挂。
+// 注:setup 在每用例前清空该共享目录,种子文件须在 beforeEach 重播种。
+import { TEST_USER_DATA } from '../unit/test-host'
+const TEST_ROOT = TEST_USER_DATA
 const SANDBOX_DIR = path.join(TEST_ROOT, 'sandbox')
 const WORKSPACE_DIR = path.join(TEST_ROOT, 'workspace')
-fsSync.mkdirSync(SANDBOX_DIR, { recursive: true })
-fsSync.mkdirSync(WORKSPACE_DIR, { recursive: true })
-// 准备测试文件 (5 工具真调用能跑通)
-fsSync.writeFileSync(path.join(SANDBOX_DIR, 'hello.txt'), 'PiPiClaw is great\n', 'utf-8')
-fsSync.writeFileSync(path.join(SANDBOX_DIR, 'app.ts'), 'export const version = "1.0"\n', 'utf-8')
-fsSync.writeFileSync(path.join(SANDBOX_DIR, 'readme.md'), '# Notes\nversion 1.0 draft\n', 'utf-8')
 
-beforeAll(() => {
-  vi.spyOn(app, 'getPath').mockImplementation((k: string) => {
-    if (k === 'userData') return TEST_ROOT
-    return TEST_ROOT
-  })
-})
+function seedSandboxFiles(): void {
+  fsSync.mkdirSync(SANDBOX_DIR, { recursive: true })
+  fsSync.mkdirSync(WORKSPACE_DIR, { recursive: true })
+  fsSync.writeFileSync(path.join(SANDBOX_DIR, 'hello.txt'), 'PiPiClaw is great\n', 'utf-8')
+  fsSync.writeFileSync(path.join(SANDBOX_DIR, 'app.ts'), 'export const version = "1.0"\n', 'utf-8')
+  fsSync.writeFileSync(path.join(SANDBOX_DIR, 'readme.md'), '# Notes\nversion 1.0 draft\n', 'utf-8')
+}
 
-afterAll(async () => {
-  await fs.rm(TEST_ROOT, { recursive: true, force: true })
+beforeEach(() => {
+  seedSandboxFiles()
 })
 
 import { LlmAgentBrain, LlmAgentBrainEvents, type LlmAgentEvent } from '../../electron/agent/LlmAgentBrain'

@@ -17,8 +17,11 @@ vi.mock('electron-log', () => ({
  */
 
 import { CrashReportCollector } from '../../electron/insight/CrashReport'
+import { getHost } from '../../electron/platform/runtime'
 
-const TEST_USER_DATA = '/tmp/pipiclaw-crash-test'
+// 实现走 getHost():路径与版本均取 TestHost 真实值(文件内 electron mock
+// 因陈旧绑定不生效,见 tests/unit/electron-setup.ts 注释)。
+const TEST_USER_DATA = getHost().getPath('userData')
 const REPORTS_DIR = path.join(TEST_USER_DATA, 'crash-reports')
 
 describe('P5-T5.4: CrashReportCollector', () => {
@@ -53,7 +56,7 @@ describe('P5-T5.4: CrashReportCollector', () => {
     expect(data!.type).toBe('unhandledRejection')
     expect(data!.error.message).toBe('rejected promise')
     expect(data!.error.name).toBe('Error')
-    expect(data!.appVersion).toBe('3.1.0')
+    expect(data!.appVersion).toBe(getHost().getVersion())
     expect(data!.platform).toBeTruthy()
     expect(data!.arch).toBeTruthy()
     expect(data!.nodeVersion).toBeTruthy()

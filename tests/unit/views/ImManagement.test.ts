@@ -2,14 +2,15 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 
-vi.mock('element-plus', () => ({
-  ElMessage: { success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() },
-  ElMessageBox: { confirm: vi.fn().mockResolvedValue('confirm') },
+// 视图从子路径取 ElMessage/ElMessageBox
+// (src/views/ImManagement.vue:343-344),vi.hoisted 共享同一对象保证 spy 生效
+const { ElMessageMock, ElMessageBoxMock } = vi.hoisted(() => ({
+  ElMessageMock: { success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() },
+  ElMessageBoxMock: { confirm: vi.fn().mockResolvedValue('confirm') },
 }))
-
-vi.mock('@element-plus/icons-vue', () => ({
-  Plus: { template: '<span>+</span>' },
-}))
+vi.mock('element-plus', () => ({ ElMessage: ElMessageMock, ElMessageBox: ElMessageBoxMock }))
+vi.mock('element-plus/es/components/message/index', () => ({ ElMessage: ElMessageMock }))
+vi.mock('element-plus/es/components/message-box/index', () => ({ ElMessageBox: ElMessageBoxMock }))
 
 /**
  * P0-01: IM 管理 UI — 配置面板

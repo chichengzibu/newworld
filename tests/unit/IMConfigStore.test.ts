@@ -26,7 +26,8 @@ vi.mock('electron-log', () => ({
 
 import { IMConfigStore } from '../../electron/channel/IMConfigStore'
 
-const TEST_USER_DATA = '/tmp/pipiclaw-imconfig-test'
+// 持久化断言必须用 TestHost 的真实目录(旧硬编码假路径与 getHost() 落盘目录不一致)
+import { TEST_USER_DATA } from './test-host'
 
 describe('P0-01: IMConfigStore 通道配置存储', () => {
   beforeEach(() => {

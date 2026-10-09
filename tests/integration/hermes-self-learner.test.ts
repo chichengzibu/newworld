@@ -31,12 +31,14 @@ vi.mock('electron-log', () => ({
 
 import { SelfLearner } from '../../electron/learning/SelfLearner'
 import { SkillLoader } from '../../electron/skill/SkillLoader'
+import { getHost } from '../../electron/platform/runtime'
 import type { SkillProposal } from '../../electron/learning/SelfLearner'
 
-const TEST_USER_DATA = '/tmp/pipiclaw-selflearner-test'
-// SelfLearner.saveSkillFromProposal 写入 path.join(getAppPath(), '..', 'skills')
-// + SkillManager.getSkillsDir() = path.join(getPath('userData'), 'skills')
-// mock 让两者解析到同一目录:/tmp/pipiclaw-selflearner-test/skills
+// 实现走 getHost(),以 TestHost 真实值为准(文件内 electron mock
+// 因陈旧绑定不生效,见 tests/unit/electron-setup.ts 注释)
+const TEST_USER_DATA = getHost().getPath('userData')
+// SelfLearner.saveSkillFromProposal 写入 path.join(getPath('userData'), 'hermes-learning')
+// 等子目录下的 skill — 统一以 TEST_USER_DATA 为根断言
 const SKILLS_DIR = path.join(TEST_USER_DATA, 'skills')
 
 describe('P2-T2.1: SelfLearner observeExecution records patterns', () => {

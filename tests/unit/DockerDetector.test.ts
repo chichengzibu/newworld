@@ -40,13 +40,16 @@ describe('DockerDetector', () => {
     ]).toContain(r.status)
   })
 
-  it('detect on win32 returns unsupported', async () => {
+  it('detect on win32 识别 Docker Desktop(不再是 W9 占位 unsupported)', async () => {
+    // 实现说明(dockerDetector.ts:56-59):早期对 win32 直接返回 unsupported,
+    // 导致 Windows 上装了 Docker Desktop 也识别不到;现已统一走 docker --version 探测。
+    // 本用例改为验证 win32 不再被强制判为 unsupported,并给出 Windows 安装地址。
     const original = process.platform
     Object.defineProperty(process, 'platform', { value: 'win32' })
     try {
       const r = await detector.detect()
-      expect(r.status).toBe('unsupported')
-      expect(r.error).toMatch(/Windows/)
+      expect(r.status).not.toBe('unsupported')
+      expect(r.installUrl ?? detector.installUrlFor('win32')).toContain('windows-install')
     } finally {
       Object.defineProperty(process, 'platform', { value: original })
     }

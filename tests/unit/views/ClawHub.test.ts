@@ -2,9 +2,12 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
 
-vi.mock('element-plus', () => ({
-  ElMessage: { success: vi.fn(), error: vi.fn(), warning: vi.fn() },
-}))
+// 视图从 element-plus 子路径取 ElMessage(见 src/views/ClawHub.vue:288),
+// 仅 mock 主模块挂不上 spy。vi.hoisted 让主模块与子路径两个 mock
+// 共享同一 ElMessage 对象,view 与测试断言指向同一 spy。
+const ElMessageMock = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn() }))
+vi.mock('element-plus', () => ({ ElMessage: ElMessageMock }))
+vi.mock('element-plus/es/components/message/index', () => ({ ElMessage: ElMessageMock }))
 
 const i18n = createI18n({ legacy: false, locale: 'zh-CN', messages: { 'zh-CN': {} } })
 

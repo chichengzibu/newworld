@@ -3,18 +3,15 @@ import { mount, flushPromises } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
 import { nextTick } from 'vue'
 
-// Mock element-plus 静态方法(ElMessage / ElMessageBox)
-vi.mock('element-plus', () => ({
-  ElMessage: {
-    success: vi.fn(),
-    error: vi.fn(),
-    warning: vi.fn(),
-    info: vi.fn(),
-  },
-  ElMessageBox: {
-    confirm: vi.fn().mockResolvedValue('confirm'),
-  },
+// Mock element-plus 静态方法(ElMessage / ElMessageBox)。
+// 视图从 element-plus 子路径取用,vi.hoisted 共享同一对象保证 spy 一致生效
+const { ElMessageMock, ElMessageBoxMock } = vi.hoisted(() => ({
+  ElMessageMock: { success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() },
+  ElMessageBoxMock: { confirm: vi.fn().mockResolvedValue('confirm') },
 }))
+vi.mock('element-plus', () => ({ ElMessage: ElMessageMock, ElMessageBox: ElMessageBoxMock }))
+vi.mock('element-plus/es/components/message/index', () => ({ ElMessage: ElMessageMock }))
+vi.mock('element-plus/es/components/message-box/index', () => ({ ElMessageBox: ElMessageBoxMock }))
 
 // electronAPI mock + store import 必须在 pinia setup 之前
 const { api } = vi.hoisted(() => {
@@ -271,12 +268,13 @@ describe('Permissions.vue', () => {
     const wrapper = mountComponent()
     await flushPromises()
     const vm: any = wrapper.vm
-    expect(vm.getSetIcon('safe')).toBe('🛡️')
-    expect(vm.getSetIcon('custom')).toBe('✏️')
+    // 图标自迁移起为 element-plus 组件名(Lock/EditPen/Folder 等),非旧版 emoji
+    expect(vm.getSetIcon('safe')).toBe('Lock')
+    expect(vm.getSetIcon('custom')).toBe('EditPen')
     expect(vm.getTemplateName('safe')).toBe('安全模式')
-    expect(vm.getCategoryIcon('filesystem')).toBe('📁')
+    expect(vm.getCategoryIcon('filesystem')).toBe('Folder')
     expect(vm.getCategoryName('network')).toBe('网络')
-    expect(vm.getSetIcon('unknown')).toBe('📋')
+    expect(vm.getSetIcon('unknown')).toBe('Document')
     wrapper.unmount()
   })
 })

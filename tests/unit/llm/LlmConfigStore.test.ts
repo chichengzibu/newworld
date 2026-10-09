@@ -2,7 +2,10 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 
-const TEST_USER_DATA = '/tmp/pipiclaw-llmconfig-test'
+// 路径以 TestHost 真实值为准(实现走 getHost().getPath('userData'),
+// 此处文件内的 electron mock 因陈旧绑定不生效)。
+// safeStorage 现由 tests/unit/electron-setup.ts 全局提供(可逆 XOR)。
+import { TEST_USER_DATA } from '../test-host'
 
 /** XOR-with-key 简易"加密" — 模拟 safeStorage 的实际语义(密文不可读、密钥可还原) */
 const ENC_KEY = 0x5a

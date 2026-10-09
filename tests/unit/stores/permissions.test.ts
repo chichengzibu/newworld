@@ -341,7 +341,8 @@ describe('usePermissionsStore', () => {
   })
 
   it('exposes static metadata dictionaries', () => {
-    expect(PERMISSION_CATEGORIES.filesystem.icon).toBe('📁')
+    // 图标自迁移起为 element-plus 组件名(Folder 等),非旧版 emoji
+    expect(PERMISSION_CATEGORIES.filesystem.icon).toBe('Folder')
     expect(PERMISSION_LEVELS.all.name).toBe('完全')
     expect(TEMPLATE_NAMES.safe).toBe('安全模式')
     expect(TEMPLATE_NAMES.custom).toBe('自定义')
