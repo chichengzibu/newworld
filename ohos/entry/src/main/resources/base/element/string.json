@@ -1,0 +1,20 @@
+{
+  "string": [
+    {
+      "name": "module_desc",
+      "value": "PiPiClaw 桌面 AI Agent 主模块"
+    },
+    {
+      "name": "EntryAbility_desc",
+      "value": "PiPiClaw 主窗口"
+    },
+    {
+      "name": "EntryAbility_label",
+      "value": "PiPiClaw"
+    },
+    {
+      "name": "reason_download_dir",
+      "value": "用于导出对话记录、生成的文档与技能产物到下载目录"
+    }
+  ]
+}

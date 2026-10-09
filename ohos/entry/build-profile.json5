@@ -1,0 +1,31 @@
+{
+  "apiType": "stageMode",
+  "buildOption": {
+    // TODO(需官方 OHOS Electron runtime 确认):
+    //   若官方 runtime 以 .so / .har 形式提供 Electron 二进制,
+    //   可能需要在此声明 externalNativeOptions(CMake)或 nativeLib.excludeFromHap。
+    //   在拿到官方发布物前留空,避免臆造字段导致 hvigor 解析失败。
+  },
+  "buildOptionSet": [
+    {
+      "name": "release",
+      "arkOptions": {
+        "obfuscation": {
+          "ruleOptions": {
+            // Electron 主进程/预加载脚本为 JS 产物,不参与 ArkTS 混淆;
+            // 壳工程 ETS 代码量极小,默认关闭混淆便于排障。
+            "enable": false,
+            "files": [
+              "./obfuscation-rules.txt"
+            ]
+          }
+        }
+      }
+    }
+  ],
+  "targets": [
+    {
+      "name": "default"
+    }
+  ]
+}

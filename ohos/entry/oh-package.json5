@@ -1,0 +1,16 @@
+{
+  "name": "entry",
+  "version": "1.0.0",
+  "description": "PiPiClaw 鸿蒙 PC entry 模块 —— 声明 Ability / 权限,承载 Electron 主进程与 vite 产物",
+  "main": "",
+  "author": "PiPiClaw Team",
+  "license": "MIT",
+  "dependencies": {
+    // TODO(需官方 OHOS Electron runtime 确认)—— 与根 ohos/oh-package.json5 保持一致。
+    // 目标: 鸿蒙 PC 官方 Electron runtime v34.6.3-20260105.1
+    // 包坐标未经验证,故不写死;取得官方发布物后取消注释其一:
+    //   "@ohos/electron": "34.6.3-20260105.1",
+    //   "electron-ohos": "file:../third_party/electron-ohos-34.6.3-20260105.1.har",
+  },
+  "devDependencies": {}
+}
