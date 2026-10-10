@@ -15,8 +15,9 @@ import { reactive, ref } from 'vue';
 // 由 vite define 注入的构建信息 (替换裸标识符 __APP_VERSION__ / __BUILD_TIME__)。
 // 注意: 不要用 `declare const`,esbuild 的 define 可能误替换类型层标识符导致语法损坏;
 // 直接在值位置赋值最稳。
-const APP_VERSION = __APP_VERSION__;
-const BUILD_TIME = __BUILD_TIME__;
+// 声明文件 src/types/vite-defines.d.ts 提供 ambient 类型给 vue-tsc。
+const APP_VERSION: string = __APP_VERSION__;
+const BUILD_TIME: string = __BUILD_TIME__;
 
 interface Vitals {
   LCP: number;

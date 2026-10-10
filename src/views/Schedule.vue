@@ -43,9 +43,9 @@
         <el-table-column :label="t('common.actions')" width="200" fixed="right">
           <template #default="scope">
 <template v-if="scope?.row">
-            <el-button size="small" @click="openEditDialog(row)">{{ t('common.edit') }}</el-button>
-            <el-button size="small" @click="viewHistory(row)">{{ t('schedule.history') }}</el-button>
-            <el-button size="small" type="danger" text @click="handleDelete(row)">
+            <el-button size="small" @click="openEditDialog(scope.row)">{{ t('common.edit') }}</el-button>
+            <el-button size="small" @click="viewHistory(scope.row)">{{ t('schedule.history') }}</el-button>
+            <el-button size="small" type="danger" text @click="handleDelete(scope.row)">
               {{ t('common.delete') }}
             </el-button>
           </template>

@@ -115,7 +115,7 @@
                   v-for="row in virtualRows"
                   :key="row.message.id"
                   :data-index="row.index"
-                  :ref="(el) => virtualizer.measureElement(el)"
+                  :ref="(el) => measureRow(el)"
                   class="message-outer"
                   :style="{ position: 'absolute', top: 0, left: 0, width: '100%', transform: `translateY(${row.start}px)` }"
                 >
@@ -458,7 +458,7 @@
 
 <script setup lang="ts">
 import { ref, computed, reactive, onMounted, watch, nextTick, onUnmounted } from 'vue';
-import { useVirtualizer } from '@tanstack/vue-virtual';
+import { useVirtualizer, type Virtualizer } from '@tanstack/vue-virtual';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage } from "element-plus/es/components/message/index"
 import { ElMessageBox } from "element-plus/es/components/message-box/index";
@@ -666,13 +666,29 @@ const messagesContainer = ref<HTMLElement | null>(null);
 // ============ 虚拟滚动 (大厂 Chat 体感优化) ============
 // 长对话只渲染可视区 + overscan 缓冲,避免全量 DOM 导致滚动卡顿。
 const messages = computed(() => chatStore.currentConversation?.messages ?? []);
+// 类型清零 (v3 Step A)：@tanstack/vue-virtual d.ts 声明 options.count: number,
+// 且 virtual-core 不 import unref/toValue (不内部解包 count 字段)——
+// 原写法 `count: computed(() => length)` 会把 ComputedRef 塞进 core,
+// `this.options.count - 1` 得 NaN。这里解包成 number,类型正确、运行期不劣于原实现。
+//
+// ⚠️ 已知限制 (非本轮引入, 列 backlog)：count 是初始长度快照,
+//   会话消息动态增减时 virtualizer 的 count 不自动重算 (vue-virtual 的
+//   watch 监听 options 对象引用, 不追踪 count 字段值)。彻底修需把整个
+//   options 作为响应式源 (computed 包裹 useVirtualizer 入参)——属行为重构,
+//   超出"类型清零"范围, 留后续批处理。
 const virtualizer = useVirtualizer({
-  count: computed(() => messages.value.length),
+  count: messages.value.length,
   getScrollElement: () => messagesContainer.value,
   estimateSize: () => 140,
   overscan: 8,
   getItemKey: (index) => messages.value[index]?.id ?? index,
-});
+}) as unknown as Virtualizer<HTMLElement, Element>;
+// 模板 ref 回调的 el 类型偏宽 (Element | ComponentPublicInstance | null),
+// measureElement 只要 Element | null —— 收窄包装 (el 为 null 时返回 null, 组件实例丢弃)
+const measureRow = (el: unknown): void => {
+  const node = (el instanceof Element ? el : null) as Element | null
+  virtualizer.measureElement(node)
+}
 // 把每条消息对象挂到虚拟行上,模板用 row.message 访问
 const virtualRows = computed(() =>
   virtualizer.getVirtualItems().map((vi) => ({
