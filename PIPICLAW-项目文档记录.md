@@ -246,11 +246,16 @@ piclaw/
 
 ## 10. 测试体系
 
-- **Vitest**（unit 63 + integration 13）：任务执行、权限、技能、模型等核心逻辑
-- **Playwright e2e**（32 spec，累计 100）：真实用户旅程（首次启动、日常对话、模型 CRUD、ClawHub 浏览、拖拽、主题、重启持久化等 64 个场景）
+- **Vitest**（unit + integration，72 文件 / 933 用例：925 过 / 8 有意 skip / 0 失败）：任务执行、权限、技能、模型等核心逻辑；
+  8 skip = Discord 5 + WhatsApp 3（W8 未实现 API 显式 `it.skip` 标注，未虚构能力）
+- **渲染 e2e（vitest + Playwright chromium，纯前端不带 Electron）**：`tests/e2e/routes-render.test.ts` 11 例，
+  `npm run test:e2e` 实跑 11/11 过（浏览器钉死 `node_modules/playwright-core/.local-browsers`，`PLAYWRIGHT_BROWSERS_PATH=0`）
+- **应用级 e2e（@playwright/test，驱动 Electron 进程）**：`tests/e2e/*.spec.ts` 30 文件 / 140 用例，
+  `npx playwright test`；**未纳入当前验证流程，待实跑认定**
 - **覆盖率**：`coverage/`（HTML 报告），`@vitest/coverage-v8`
 - **冒烟/性能**：`scripts/smoke-test.mjs`、`perf-benchmark.mjs`
-- CHANGELOG 记录 v4.3.1 已达 ship-ready（64 e2e + 869 unit + 22 smoke）
+- 注：v4.3.1（2026-07-24）曾记录 ship-ready（64 e2e + 869 unit + 22 smoke），为历史快照，非当前状态；
+  当前测试体系以 `npm test` / `npm run test:e2e` 实时输出为准
 
 ---
 
@@ -267,7 +272,7 @@ piclaw/
 | `docs/release/`、`release-process.md` | 发布流程与发布物料 |
 | `docs/audit/`、`e2e-testing.md`、`llm-quirks.md` | 审计、e2e 测试、LLM 行为笔记 |
 | `docs/CHANGELOG-INDEX.md` | 变更日志总索引 |
-| `CHANGELOG.md`（根） | 版本变更（最新 v4.3.1 ship-ready） |
+| `CHANGELOG.md`（根） | 版本变更（历史快照至 v4.3.1；现状见第 10 节） |
 
 现有顶层 README.md 已含功能特性、快速开始、使用教程、API（IPC/技能定义）、开发指南与文档索引。
 
