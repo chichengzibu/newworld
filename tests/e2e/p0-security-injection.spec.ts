@@ -14,6 +14,15 @@
  *
  * 期望 (基线 / 改前): 注入 `echo safe; cat /etc/passwd` → 实际执行 cat (洞)
  * 期望 (改后): 含 ; 的 command → server 拒绝 (400/422/500 with 白名单错误)
+ *
+ * 运行配方 (验收复跑依据, 钉死环境):
+ *   1) 前置: npm run build (dist-electron/main.js 必须已产出 — 本 spec 走 _electron.launch, 无此文件直接红)
+ *   2) 浏览器: export PLAYWRIGHT_BROWSERS_PATH=0  (钉死项目本地 chromium, 不依赖全局缓存)
+ *   3) 单跑: npx playwright test tests/e2e/p0-security-injection.spec.ts
+ *      全量: npx playwright test
+ *   4) 环境变量: E2E_ELECTRON=1  (若 CI 防御性 skip 生效, 本 spec 会静默 skipped — 跑前确认)
+ *   5) 期望: 3 passed, 0 failed; 拒绝通道 = PERMISSION_DENIED (safe 模板默认 shell 禁用,
+ *      或名单层拒绝; 断言只钉 errorCode, 不锁定中文文案)
  */
 
 import { test, expect } from '@playwright/test'
@@ -68,12 +77,9 @@ test.describe('P0 Security: runCommand shell 注入防护', () => {
     console.log(`  shell-meta command body=${r.body.slice(0, 250)}`)
     // 改前: 200 + 真跑了 echo + cat (洞)
     // 改后: 拒绝 (白名单检查失败 / shell metachar / 错误码)
-    const looksRejected = r.body.includes('command 含非法字符') ||
-                          r.body.includes('白名单') ||
-                          r.body.includes('不允许') ||
-                          r.body.includes('metachar') ||
-                          r.body.includes('runCommand')
-    expect(looksRejected, 'server 应明确拒绝含 shell metachar 的 command').toBe(true)
+    // 钉死拒绝通道: 响应 JSON 含 "errorCode":"PERMISSION_DENIED"
+    // (safe 模板默认 shell 禁用 → PermissionManager 拒绝; 文案会随模板变, 不再断言中文措辞)
+    expect(r.body, 'server 必须拒绝含 shell metachar 的 command').toContain('PERMISSION_DENIED')
     expect(r.body.includes('root:'), 'server 不应执行 cat /etc/passwd (body 不应包含 root:)').toBe(false)
   })
 
@@ -85,11 +91,8 @@ test.describe('P0 Security: runCommand shell 注入防护', () => {
       args: ['-h'],
     })
     console.log(`  non-allowlist nc body=${r.body.slice(0, 250)}`)
-    const looksRejected = r.body.includes('白名单') ||
-                          r.body.includes('不允许') ||
-                          r.body.includes('不在白名单') ||
-                          r.body.includes('runCommand')
-    expect(looksRejected, '不在白名单的命令应被拒').toBe(true)
+    // 两层拒绝都可能命中 (权限层先于名单层), 通道统一 PERMISSION_DENIED
+    expect(r.body, '不在自动放行/确认名单的命令必须被拒').toContain('PERMISSION_DENIED')
   })
 
   test('runCommand 含 null byte 参数应被拒', async () => {
@@ -98,9 +101,6 @@ test.describe('P0 Security: runCommand shell 注入防护', () => {
       args: ['safe\0injected'],
     })
     console.log(`  null-byte arg body=${r.body.slice(0, 250)}`)
-    const looksRejected = r.body.includes('null byte') ||
-                          r.body.includes('runCommand') ||
-                          r.body.includes('不允许')
-    expect(looksRejected, '含 null byte 的参数应被拒').toBe(true)
+    expect(r.body, '含 null byte 的参数必须被拒').toContain('PERMISSION_DENIED')
   })
 })
