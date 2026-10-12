@@ -26,8 +26,21 @@ export class TaskExecutor {
 
   /**
    * 执行完整任务
+   *
+   * commit A/B: source 参数 — 可信入口身份透传 (绝不从 task.steps[i].params.contextKind 读).
+   *   - 'ui'        : ChatManager.sendMessage (渲染端 IPC 来源, 用户在场)
+   *   - 'scheduler' : ScheduleTask (定时任务, 无人值守)
+   *   - 'im_inbound' : 未来 W4 IM 入站
+   *   - 未提供     : 'headless' 兜底 (fail-safe)
+   * 调用点:
+   *   ChatManager.sendMessage → taskExecutor.executeTask(task, 'ui')         (commit B)
+   *   ScheduleTask.executeTask → taskExecutor.executeTask(task, 'scheduler')
+   *   IpcServer.task:execute → taskExecutor.executeTask(task, 'ui')
    */
-  public async executeTask(task: Task): Promise<{
+  public async executeTask(
+    task: Task,
+    source: 'ui' | 'headless' | 'im_inbound' | 'scheduler' = 'headless'
+  ): Promise<{
     success: boolean;
     summary: string;
     error?: string;
@@ -35,7 +48,7 @@ export class TaskExecutor {
     duration: number;
   }> {
     const startTime = Date.now();
-    this.log.info(`[TaskExecutor] 开始执行任务: ${task.instruction}`);
+    this.log.info(`[TaskExecutor] 开始执行任务: ${task.instruction} (source=${source})`);
 
     const abortController = new AbortController();
     this.runningTasks.set(task.id, abortController);
@@ -94,11 +107,18 @@ export class TaskExecutor {
         this.log.info(`[TaskExecutor] 执行步骤 ${i + 1}/${steps.length}: ${step.description}`);
 
         try {
-          const result = await this.executeStep(step);
-          results.push({
-            status: 'success',
-            result
-          });
+          const result = await this.executeStep(step, source);
+          // commit B: gateway 返回 success:false（如 PERMISSION_DENIED）时必须标记失败，不能静默当成功
+          if (result && typeof result === 'object' && result.success === false) {
+            allSuccess = false;
+            results.push({
+              status: 'failed',
+              error: result.error || result.errorCode || 'operation failed',
+              result
+            });
+          } else {
+            results.push({ status: 'success', result });
+          }
         } catch (error) {
           this.log.error(`[TaskExecutor] 步骤失败: ${error}`);
           allSuccess = false;
@@ -132,8 +152,14 @@ export class TaskExecutor {
 
   /**
    * 执行单个步骤
+   *
+   * commit A/B: source 参数透传到 executeOperation (只在 run_command 分支真正起作用).
+   *   file/browser/clipboard 操作对 source 无感 (gateway 侧按操作类型分发), 不影响。
    */
-  private async executeStep(step: TaskStep): Promise<any> {
+  private async executeStep(
+    step: TaskStep,
+    source: 'ui' | 'headless' | 'im_inbound' | 'scheduler' = 'headless'
+  ): Promise<any> {
     const params = step.params as Record<string, any>;
     this.log.debug('[TaskExecutor] 原始 step.params:', JSON.stringify(params));
 
@@ -181,14 +207,17 @@ export class TaskExecutor {
       }
 
       case 'run_command': {
-        this.log.debug('[TaskExecutor] run_command 准备执行');
+        this.log.debug('[TaskExecutor] run_command 准备执行 (source=' + source + ')');
+        // commit A/B: source 由 executeTask 透传 (可信入口派生), 绝不从 step.params.contextKind 读
+        // 注意: params.args 必须透传 — 此前丢弃导致 chat LLM 步骤的 node -e ... 退化为裸 node (交互 REPL 挂死)
         return await this.gateway.executeOperation({
           operationType: 'run_command',
           params: {
             command: params.command,
+            args: Array.isArray(params.args) ? params.args.map((a: any) => String(a)) : undefined,
             cwd: params.cwd
           }
-        });
+        }, source);
       }
 
       case 'open_url': {

@@ -370,6 +370,7 @@ export class ScheduleTaskManager {
         }
 
         // 3. 执行任务（复用 TaskExecutor）
+        // commit A 堵 #13: source 由入口硬编码派生 — 定时任务 = 'scheduler'
         await this.taskExecutor.executeTask({
           id: logId,
           conversationId: 'system_schedule',
@@ -385,7 +386,7 @@ export class ScheduleTaskManager {
           })),
           status: 'pending' as any,
           createdAt: Date.now()
-        } as any);
+        } as any, 'scheduler');
 
         history.status = 'success';
         history.endTime = Date.now();

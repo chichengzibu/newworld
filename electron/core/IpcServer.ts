@@ -853,7 +853,8 @@ export class IpcServer {
         this.log.info('[IpcServer] 安全序列化完成');
 
         const taskExecutor = TaskExecutor.getInstance();
-        const result = await taskExecutor.executeTask(safeTask);
+        // commit A 堵 #13: source 由入口硬编码派生 — task:execute IPC (渲染端用户触发) → 'ui'
+        const result = await taskExecutor.executeTask(safeTask, 'ui');
 
         // 安全序列化返回结果
         const safeResult = JSON.parse(JSON.stringify(result));
@@ -1135,7 +1136,7 @@ export class IpcServer {
           createdAt: Date.now()
         };
 
-        const result = await taskExecutor.executeTask(task);
+        const result = await taskExecutor.executeTask(task, 'ui');
         return { success: true, data: result };
       } catch (error) {
         this.log.error('task:log:retry 失败', error);
@@ -1228,12 +1229,13 @@ export class IpcServer {
     });
 
     // ========== OpenClaw 核心执行引擎 ==========
-
+    // commit A 堵 #13: source='ui' 由入口硬编码派生 (渲染端 IPC 来源), 绝不从 request.params 读
+    // (否则外部调用者能传 params.contextKind='ui' 自我放行, 见偏差 #13)
     ipcMain.handle('openclaw:execute', async (_, request: OpenClawOperationRequest) => {
       try {
         this.log.info('[IpcServer] openclaw:execute 被调用', request);
         const gateway = OpenClawGateway.getInstance();
-        const result = await gateway.executeOperation(request);
+        const result = await gateway.executeOperation(request, 'ui');
         return { success: result.success, data: result };
       } catch (error) {
         this.log.error('openclaw:execute 失败', error);

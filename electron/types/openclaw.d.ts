@@ -45,12 +45,13 @@ export interface CommandOperationParams {
   cwd?: string;
   timeout?: number;
   /**
-   * 会话来源标记 (v3 #4 + 5 裁决 #4).
-   * - 'ui'         : 本应用渲染进程 / chat IPC (确认弹窗可用)
-   * - 'headless'   : 未标记 / 外部入口 (fail-safe, 拒绝 confirm)
-   * - 'im_inbound' : IM 入站消息 (W4 预留)
-   * - 'scheduler'  : 定时任务
-   * OpenClawGateway.runCommand 会透传给 commandDecide.execCommand(); 未提供时按 'headless' 兜底.
+   * @deprecated v3 安全红线 — 此字段已被 OpenClawGateway 忽略(commit A 堵 #13).
+   * 命令来源(source) 由可信入口在 main 进程硬编码派生, 见 OpenClawGateway.executeOperation(request, source).
+   * - IPC 'openclaw:execute' (渲染端) → 'ui'
+   * - OpenClawServer HTTP (外部)    → 'headless' (W4 渠道接线后改 'im_inbound')
+   * - TaskExecutor (chat 活跃链)    → 'ui'
+   * - ScheduleTask (定时任务)       → 'scheduler'
+   * 外部调用者若仍传 params.contextKind='ui' 会被忽略, confirm 级命令一律 fail-safe 拒绝.
    */
   contextKind?: 'ui' | 'headless' | 'im_inbound' | 'scheduler';
   /**

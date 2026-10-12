@@ -19,6 +19,7 @@ import { Document, Packer, Paragraph, TextRun } from 'docx';
 import { OpenClawServer } from './OpenClawServer';
 import { BrowserManager } from '../browser/BrowserManager';
 import { execCommand } from '../agent/tools/commandDecide';
+import type { ContextKind } from '../agent/tools/constants';
 
 const DEFAULT_OPENCLAW_PORT = 18789;
 import type {
@@ -373,7 +374,15 @@ export class OpenClawGateway {
   /**
    * 执行单步操作
    */
-  public async executeOperation(request: OpenClawOperationRequest): Promise<OpenClawOperationResult> {
+  // source: 可信入口身份 (commit A 堵 #13) — 由 main 进程按传输身份派生, 绝不从 params 读
+  //   'ui'        : IpcServer.openclaw:execute (渲染端来源)
+  //   'scheduler' : TaskExecutor (chat 活跃路径 / 定时任务)
+  //   'headless'  : 默认 / 外部 HTTP (OpenClawServer.handleExecute)
+  // 安全红线: 命令来源绝不来自 params.contextKind (外部可伪造自我放行, 见偏差 #13)
+  public async executeOperation(
+    request: OpenClawOperationRequest,
+    source: ContextKind = 'headless'
+  ): Promise<OpenClawOperationResult> {
     const { operationType, params, operationId } = request;
     const id = operationId || `op_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const startTime = Date.now();
@@ -431,7 +440,7 @@ export class OpenClawGateway {
             case 'file_exists':
               return this.fileExists(params as FileOperationParams);
             case 'run_command':
-              return await this.runCommand(params as CommandOperationParams);
+              return await this.runCommand(params as CommandOperationParams, source);
             case 'open_url':
               return await this.openUrl(params as any);
             case 'clipboard_read':
@@ -676,17 +685,22 @@ export class OpenClawGateway {
 
   // ========== 系统操作 ==========
 
-  private async runCommand(params: CommandOperationParams): Promise<{ stdout: string; stderr: string }> {
+  // source: 可信入口身份 (commit A 堵 #13) — 绝不读 params.contextKind (外部 HTTP/IPC 可伪造)
+  //   'ui'/'scheduler' → 允许 confirm 级命令 (经 execCommand 的确认桥)
+  //   'headless' (默认) → confirm 级 fail-safe 拒绝
+  private async runCommand(
+    params: CommandOperationParams,
+    source: ContextKind = 'headless'
+  ): Promise<{ stdout: string; stderr: string }> {
     // v3 #3 单点: 决策/确认/审计/执行 全部在 commandDecide.execCommand() 单点。
-    // 本方法只做: (1) 上下文派生 (params.contextKind ?? headless) (2) 调 execCommand (3) 把 exec 结果翻译成 OpenClaw 操作通道
+    // 本方法只透传 source (由 executeOperation 的可信入口派生), 绝不读 params.contextKind。
     // 旧 inline 白名单 (COMMAND_ALLOWLIST) 已废弃: v3 规格红线 — 未知命令一律 deny, 见 constants.ts
-    const contextKind = (typeof params.contextKind === 'string') ? params.contextKind : 'headless'
     const r = await execCommand({
       command: String(params.command ?? ''),
       args: params.args ?? [],
       cwd: params.cwd,
       timeoutMs: params.timeout ?? 30000,
-      contextKind,
+      contextKind: source,
     })
     if (r.denied) {
       // v3 #9 / 拒绝语义: 走既有 PERMISSION_DENIED 通道 (formatErrorMessage: EACCES→PERMISSION_DENIED)
