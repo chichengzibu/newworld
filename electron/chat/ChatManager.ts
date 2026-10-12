@@ -279,7 +279,7 @@ export class ChatManager {
           createdAt: Date.now()
         };
 
-        const result = await taskExecutor.executeTask(task as any);
+        const result = await taskExecutor.executeTask(task as any, 'ui');
 
         // 更新助手消息 - 详细的任务结果格式
         // 构建详细步骤列表

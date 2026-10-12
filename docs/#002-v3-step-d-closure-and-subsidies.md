@@ -81,17 +81,20 @@
 **实读证据**: `electron/preload.ts:L937` 已暴露 `electronAPI.openclaw.execute(request)`, **零新代码**可冒烟
 
 **devtools 冒烟 script** (用户在 Hermes 桌面 chat 里开 devtools, console 里贴):
+> **补丁批 commit A 后**: `contextKind` 改由 `main` 进程按入口身份派生(渲染端 IPC → `ui`),
+> 渲染端 **不再也不能** 传 `params.contextKind` (gateway 忽略它, 防外部自放行)。
+> 脚本相应改: 去掉 `contextKind` 字段, 直接走 `openclaw:execute` IPC 即可触发 `ui` 派生。
 
 ```javascript
-// 冒烟: 验证 v3 confirm 弹窗全链
-// contextKind='ui' → 渲染端弹 CommandConfirmDialog (30s 超时拒)
+// 冒烟: 验证 v3 confirm 弹窗全链 (commit A 后: 渲染端入口自动派生 ui)
+// openclaw:execute IPC 由 IpcServer 硬编码 source='ui' → 渲染端弹 CommandConfirmDialog (30s 超时拒)
 // 用户在弹窗里按 "允许" → 命令执行 → 审计 humanConfirm='true'
 const res = await window.electronAPI.openclaw.execute({
   operationType: 'run_command',
   params: {
     command: 'git',
-    args: ['status'],
-    contextKind: 'ui'   // ← 关键: 显式传 ui, 否则 headless 拒绝
+    args: ['status']
+    // 注意: 不再传 contextKind — 由 main 进程 (IpcServer 'ui' 派生) 决定
   }
 });
 console.log('[冒烟结果]', res);
@@ -101,9 +104,12 @@ console.log('[冒烟结果]', res);
 //   3. 命令执行, res.success === true
 //   4. res.data.result.stdout 含 "On branch master"
 //   5. %APPDATA%/PiPiClaw/audit/openclaw.audit.jsonl 末 2 行:
-//        [N]  start  ... node→git ... exit="pending" humanConfirm="true" confirmChannel="ui" contextKind="ui"
+//        [N]  start  ... git status ... exit="pending" humanConfirm="true" confirmChannel="ui" contextKind="ui"
 //        [N+1] finish ... exit=0 ... (同 opId)
 ```
+
+> **攻击自测 (可选)**: 同一段把 `command:'git'` 换成外部 HTTP 触发 (`localhost:18789/execute`) 且 params 塞 `contextKind:'ui'` →
+> gateway 读不到 `ui` (source='headless') → confirm 级拒 → 冒烟攻击面关闭。已由 `tests/unit/gateway-source-injection.test.ts` 覆盖。
 
 **冒烟通过标准** (用户亲手签):
 - ✅ devtools 执行后 30s 内弹出命令确认弹窗 (标题+`$ git status`+两键)
