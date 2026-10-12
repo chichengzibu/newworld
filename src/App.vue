@@ -4,6 +4,7 @@
       <AppLayout />
       <FirstLaunchGuide v-model="appStore.showGuide" />
       <DevPanel />
+      <CommandConfirmDialog />
     </div>
   </el-config-provider>
 </template>
@@ -14,6 +15,7 @@ import { useI18n } from 'vue-i18n';
 import AppLayout from '@/components/layout/AppLayout.vue';
 import FirstLaunchGuide from '@/components/guide/FirstLaunchGuide.vue';
 import DevPanel from '@/components/dev/DevPanel.vue';
+import CommandConfirmDialog from '@/components/common/CommandConfirmDialog.vue';
 import { onMounted } from 'vue';
 import { useAppStore } from '@/stores/app';
 import { useGatewayStore } from '@/stores/gateway';

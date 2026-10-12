@@ -151,6 +151,9 @@ const IpcChannels = {
   TASK_TRACE: 'task:trace',
   TASK_CONFIRM_PREVIEW: 'task:confirm-preview',
   TASK_ON_PREVIEW: 'task:on-preview',
+  // 命令确认 (v3 #5 弹窗): 主进程→渲染 请求确认; 渲染→主进程 回执
+  COMMAND_CONFIRM_REQUEST: 'command:confirm-request',
+  COMMAND_CONFIRM_REPLY: 'command:confirm-reply',
 
   // ========== 技能管理 ==========
   SKILLS_LIST: 'skills:list',
@@ -1267,6 +1270,22 @@ const electronAPI = {
     setEnabled: (id: string, enabled: boolean): Promise<IpcResponse<boolean>> =>
       ipcRenderer.invoke(IpcChannels.SCHEDULE_SET_ENABLED, { id, enabled }),
     history: (taskId?: string): Promise<IpcResponse<any[]>> => ipcRenderer.invoke(IpcChannels.SCHEDULE_HISTORY, taskId)
+  },
+
+  // ========== 命令确认 (v3 #5 弹窗, #002-v3 步骤 2.6/2.7) ==========
+  // 主进程经 BrowserWindow.webContents.send('command:confirm-request') 推送,
+  // 渲染端 (Chat.vue 弹窗组件) 监听并回执。此处只暴露 IPC, 不暴露 UI 细节。
+  command: {
+    /** 订阅确认请求; 返回 unsubscribe。 */
+    onConfirmRequest: (callback: (req: { opId: string; command: string; args: string[]; cwd?: string }) => void) => {
+      const handler: IpcCallback = (_e, req) => callback(req);
+      ipcRenderer.on(IpcChannels.COMMAND_CONFIRM_REQUEST, handler);
+      return () => ipcRenderer.removeListener(IpcChannels.COMMAND_CONFIRM_REQUEST, handler);
+    },
+    /** 回执确认结果 (允许/拒绝)。 */
+    replyConfirm: (opId: string, ok: boolean): void => {
+      ipcRenderer.send(IpcChannels.COMMAND_CONFIRM_REPLY, { opId, ok });
+    }
   }
 };
 
