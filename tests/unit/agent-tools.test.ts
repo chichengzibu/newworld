@@ -23,6 +23,8 @@ import { EditTool, EditToolMetadata } from '../../electron/agent/tools/EditTool'
 import { BashTool, BashToolMetadata } from '../../electron/agent/tools/BashTool'
 import { GlobTool, GlobToolMetadata } from '../../electron/agent/tools/GlobTool'
 import { GrepTool, GrepToolMetadata } from '../../electron/agent/tools/GrepTool'
+// v3 Step D: 命令咽喉点注入 (contextKind 模块态 + confirmTransport)
+import { setCommandContext, setConfirmTransport } from '../../electron/agent/tools/commandDecide'
 
 describe('Agent 5 工具 metadata', () => {
   it('Read 工具 schema 正确', () => {
@@ -120,31 +122,74 @@ describe('EditTool', () => {
 describe('BashTool', () => {
   const tool = new BashTool()
 
-  it('白名单内命令正常跑', async () => {
+  afterEach(() => {
+    // 隔离:每用例后复原 (模块态 + transport stub)
+    setCommandContext('headless')
+    setConfirmTransport(null)
+  })
+
+  // P1 升级 a: 全链正向 (stub+ui),禁 echo 降级 — 钉"brain→咽喉→确认→执行→审计 humanConfirm='true'"
+  it('P1: confirm 级命令 (node) + ctx=ui + stub 允许 → 执行成功 + humanConfirm=true', async () => {
+    setCommandContext('ui')
+    let approvedRequest: { command: string; args: string[] } | null = null
+    setConfirmTransport(async (req) => {
+      approvedRequest = { command: req.command, args: req.args }
+      return true
+    })
     const r = await tool.execute({ command: 'node', args: ['-e', 'console.log(42)'] })
     expect(r.ok).toBe(true)
     expect(r.result).toContain('exit=0')
     expect(r.result).toContain('42')
+    // 钉: stub 真的收到 node 的确认请求 (非被降级换道)
+    expect(approvedRequest?.command).toBe('node')
   })
-  it('白名单外命令拒绝', async () => {
+
+  it('P1b: confirm 级命令 (node) + ctx=headless → 拒 (不弹窗, 执行不了)', async () => {
+    setCommandContext('headless')
+    const r = await tool.execute({ command: 'node', args: ['-e', 'console.log(1)'] })
+    expect(r.ok).toBe(false)
+    // v3 #4: headless 不允许 confirm 级 → 拒 (审计 humanConfirm='false')
+    expect(r.error).toMatch(/headless|confirm|ui/)
+  })
+
+  // P3 升级 a: stub+ui 全链 + cwd sandbox 沙箱保留断言
+  it('P3: confirm 级 (node) + ctx=ui + stub 允许 → cwd 在 sandbox 内能跑', async () => {
+    setCommandContext('ui')
+    setConfirmTransport(async () => true)
+    const r = await tool.execute({ command: 'node', args: ['-e', 'console.log(1)'], cwd: SANDBOX_DIR })
+    expect(r.ok).toBe(true)
+    expect(r.result).toContain('exit=0')
+  })
+
+  it('P3b: confirm 级 (node) + ctx=ui + stub 允许 → cwd 在 sandbox 外仍被拒 (沙箱红线保留)', async () => {
+    setCommandContext('ui')
+    setConfirmTransport(async () => true)
+    const r = await tool.execute({ command: 'node', args: ['-e', 'console.log(1)'], cwd: 'C:\\Windows' })
+    expect(r.ok).toBe(false)
+    expect(r.error).toMatch(/sandbox|workspace/i)
+  })
+
+  // P2 (P2-框架接受: null byte → execFile 层拒 = 行为不变, 以实测为准)
+  it('P2: args 含 null byte 拒绝', async () => {
+    setCommandContext('ui')
+    setConfirmTransport(async () => true)
+    const r = await tool.execute({ command: 'echo', args: ['safe\u0000evil'] })
+    expect(r.ok).toBe(false)
+    expect(r.error).toMatch(/null byte/i)
+  })
+
+  it('deny 级命令 (rm) 拒绝 — v3 红线: 未知命令一律 deny', async () => {
+    setCommandContext('ui')
     const r = await tool.execute({ command: 'rm', args: ['-rf', '/'] })
     expect(r.ok).toBe(false)
-    expect(r.error).toMatch(/不在白名单/)
+    expect(r.error).toMatch(/不在自动\/确认名单|denied/i)
   })
+
   it('shell metacharacter 拒绝', async () => {
+    setCommandContext('ui')
     const r = await tool.execute({ command: 'node; echo PWN', args: [] })
     expect(r.ok).toBe(false)
-    expect(r.error).toMatch(/非法字符/)
-  })
-  it('args 含 null byte 拒绝', async () => {
-    const r = await tool.execute({ command: 'echo', args: ['safe\0evil'] })
-    expect(r.ok).toBe(false)
-    expect(r.error).toMatch(/null byte/)
-  })
-  it('cwd 在 sandbox 外拒绝', async () => {
-    const r = await tool.execute({ command: 'node', args: ['-e', '1'], cwd: 'C:\\Windows' })
-    expect(r.ok).toBe(false)
-    expect(r.error).toMatch(/sandbox|workspace/)
+    expect(r.error).toMatch(/非法字符|metachar/i)
   })
 })
 
