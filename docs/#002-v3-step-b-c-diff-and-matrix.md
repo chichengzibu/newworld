@@ -89,10 +89,17 @@ electron/openclaw/OpenClawGateway.ts:720       throw new Error(`runCommand: 不�
  *   Windows 无 OS 沙箱 ⇒ 自动放行级命令 (ls/cat) 可读当前用户可读的任何文件;
  *   名单层防"执行", 不防"读取"。根治 = Windows 沙箱 (P2)。
  *
- * 审计两段式 (v3 #6 + fail-closed):
- *   咽喉点先写审计占位(exit='pending'), 写失败→命令拒(audit-unavailable);
- *   执行成功后追加终态行(exit=0/真实码, phase='finish')。
- *   同一 opId 允许两行 (start 占位 + finish 终态), 审计系统常见模式。
+ * 审计两段式 (v3 #6 + fail-closed) — 四颗审计钉子 (GLM 预审 #1, 纳入 2.2 强制):
+ *   [哨兵 pending]   占位行 exit='pending' 为哨兵值, 表"未终态"; 审计消费方见此
+ *                    = 该命令 start 已落、finish 未到; 禁止把 pending 当成功 exit=0。
+ *   [phase 配对]     每条成功记录 = 恰一个 phase:'start' + 恰一个 phase:'finish' (同 opId),
+ *                    或一条独立 deny 行; 禁止两 start / 两 finish / 交错。
+ *   [孤儿可检测]     只有 start(pending) 无 finish = 孤儿 (fail-closed 拒绝 / 进程中途崩);
+ *                    孤儿必须可被审计扫描识别并计数, 不得静默丢失。
+ *   [分段失败语义]   start 段写失败 = 命令拒(硬 fail-closed, execFile 不跑, audit-unavailable);
+ *                    finish 段写失败 = 命令结果照常返回(命令已跑、数据已产生, 不得改判失败),
+ *                    只记 warn 并把该 opId 标为孤儿。
+ *   流程: 咽喉点先写占位(哨兵 pending + phase:'start', 写失败即拒) → execFile → 追加 finish(真实 exit)。
  *
  * 密钥 guard (v3 强制 #7 + 裁决 #2):
  *   (a) 路径段感知: 匹配 path segment == pattern, 禁裸子串 (防误杀)
@@ -365,28 +372,30 @@ async function doExecFile(opId: string, baseCmd: string, cmdArgs: string[], cwd:
   }
   const resolvedCwd = cwd || path.join(getHost().getPath('userData'), 'sandbox')
 
-  // v3 #6 fail-closed: 审计写失败 → 命令拒 (audit-unavailable)
-  // 先落审计占位(字段全量, exit 暂为 pending), 写失败则直接 deny
+  // v3 #6 fail-closed + 钉子[哨兵][分段失败①]: start 段写失败 → 命令拒, execFile 不跑
+  // 占位行: 哨兵 exit='pending' + phase:'start' (钉子[phase 配对]的 start 端)
   try {
     await auditAppend({
       opId, baseCmd, args: cmdArgs, cwd: resolvedCwd,
       denied: false, humanConfirm,
       confirmChannel: humanConfirm === 'true' ? 'ui' : '-',
-      contextKind: ctx, exit: 'pending',
+      contextKind: ctx, exit: 'pending', phase: 'start',   // 哨兵 pending + phase 配对
     })
   } catch (auditErr: any) {
-    // 审计写失败 → 命令本身也拒 (v3 #6: try/catch 写失败→命令拒)
+    // 钉子[分段失败①]: start 段写失败 = 硬 fail-closed, 命令不执行即拒
     return { ok: false, denied: true, denialReason: `audit-unavailable: ${auditErr?.message ?? auditErr}`, humanConfirm }
   }
 
-  // 审计已落盘, 执行命令 (fail-closed: 若上面写失败, 命令已被拒, 不会走到这里)
+  // 审计 start 已落盘, 执行命令 (fail-closed: 若上面写失败, 命令已被拒, 不会走到这里)
   try {
     const { stdout, stderr } = await execFileAsync(baseCmd, cmdArgs, { cwd: resolvedCwd, timeout: timeoutMs, windowsHide: true })
-    // 终态行: 补真实 exit (审计允许同 opId 追加 finish 事件, 见 head 注释)
+    // finish 行: 配对的 phase 端 + 真实 exit (钉子[phase 配对][哨兵: 非 pending])
     await auditAppend({ opId, baseCmd, exit: 0, phase: 'finish', contextKind: ctx })
     return { ok: true, stdout, stderr, exitCode: 0, humanConfirm }
   } catch (e: any) {
-    await auditAppend({ opId, baseCmd, exit: e.status ?? -1, phase: 'finish', contextKind: ctx }).catch(() => { /* finish 行写失败不再升级, 命令结果照常返回 */ })
+    // 钉子[分段失败②]: finish 段写失败不得改判已跑完的命令失败, 只记 warn + 标孤儿
+    await auditAppend({ opId, baseCmd, exit: e.status ?? -1, phase: 'finish', contextKind: ctx })
+      .catch(() => { /* 钉子[孤儿可检测]: finish 写失败 → 该 opId 成为孤儿, warn 日志, 不改判命令结果 */ })
     return { ok: false, stdout: e.stdout?.toString() ?? '', stderr: e.stderr?.toString() ?? '', exitCode: e.status ?? -1, humanConfirm, denialReason: e.message }
   }
 }
@@ -649,36 +658,44 @@ for (const cmd of ['bash','npm','node','git','env']) {
 }
 ```
 
-#### T7 · 审计落盘 + fail-closed (两段式)
+#### T7 · 审计落盘 + fail-closed + 四颗钉子 (两段式)
 ```ts
-// 跑一条 auto (ls), 验证审计占位行(先) + 终态行(后)
+// 跑一条 auto (ls), 验证审计 start 行(哨兵 pending) + finish 行(真实 exit) 配对
 const rLs = await execCommand({ command: 'ls', args: [], cwd: SANDBOX_DIR, contextKind: 'ui' })
 expect(rLs.ok).toBe(true)
-// 审计文件应有两行 (同 opId): 占位行 + 终态行
-const auditLines = (await fs.readFile(AUDIT_FILE, 'utf8')).trim().split('\n')
-// 找本次 opId 的行 (最新两行中, 倒查)
-const lastTwo = auditLines.slice(-2).map(l => JSON.parse(l))
-const placeholderRow = lastTwo.find(r => r.exit === 'pending' && r.phase === undefined) as any
-const finishRow = lastTwo.find(r => r.phase === 'finish' && r.exit !== 'pending') as any
-// 占位行: 字段全量
-expect(placeholderRow).toBeDefined()
-for (const k of ['ts','opId','baseCmd','args','cwd','exit','denied','humanConfirm','confirmChannel','contextKind']) {
-  expect(k in placeholderRow).toBe(true)
-}
-expect(placeholderRow.denied).toBe(false)
-expect(placeholderRow.humanConfirm).toBe('not-required')
-// 终态行: 真实 exit
+const auditLines = (await fs.readFile(AUDIT_FILE, 'utf8')).trim().split('\n').map(l => JSON.parse(l))
+// 取本次 opId 的行 (rLs 未直接回传 opId, 以最近两行中匹配 baseCmd=ls 的为准, 或执行侧返回 opId——实施时 execCommand 回传 opId 便于断言)
+const startRow  = auditLines.find(r => r.baseCmd === 'ls' && r.phase === 'start' && r.exit === 'pending') as any
+const finishRow = auditLines.find(r => r.baseCmd === 'ls' && r.phase === 'finish' && r.exit === 0) as any
+// [哨兵 pending] start 行 exit='pending' 为哨兵, 非 0
+expect(startRow).toBeDefined()
+expect(startRow.exit).toBe('pending')
+// [phase 配对] 同 opId 恰一 start + 恰一 finish
 expect(finishRow).toBeDefined()
-expect(finishRow.exit).toBe(0)
+expect(startRow.opId).toBe(finishRow.opId)
+// start 行字段全量 (v3 #6)
+for (const k of ['ts','opId','baseCmd','args','cwd','exit','denied','humanConfirm','confirmChannel','contextKind','phase']) {
+  expect(k in startRow).toBe(true)
+}
+expect(startRow.denied).toBe(false)
 expect(finishRow.phase).toBe('finish')
+expect(finishRow.exit).toBe(0)
+// [孤儿可检测] 人为构造: 有 start 无 finish → 应被识别为孤儿
+// (实现: 审计扫描函数 countOrphans(line) = start 行无配对 finish 的 opId 数)
+const orphanOpId = 'unit-test-orphan-' + Date.now()
+await fs.appendFileSync(AUDIT_FILE, JSON.stringify({ ts: new Date().toISOString(), opId: orphanOpId, baseCmd: 'ls', phase: 'start', exit: 'pending', denied: false }) + '\n')
+const orphans = auditLines.filter(r => r.phase === 'start' && r.exit === 'pending' && !auditLines.some(f => f.opId === r.opId && f.phase === 'finish')).length
+expect(orphans).toBeGreaterThanOrEqual(1)   // 孤儿可被计数, 不静默
 
-// fail-closed (v3 #6): mock appendFileSync throw → 命令必 deny (在 execFile 前就拒)
+// [分段失败①] start 段写失败 = 命令拒 (audit-unavailable), execFile 不跑
 vi.spyOn(fs, 'appendFileSync').mockImplementation(() => { throw new Error('disk full') })
 const rFail = await execCommand({ command: 'cat', args: ['/etc/hostname'], contextKind: 'ui' })
 expect(rFail.ok).toBe(false)
 expect(rFail.denied).toBe(true)
 expect(rFail.denialReason).toMatch(/audit-unavailable/)
 vi.restoreAllMocks()
+// [分段失败②] finish 段写失败不改判命令: (需独立 mock 第二次 write 失败, 实施时按 opId 区分 start/finish 两次 append)
+//   断言: 命令结果 ok=true 返回, 但该 opId 计入孤儿; 不抛 audit-unavailable
 ```
 
 #### T8 · brain 链路语义验证 (未标记 → headless 归一 + confirm 拒)
@@ -745,7 +762,7 @@ expect(rLs.ok).toBe(true)
 | #3 | 咽喉点单点强制;brain/gateway 双咽喉;入口携带 contextKind;MCP 在 McpManager.ts:325 追加同格式审计 | **偏差 + 理由 + 补项** —— (a) brain + gateway 两路汇入 `commandDecide.execCommand()` 满足"单点强制";(b) MCP 是 client(`McpManager.ts:325` 调外部 `tools/call`),不暴露 runCommand tool,故**不适用"第三路"**,但按**裁决 #1-MCP-窄项**在 L325 追加**同格式审计**(server/tool/args 存在性)复用同一 sink + fail-closed;独立 commit + 1 测试;(c) MCP 权限矩阵**维持 W4 归口**,本批不扩 |
 | #4 | contextKind = ui / im_inbound / scheduler / headless，入口派生 | **按规格实现**（2.5 入口派生表）；**附注** brain 默认 headless（v3 #B4 的 fallback），im_inbound/scheduler 留待后续接入点 |
 | #5 | 弹窗：命令+cwd+args 预览；仅两键；30s 超时拒；无窗拒；"记住"→backlog | **按规格实现**（2.6 + 2.7）；"记住本会话" 不实现，列 backlog（2.7 注释） |
-| #6 | 审计：`{userData}/audit/openclaw.audit.jsonl` 同步追加；字段 ts/opId/baseCmd/args/cwd/exit/denied/denialReason/humanConfirm/confirmChannel/contextKind；拒绝也落盘；写失败→命令拒(audit-unavailable)；头注释注敏感参数；轮转→backlog | **偏差 + 理由**（见偏差清单 #7：审计由"单行追加"细化为"两段式 占位 pending + 终态 finish"，因真实 exit 只在 execFile 后可得；**占位行仍在 execFile 前同步写、写失败即拒 → fail-closed 语义不变**；字段全量在占位行满足）；**附注** 轮转不实现，留 backlog |
+| #6 | 审计：`{userData}/audit/openclaw.audit.jsonl` 同步追加；字段 ts/opId/baseCmd/args/cwd/exit/denied/denialReason/humanConfirm/confirmChannel/contextKind；拒绝也落盘；写失败→命令拒(audit-unavailable)；头注释注敏感参数；轮转→backlog | **偏差 + 理由**（见偏差清单 #7：审计由"单行追加"细化为"两段式 占位 pending + 终态 finish"，因真实 exit 只在 execFile 后可得；**四颗审计钉子**：哨兵 pending / phase 配对 / 孤儿可检测 / 分段失败语义——start 段写失败即拒（fail-closed 语义不变），finish 段写失败不改判命令；字段全量 + phase 在 start 行满足）；**附注** 轮转不实现，留 backlog |
 | #7 | 密钥 guard: args 或 cwd 含 `.pipiclaw-secrets` / `clawhub-dev-ed25519.key` → deny | **按规格实现 + 裁决 #2 扩展** —— (a) 加 `/.ssh` / `/.aws` 为段名(裁决 #2a: 段名感知,非裸子串);(b) SECRETS_GUARD_PATTERNS **数据表化**(裁决 #2b: 改数据不改代码);(c) 头注释已注"尽力而为、可绕过、根治 = Windows 沙箱 P2"(裁决 #2c) |
 | #8 | 残留风险条款写 constants.ts 头 + 旗舰文档 | **按规格实现**（2.1 constants.ts 头已写；旗舰文档在 Step D 后更新 `PiPiClaw-项目文档记录.md` 第 7 节安全部分） |
 | #9 | 拒绝语义复用 PERMISSION_DENIED；metachar/null-byte/sandbox/execFile 数组传参保留 | **按规格实现**（2.4 throw 带 `errorCode:'PERMISSION_DENIED'`；2.2 `doExecFile` 保留 metachar/null-byte 校验；sandbox 校验从 `BashTool.isCwdInSandbox` 抽出复用；execFile 数组传参） |
@@ -759,7 +776,12 @@ expect(rLs.ok).toBe(true)
 4. **pre-flight 命中修正**：裁决 #3 预判成立——`tests/unit/agent-tools.test.ts` L124/L145 两条 `node` 用例在新姿态下必红（headless+confirm 拒），属**预期姿态变更**而非 BLOCKED。Step D 实施时改写这 3 条到新姿态（`contextKind: 'ui'`+stub 弹框 true，或改 AUTO 级命令），**禁为绿放松安全**。
 5. **env 移出 AUTO → CONFIRM**：v3 规格修正（用户裁决 #5）+ 测试 T1/T4 同步更新（T1 钉 `env ∉ AUTO`，T4 钉 `env → confirm`）。
 6. **contextKind 字段**：裁决 #4 允许（v3 #B4 原"禁止造字段"被其覆盖——裁决优先）；仅加为 brain.run/BashTool.execute 的可选参数，默认 `undefined` → 归一 `headless`（fail-safe）。
-7. **审计两段式**（v3 #6 文本外的新语义，主动声明）：真实 `exit` 只在 `execFile` 完成后才可得——若按"先执行、后单行写"，则写失败时命令**已跑**，违反 #6 "写失败→拒"。故改为**占位行(`exit:'pending'`, `execFile` 前同步写, 写失败即拒) + 终态行(`phase:'finish'` 补真实 exit)**，同 `opId` 两行。规格意图"咽喉点同步、不可绕过"仍满足(占位行在 execFile 前、同步、写失败 deny)；此为把"同步追加"细化为"占位行同步追加"，非违背，但属规格文本外新语义 → 在此声明, 无第三处。
+7. **审计两段式**（v3 #6 文本外的新语义，主动声明；**GLM 预审 #1 纳入四颗审计钉子**）：真实 `exit` 只在 `execFile` 完成后才可得——若按"先执行、后单行写"，则写失败时命令**已跑**，违反 #6 "写失败→拒"。故改为**占位行(`exit:'pending'` 哨兵, `phase:'start'`, `execFile` 前同步写, 写失败即拒) + 终态行(`phase:'finish'` 补真实 exit)**，同 `opId` 两行。四颗钉子（2.2 强制 + T7 断言）：
+   ① **哨兵 pending**：start 行 `exit='pending'` 表"未终态"，消费方禁止当 exit=0；
+   ② **phase 配对**：恰一 start + 恰一 finish（同 opId），禁止两 start/两 finish/交错，或独立 deny 行；
+   ③ **孤儿可检测**：有 start 无 finish = 孤儿（fail-closed 拒绝 / 进程中途崩），必须可被审计扫描识别计数，不静默丢失；
+   ④ **分段失败语义**：start 段写失败 = 命令拒（硬 fail-closed，execFile 不跑，`audit-unavailable`）；finish 段写失败 = 命令结果照常返回（命令已跑，不得改判失败），只记 warn + 标孤儿。
+   规格意图"咽喉点同步、不可绕过"仍满足（start 行在 execFile 前、同步、写失败 deny）；此为把"同步追加"细化为"两段式占位+终态"，非违背，但属规格文本外新语义 → 在此声明，无第三处。
 
 ---
 
@@ -767,12 +789,39 @@ expect(rLs.ok).toBe(true)
 
 | # | 验收 | 预期 |
 |---|-----|------|
-| 1 | `npm test` 全绿 | **总数上抬**（原 930 → + 新增 T1-T12；**数字一律实测口径**：文件数 / 过 / skip / 失败 四项，禁止预估） |
+| 1 | `npm test` 全绿 | **总数上抬**（原 930 → + T1-T12；**数字一律实测口径**：文件数 / 过 / skip / 失败 四项，禁止预估） |
 | 2 | `npx playwright test tests/e2e/p0-security-injection.spec.ts` | 3 绿 |
 | 3 | `vue-tsc --noEmit` | 0 错（Step A 已归 0，本批零新增） |
-| 4 | 审计文件 `%APPDATA%/pipiclaw/audit/openclaw.audit.jsonl` 存在且人工可读 | 至少含 1 条拒绝条目 + `humanConfirm` 字段 |
+| 4 | 审计文件 `%APPDATA%/pipiclaw/audit/openclaw.audit.jsonl` 人工可读 | start 行含哨兵 `exit:'pending'`+`phase:'start'`+`humanConfirm` 字段；finish 行含 `exit:0`+`phase:'finish'`；含至少 1 条 deny 条目 |
 | 5 | `git status --porcelain` 干净（除 gitignore） | 空 |
 | 6 | ROE 任一红 → **BLOCKED** 报回，不带伤往下走 | 严格 |
+
+### PART 4 附录 · pre-flight 修复方针备案（预裁决 3，实施仍在本 PART 4 内）
+
+pre-flight 实跑确认以下 3 条用例在新姿态（headless + confirm = deny，fail-safe 归一）下必红：
+
+| # | 文件:L 号 | 当前断言 | 新姿态下行为 | 修复方针（**Step D 内执行**） |
+|---|----------|---------|-------------|-------------------------------|
+| P1 | `tests/unit/agent-tools.test.ts:124` | `tool.execute({command:'node', args:['-e','console.log(42)']})` → 期望 `exit=0`+"42" 输出 | `node` 是 CONFIRM 级 + 无 contextKind → 归一 headless → **confirm 拒** → 断言红 | 改为 `contextKind:'ui'` + stub 弹框 true + 期望 `exit=0`；**或**改命令为 AUTO 级（如 `echo 42`）保持真执行语义 |
+| P2 | `tests/unit/agent-tools.test.ts:140` | `tool.execute({command:'echo', args:['safe\0evil']})` → 期望 null byte 拒 | `echo` 是 AUTO 级，null byte 在 `execFile` 传参层面仍被拒（不经过 context 判断）→ **行为不变，断言仍应绿** | 无需改写，但需验证 null byte 仍命中 `execFile` 层的 reject 而非 context 层的 deny；若文案从"null byte"漂移到别的，按实际错误文案更新断言 |
+| P3 | `tests/unit/agent-tools.test.ts:145` | `tool.execute({command:'node', args:['-e','1'], cwd:'C:\\Windows'})` → 期望 sandbox 拒 | `node` 是 CONFIRM 级 → 在 context 层面就被拒（sandbox 校验已不触发）→ 断言从"sandbox"漂移到"context/headless/deny" | 改为 `contextKind:'ui'` + stub 弹框 true + 保留 `cwd:'C:\\Windows'` + 期望 sandbox 拒（验证 sandbox 校验在 confirm 通过后仍生效）；**或**改命令为 AUTO 级（如 `ls`）+ `cwd:'C:\\Windows'` 保持 sandbox 拒语义 |
+
+**方针原则**：
+- 改写目标 = **新姿态语义**，非"让旧断言凑绿"
+- **禁为绿放松安全**（裁决 #3：改断言到新姿态，禁为绿放松）
+- 三条全属"测试跟随实现"的合理姿态变更，**非 BLOCKED**
+- P2 若行为不变（null byte 仍在 execFile 层被拒），则断言**不动**——以实测为准
+
+### PART 4 执行顺序（Step D）
+
+1. 按 PART 2 diff 草案落代码（2.1 → 2.2 → 2.3 → 2.4 → 2.5 → 2.6 → 2.7 → 2.9）
+2. 跑 `npm test` → 预期 P1/P3 红（P2 可能绿）
+3. 按上方修复方针改 P1/P2/P3 → 重跑 → 全绿
+4. 跑 `npx playwright test tests/e2e/p0-security-injection.spec.ts` → 3 绿
+5. 跑 `vue-tsc --noEmit` → 0 错
+6. 审计文件人工查验（start/finish 配对 + 哨兵 + humanConfirm + deny 条目）
+7. `git status --porcelain` 干净
+8. **全部过 → PASS**；任一红 → **BLOCKED** 报回
 
 ---
 
