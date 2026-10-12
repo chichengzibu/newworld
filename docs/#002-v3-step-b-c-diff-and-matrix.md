@@ -393,9 +393,14 @@ async function doExecFile(opId: string, baseCmd: string, cmdArgs: string[], cwd:
     await auditAppend({ opId, baseCmd, exit: 0, phase: 'finish', contextKind: ctx })
     return { ok: true, stdout, stderr, exitCode: 0, humanConfirm }
   } catch (e: any) {
-    // 钉子[分段失败②]: finish 段写失败不得改判已跑完的命令失败, 只记 warn + 标孤儿
+    // 钉子[分段失败②]: finish 段写失败不得改判已跑完的命令失败
+    //   warn 必须是真代码 (裁定升级 b): 下面是 console.error 调用, 不是注释
+    //   "注释+标注" 最容易糊弄失败路径, Step D diff 见到实现才算数
     await auditAppend({ opId, baseCmd, exit: e.status ?? -1, phase: 'finish', contextKind: ctx })
-      .catch(() => { /* 钉子[孤儿可检测]: finish 写失败 → 该 opId 成为孤儿, warn 日志, 不改判命令结果 */ })
+      .catch((auditErr: any) => {
+        // 真 warn (console.error 级别, 带 opId 便于审计孤儿扫描定位)
+        console.error(`[audit] finish-row write failed for opId=${opId} (baseCmd=${baseCmd}): ${auditErr?.message ?? auditErr}. This opId is now ORPHAN (start has no finish). Command result NOT affected.`)
+      })
     return { ok: false, stdout: e.stdout?.toString() ?? '', stderr: e.stderr?.toString() ?? '', exitCode: e.status ?? -1, humanConfirm, denialReason: e.message }
   }
 }
@@ -766,7 +771,9 @@ expect(rLs.ok).toBe(true)
 | #7 | 密钥 guard: args 或 cwd 含 `.pipiclaw-secrets` / `clawhub-dev-ed25519.key` → deny | **按规格实现 + 裁决 #2 扩展** —— (a) 加 `/.ssh` / `/.aws` 为段名(裁决 #2a: 段名感知,非裸子串);(b) SECRETS_GUARD_PATTERNS **数据表化**(裁决 #2b: 改数据不改代码);(c) 头注释已注"尽力而为、可绕过、根治 = Windows 沙箱 P2"(裁决 #2c) |
 | #8 | 残留风险条款写 constants.ts 头 + 旗舰文档 | **按规格实现**（2.1 constants.ts 头已写；旗舰文档在 Step D 后更新 `PiPiClaw-项目文档记录.md` 第 7 节安全部分） |
 | #9 | 拒绝语义复用 PERMISSION_DENIED；metachar/null-byte/sandbox/execFile 数组传参保留 | **按规格实现**（2.4 throw 带 `errorCode:'PERMISSION_DENIED'`；2.2 `doExecFile` 保留 metachar/null-byte 校验；sandbox 校验从 `BashTool.isCwdInSandbox` 抽出复用；execFile 数组传参） |
-| 测试 | 集合迭代断言/三值/归一化四连/find 7 参/secrets/T9 正向/T6 contextKind/T7 审计+fail-closed/T8 brain/T12 MCP 窄项/injection 三连(T10) | **按规格实现**（2.8 T1-T12 全条对应；**T8 含 T11 落地说明**：B4 现实下改为咽喉点注入 contextKind 单测，见 2.8 "T11 落地说明"标注） |
+| 测试 | 集合迭代断言/三值/归一化四连/find 7 参/secrets/T9 正向/T6 contextKind/T7 审计+fail-closed+四钉子/T8 brain/T12 MCP 窄项/injection 三连(T10) | **按规格实现**（2.8 T1-T12 全条对应；**T7 钉四颗审计钉子**：哨兵 pending / phase 配对 / 孤儿可检测 / 分段失败①start拒②finish真 warn；**T8 含 T11 落地说明**） |
+| 门禁·升级 a | P1/P3 stub+ui 强制，禁 echo/ls 降级；stub 失败报偏差+理由 | **按裁定升级 a**（PART 4 方针 #5 + 偏差 #8 + 门禁检查锚点：diff 必见 `command:'node'`+`contextKind:'ui'`） |
+| 门禁·升级 b | finish 段 warn = console.error 真代码，非注释 | **按裁定升级 b**（2.2 finish-catch 真 console.error + 偏差 #9 + 门禁检查锚点：diff 必见 `console.error(`+opId 参数） |
 
 ### 偏差/扩展点清单（已按 5 裁决锁定，门禁复审时核对即可）
 
@@ -782,6 +789,8 @@ expect(rLs.ok).toBe(true)
    ③ **孤儿可检测**：有 start 无 finish = 孤儿（fail-closed 拒绝 / 进程中途崩），必须可被审计扫描识别计数，不静默丢失；
    ④ **分段失败语义**：start 段写失败 = 命令拒（硬 fail-closed，execFile 不跑，`audit-unavailable`）；finish 段写失败 = 命令结果照常返回（命令已跑，不得改判失败），只记 warn + 标孤儿。
    规格意图"咽喉点同步、不可绕过"仍满足（start 行在 execFile 前、同步、写失败 deny）；此为把"同步追加"细化为"两段式占位+终态"，非违背，但属规格文本外新语义 → 在此声明，无第三处。
+8. **P1/P3 强制 stub+ui 变体，禁 echo/ls 降级**（**GLM 裁定升级 a**；v3 未明文，属门禁新增约束）：P1/P3 的修复方针**只许走** `contextKind:'ui'` + `replyConfirm(opId, true)` stub，**不许**改命令为 AUTO 级（echo/ls）——后者绕掉 confirm → 审计 `humanConfirm='true'` 全链主线。P1 免费到手一条全链正向用例（brain→咽喉→确认→执行→审计），P3 额外验 confirm 后 sandbox 仍生效。**门禁检查锚点**：Step D 的 `agent-tools.test.ts` diff 中 P1/P3 行必须仍见 `command:'node'` + `contextKind:'ui'`；若见 `command:'echo'`/`'ls'` = 降级违规，**除非** diff 上方存在"stub 注入失败" 的偏差+理由说明块（含哪步失败/试过什么 stub）。
+9. **finish 段 warn = 真代码，非注释**（**GLM 裁定升级 b**；v3 未明文，属门禁新增检查）：`doExecFile` catch 里 finish 行写失败的分支**必须是 `console.error(...)` 调用**（含 opId + baseCmd + error 信息），**不许**只留 `/* ... */` 注释 + 标注。理由：失败路径在 draft 里最易被"注释+标注"糊弄，注释不是行为。**门禁检查锚点**：Step D 的 `commandDecide.ts` diff 中 finish-write-fail 分支必须见 `console.error(` 调用且参数含 `opId`；若只见 `/* warn */` = 违规。
 
 ---
 
@@ -802,15 +811,17 @@ pre-flight 实跑确认以下 3 条用例在新姿态（headless + confirm = den
 
 | # | 文件:L 号 | 当前断言 | 新姿态下行为 | 修复方针（**Step D 内执行**） |
 |---|----------|---------|-------------|-------------------------------|
-| P1 | `tests/unit/agent-tools.test.ts:124` | `tool.execute({command:'node', args:['-e','console.log(42)']})` → 期望 `exit=0`+"42" 输出 | `node` 是 CONFIRM 级 + 无 contextKind → 归一 headless → **confirm 拒** → 断言红 | 改为 `contextKind:'ui'` + stub 弹框 true + 期望 `exit=0`；**或**改命令为 AUTO 级（如 `echo 42`）保持真执行语义 |
-| P2 | `tests/unit/agent-tools.test.ts:140` | `tool.execute({command:'echo', args:['safe\0evil']})` → 期望 null byte 拒 | `echo` 是 AUTO 级，null byte 在 `execFile` 传参层面仍被拒（不经过 context 判断）→ **行为不变，断言仍应绿** | 无需改写，但需验证 null byte 仍命中 `execFile` 层的 reject 而非 context 层的 deny；若文案从"null byte"漂移到别的，按实际错误文案更新断言 |
-| P3 | `tests/unit/agent-tools.test.ts:145` | `tool.execute({command:'node', args:['-e','1'], cwd:'C:\\Windows'})` → 期望 sandbox 拒 | `node` 是 CONFIRM 级 → 在 context 层面就被拒（sandbox 校验已不触发）→ 断言从"sandbox"漂移到"context/headless/deny" | 改为 `contextKind:'ui'` + stub 弹框 true + 保留 `cwd:'C:\\Windows'` + 期望 sandbox 拒（验证 sandbox 校验在 confirm 通过后仍生效）；**或**改命令为 AUTO 级（如 `ls`）+ `cwd:'C:\\Windows'` 保持 sandbox 拒语义 |
+| P1 | `tests/unit/agent-tools.test.ts:124` | `tool.execute({command:'node', args:['-e','console.log(42)']})` → 期望 `exit=0`+"42" 输出 | `node` 是 CONFIRM 级 + 无 contextKind → 归一 headless → **confirm 拒** → 断言红 | **【裁定升级 a·强制 stub+ui 变体】** `contextKind:'ui'` + stub 弹框 `replyConfirm(opId, true)` + 期望 `exit=0`+"42"。**此变体 = 全链正向用例**（brain → 咽喉 → 确认弹窗 → 执行 → 审计 `humanConfirm='true'`），一条测全，免费到手。**禁止降级为 `echo 42`** —— echo 是 AUTO 级，绕掉了 confirm → 审计 `humanConfirm='true'` 这条主线。若 stub 在单测环境注入失败，**报偏差+理由后才许降级**，禁静默换道（见方针原则 #5）。 |
+| P2 | `tests/unit/agent-tools.test.ts:140` | `tool.execute({command:'echo', args:['safe\0evil']})` → 期望 null byte 拒 | `echo` 是 AUTO 级，null byte 在 `execFile` 传参层面仍被拒（不经过 context 判断）→ **行为不变，断言仍应绿**（裁定 #2·2.2 框架接受） | 无需改写；若文案从"null byte"漂移到别的，按实际错误文案更新断言。**断言依据**：2.2 `doExecFile` 的 `args[i].includes('\0')` 校验保留不动。 |
+| P3 | `tests/unit/agent-tools.test.ts:145` | `tool.execute({command:'node', args:['-e','1'], cwd:'C:\\Windows'})` → 期望 sandbox 拒 | `node` 是 CONFIRM 级 → 在 context 层面就被拒（sandbox 校验已不触发）→ 断言从"sandbox"漂移到"context/headless/deny" | **【裁定升级 a·强制 stub+ui 变体】** `contextKind:'ui'` + stub 弹框 `replyConfirm(opId, true)` + **保留 `cwd:'C:\\Windows'`** + 期望 sandbox 拒。**此变体 = 验证 sandbox 校验在 confirm 通过后仍生效**（confirm 通过后进入 execFile 前的 sandbox 段）。**禁止降级为 `ls`** —— ls 是 AUTO 级，绕掉了 confirm；stub 注入失败时报偏差+理由后才许降级，禁静默。 |
 
 **方针原则**：
 - 改写目标 = **新姿态语义**，非"让旧断言凑绿"
 - **禁为绿放松安全**（裁决 #3：改断言到新姿态，禁为绿放松）
 - 三条全属"测试跟随实现"的合理姿态变更，**非 BLOCKED**
 - P2 若行为不变（null byte 仍在 execFile 层被拒），则断言**不动**——以实测为准
+- **【裁定升级 a #5】** **P1/P3 必须走 stub+ui 变体，不许 echo/ls 降级** —— echo/ls 是 AUTO 级，绕掉了"brain → 咽喉 → confirm 弹窗 → 执行 → 审计 humanConfirm='true'"这条全链正向主线（P1 免费到手一条全链用例，P3 额外验 confirm 后 sandbox 仍生效）。**若 stub 在单测环境注入失败**（如 `BrowserWindow` mock 困难 / IPC stub 不工作）→ **先报偏差+理由**（含"哪步注入失败 / 已试过什么 stub"），经门禁裁定后才许降级；**禁静默换道**。
+- **【裁定升级 b】** **finish 段写失败的 warn 必须是真代码**（`console.error(...)`，含 opId + baseCmd + error 信息），不是 diff 里的注释——"注释+标注"在 draft 里最容易糊弄失败路径，Step D 的 diff 见到 `console.error` 调用才算数。
 
 ### PART 4 执行顺序（Step D）
 
