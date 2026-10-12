@@ -17,6 +17,7 @@ import { HermesMemory } from '../hermes/HermesMemory';
 import { TaskExecutor } from '../task/TaskExecutor';
 import { InstructionGenerator } from '../task/InstructionGenerator';
 import { SelfLearner } from '../learning/SelfLearner';
+import { setCommandContext } from '../agent/tools/commandDecide';
 import type { Conversation, ChatMessage, ChatSettings, MessageRole, StreamChunk } from './ChatTypes';
 import type { AgentBrain, Disposable } from '../contracts/types';
 
@@ -957,15 +958,25 @@ export class ChatManager {
   /**
    * 派发消息给已注册的 agent(由 IpcServer / TaskExecutor 调用)
    * 如果没注册 agent,返回 void(noop),不抛错
+   *
+   * contextKind 参数 (v3 #4 + 5 裁决 #4):
+   *   - 'ui'        : 来自渲染进程 chat IPC
+   *   - 'scheduler' : 来自 TaskExecutor 定时任务
+   *   - 'im_inbound': 来自 IM 入站 (W4 预留)
+   *   - 未提供     : 按 'headless' 兜底 (fail-safe, 拒绝 confirm 级命令)
+   * 绝不从 LLM 自报, 由入口硬编码。
    */
-  public async dispatchToAgent(msg: ChatMessage): Promise<void> {
+  public async dispatchToAgent(msg: ChatMessage, contextKind?: 'ui' | 'headless' | 'im_inbound' | 'scheduler'): Promise<void> {
     if (!this.registeredAgent) {
       this.log.debug('[ChatManager] dispatchToAgent: 未注册 agent,跳过');
       return;
     }
+    const effectiveKind = contextKind ?? 'headless'
     try {
-      const decision = await this.registeredAgent.think({ conversationId: msg.id, content: msg.content });
-      this.log.debug('[ChatManager] dispatchToAgent: agent decision', { decision });
+      // 模块态贯穿: 在脑执行前设 (裁决 #4), 让 LlmAgentBrain 内部的 tool.call() 继承
+      try { setCommandContext(effectiveKind) } catch { /* noop — 脑侧默认 headless, 兜底 */ }
+      const decision = await this.registeredAgent.think({ conversationId: msg.id, content: msg.content, contextKind: effectiveKind });
+      this.log.debug('[ChatManager] dispatchToAgent: agent decision', { decision, contextKind: effectiveKind });
     } catch (e) {
       this.log.error('[ChatManager] dispatchToAgent 失败', e);
     }

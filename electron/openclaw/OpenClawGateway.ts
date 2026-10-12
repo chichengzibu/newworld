@@ -12,14 +12,13 @@
 import * as fs from 'fs';
 import { getHost } from '../platform/runtime'
 import * as path from 'path';
-import { execFile } from 'child_process';
 import {shell, clipboard,  BrowserWindow} from 'electron';
-import { promisify } from 'util';
 import { LogManager } from '../core/LogManager';
 import { PermissionManager } from '../permissions/PermissionManager';
 import { Document, Packer, Paragraph, TextRun } from 'docx';
 import { OpenClawServer } from './OpenClawServer';
 import { BrowserManager } from '../browser/BrowserManager';
+import { execCommand } from '../agent/tools/commandDecide';
 
 const DEFAULT_OPENCLAW_PORT = 18789;
 import type {
@@ -33,34 +32,10 @@ import type {
   CommandOperationParams
 } from '../types/openclaw';
 
-const execFileAsync = promisify(execFile);
-
 /**
- * runCommand 白名单: 只允许这些 baseCmd 执行,避免任意命令注入。
- * 全部小写。Skill / Agent 想要扩展需显式 PR 加进白名单。
+ * 白名单已上移到 electron/agent/tools/constants.ts (v3 终版, 5 裁决).
+ * 旧 inline COMMAND_ALLOWLIST 已删除: v3 #3 单点强制, 见 commandDecide.execCommand()
  */
-const COMMAND_ALLOWLIST: ReadonlySet<string> = new Set([
-  // 版本控制
-  'git',
-  // 运行时 (skill 常用)
-  'node', 'npm', 'npx', 'pnpm', 'yarn', 'bun', 'deno',
-  // 脚本
-  'python', 'python3', 'pip', 'pip3', 'poetry', 'uv',
-  // 系统工具 (只读类)
-  'ls', 'cat', 'head', 'tail', 'wc', 'find', 'grep', 'tree', 'echo', 'pwd', 'env', 'whoami', 'date', 'uname',
-  // 编译 / 构建
-  'make', 'cmake', 'cargo', 'rustc', 'go', 'gcc', 'g++', 'clang', 'javac', 'mvn', 'gradle',
-  // 容器
-  'docker', 'docker-compose', 'podman',
-  // 测试
-  'jest', 'vitest', 'pytest', 'mocha', 'eslint', 'prettier', 'tsc',
-  // 文件操作 (在沙箱 cwd 下安全)
-  'cp', 'mv', 'mkdir', 'rmdir', 'touch', 'tar', 'zip', 'unzip', 'gzip', 'gunzip',
-  // 网络 (无认证场景)
-  'curl', 'wget',
-  // 平台特定
-  'powershell', 'cmd', 'bash', 'sh', 'zsh', 'fish',
-]);
 
 // ========== 类型定义 ==========
 
@@ -702,71 +677,36 @@ export class OpenClawGateway {
   // ========== 系统操作 ==========
 
   private async runCommand(params: CommandOperationParams): Promise<{ stdout: string; stderr: string }> {
-    const { command, args = [], cwd, timeout = 30000 } = params;
-    // shell 参数已被废弃,强制 false (用 execFile 数组传参,不走 shell 解析)
-    void (params as any).shell; // 兼容旧调用,但不使用
-
-    // 1. 白名单校验: baseCmd 必须在 COMMAND_ALLOWLIST 内
-    const baseCmd = String(command || '').trim().toLowerCase();
-    if (!baseCmd) {
-      throw new Error('runCommand: command 不能为空');
+    // v3 #3 单点: 决策/确认/审计/执行 全部在 commandDecide.execCommand() 单点。
+    // 本方法只做: (1) 上下文派生 (params.contextKind ?? headless) (2) 调 execCommand (3) 把 exec 结果翻译成 OpenClaw 操作通道
+    // 旧 inline 白名单 (COMMAND_ALLOWLIST) 已废弃: v3 规格红线 — 未知命令一律 deny, 见 constants.ts
+    const contextKind = (typeof params.contextKind === 'string') ? params.contextKind : 'headless'
+    const r = await execCommand({
+      command: String(params.command ?? ''),
+      args: params.args ?? [],
+      cwd: params.cwd,
+      timeoutMs: params.timeout ?? 30000,
+      contextKind,
+    })
+    if (r.denied) {
+      // v3 #9 / 拒绝语义: 走既有 PERMISSION_DENIED 通道 (formatErrorMessage: EACCES→PERMISSION_DENIED)
+      const e: any = new Error(r.denialReason ?? 'command denied by v3 policy')
+      e.code = 'EACCES'
+      throw e
     }
-    // 防御: 拒绝任何含 shell metacharacter 的 command
-    // (args 会原样传给 execFile,不会过 shell,但 command 字段本身必须干净)
-    if (/[\s;&|`$<>(){}\\]/.test(baseCmd)) {
-      throw new Error(`runCommand: command 含非法字符,只接受 baseCmd: ${baseCmd}`);
+    if (r.exitCode !== 0) {
+      // 命令已跑但失败: 保留 stdout/stderr + exit code 给调用方 (gateway 侧按原行为视为错误)
+      const e: any = new Error(`command exited with ${r.exitCode}`)
+      e.code = 'COMMAND_FAILED'
+      e.stdout = r.stdout
+      e.stderr = r.stderr
+      e.exitCode = r.exitCode
+      throw e
     }
-    if (!COMMAND_ALLOWLIST.has(baseCmd)) {
-      throw new Error(`runCommand: 不在白名单的命令 "${baseCmd}",允许列表见 COMMAND_ALLOWLIST`);
-    }
-    this.log.info('[OpenClawGateway] 执行命令 (白名单内):', baseCmd, args);
-
-    // 2. args 过滤: 任何含 null byte 的参数拒绝 (防止 string injection)
-    const safeArgs = args.map((a, i) => {
-      if (typeof a !== 'string') {
-        throw new Error(`runCommand: args[${i}] 不是字符串`);
-      }
-      if (a.includes('\0')) {
-        throw new Error(`runCommand: args[${i}] 含 null byte`);
-      }
-      return a;
-    });
-
-    // 3. cwd 沙箱: 必须在 ~/.pipiclaw/sandbox/ 或用户显式指定的允许目录
-    let resolvedCwd: string | undefined;
-    if (cwd) {
-      resolvedCwd = this.resolvePath(cwd);
-      if (!this.isCwdInSandbox(resolvedCwd)) {
-        throw new Error(`runCommand: cwd 必须在 ~/.pipiclaw/sandbox/ 或 ~/.pipiclaw/workspace/ 下,实际: ${resolvedCwd}`);
-      }
-    } else {
-      // 默认 cwd = sandbox 目录
-      const defaultSandbox = path.join(getHost().getPath('userData'), 'sandbox');
-      try {
-        fs.mkdirSync(defaultSandbox, { recursive: true });
-        resolvedCwd = defaultSandbox;
-      } catch {
-        resolvedCwd = undefined;
-      }
-    }
-
-    // 4. execFile: 不用 shell,数组传参,参数按字面量传给进程
-    this.log.debug('[OpenClawGateway] 执行命令:', baseCmd, safeArgs, 'cwd=', resolvedCwd);
-    const { stdout, stderr } = await execFileAsync(baseCmd, safeArgs, {
-      cwd: resolvedCwd,
-      timeout,
-      // 显式不设 shell,即便未来有人修改也不会被 shell 解析
-      windowsHide: true,
-    });
-
-    return { stdout, stderr };
+    return { stdout: r.stdout, stderr: r.stderr }
   }
 
-  /**
-   * 校验 cwd 是否在允许的沙箱根目录内。
-   * 允许: ~/.pipiclaw/sandbox/*, ~/.pipiclaw/workspace/*
-   * 不允许: C:\Windows\, /etc, ~/.ssh, $HOME 根目录
-   */
+  /** @deprecated 原 cwd 沙箱校验, 已上移到 commandDecide.isCwdInSandbox() — 调用方勿再使用 */
   private isCwdInSandbox(resolvedCwd: string): boolean {
     try {
       const userData = getHost().getPath('userData');

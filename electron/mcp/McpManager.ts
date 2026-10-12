@@ -19,6 +19,7 @@ import path from 'node:path';
 import { app } from 'electron';
 import { LogManager } from '../core/LogManager';
 import { StdioTransport } from './transport/stdio';
+import { mcpCallAudit } from '../agent/tools/commandDecide';
 import type {
   McpInvokeResult,
   McpServerConfig,
@@ -322,6 +323,10 @@ export class McpManager {
         }
       }
       const params: McpToolCallParams = { name: toolName, arguments: args ?? {} };
+      // v3 裁决 #1-MCP-窄项: 复用同一审计 sink + fail-closed (见 commandDecide.mcpCallAudit)
+      // 权限矩阵仍归 W4, 本条仅审计, 不加权限判断
+      const argKeys = args ? Object.keys(args).sort() : []
+      mcpCallAudit(server, toolName, argKeys)
       const resp = await inst.transport.request<McpToolResult>('tools/call', params);
       if ('error' in resp) {
         return {

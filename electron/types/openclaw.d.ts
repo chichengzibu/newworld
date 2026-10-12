@@ -45,6 +45,15 @@ export interface CommandOperationParams {
   cwd?: string;
   timeout?: number;
   /**
+   * 会话来源标记 (v3 #4 + 5 裁决 #4).
+   * - 'ui'         : 本应用渲染进程 / chat IPC (确认弹窗可用)
+   * - 'headless'   : 未标记 / 外部入口 (fail-safe, 拒绝 confirm)
+   * - 'im_inbound' : IM 入站消息 (W4 预留)
+   * - 'scheduler'  : 定时任务
+   * OpenClawGateway.runCommand 会透传给 commandDecide.execCommand(); 未提供时按 'headless' 兜底.
+   */
+  contextKind?: 'ui' | 'headless' | 'im_inbound' | 'scheduler';
+  /**
    * @deprecated 安全原因已废弃,强制 shell: false。
    * 若传入此字段,OpenClawGateway.runCommand 会忽略并 log warn。
    * 使用 execFile(command, argsArray) 数组传参,不走 shell 解析。
