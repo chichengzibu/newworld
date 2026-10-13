@@ -8,12 +8,13 @@
  * 安全:
  *   - 三层决策 (AUTO/CONFIRM/其余拒) + 确认 + 审计 全收敛到 commandDecide.execCommand()
  *   - 本文件只保留: 元数据 + execute() 入口 → 调 execCommand (咽喉点单点强制)
- *   - contextKind 来自模块态 (getCommandContext), 脑链路默认 headless (裁决 #4)
+ *   - #005 Step 0 (DEV-014 机制切除): contextKind 由 execute() 第二参 ctx 显式携带,
+ *     缺省 headless (fail-safe); 【禁】回落 getCommandContext 模块态 (裁决 override)
  *   - 防御 shell metacharacter: 由 commandDecide 保留执行
- *   - 防安全反转 (v3 红线): 绝不读 LLM 生成的 contextKind —— 一律走模块态
+ *   - 防安全反转 (v3 红线): 绝不读 LLM 生成的 contextKind —— 只认执行链显式入参
  */
-import { execCommand, getCommandContext } from './commandDecide'
-import type { PiPiTool, ToolExecResult } from './Tool'
+import { execCommand } from './commandDecide'
+import type { PiPiTool, ToolExecResult, RuntimeToolContext } from './Tool'
 
 export const BashToolMetadata = {
   name: 'Bash',
@@ -35,7 +36,7 @@ export const BashToolMetadata = {
 export class BashTool implements PiPiTool {
   metadata = BashToolMetadata
 
-  async execute(args: Record<string, unknown>): Promise<ToolExecResult> {
+  async execute(args: Record<string, unknown>, ctx?: RuntimeToolContext): Promise<ToolExecResult> {
     const command = String(args.command ?? '').trim()
     const rawArgs = Array.isArray(args.args) ? (args.args as unknown[]) : []
     const cwd = args.cwd ? String(args.cwd) : undefined
@@ -43,13 +44,15 @@ export class BashTool implements PiPiTool {
 
     if (!command) return { ok: false, result: '', error: 'command 必填' }
 
-    // v3 #3 咽喉点 + 裁决 #4: contextKind 来自模块态, 绝不从 LLM args 读 (防安全反转)
+    // #005 Step 0 (DEV-014 切除, 裁决 override): ctx?.contextKind ?? 'headless' —— 显式贯穿,
+    // 禁回落 getCommandContext (模块态三件同提交删除, 见 #004/#005 台账 DEV-014 关闭项)。
+    // v3 #3 咽喉点 + 红线: 绝不从 LLM args 读 contextKind (防安全反转)。
     const r = await execCommand({
       command,
       args: rawArgs.map((a, i) => typeof a === 'string' ? a : String((a as any)?.toString?.() ?? a)),
       cwd,
       timeoutMs,
-      contextKind: getCommandContext(),
+      contextKind: ctx?.contextKind ?? 'headless',
     })
 
     if (r.ok) {

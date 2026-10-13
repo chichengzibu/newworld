@@ -8,7 +8,7 @@
  * contextKind (v3 #4 + 裁决 #4):
  *   必填字段, 由入口派生 (ui / im_inbound / scheduler / headless), 随调用传入 execCommand。
  *   安全红线: contextKind 绝不从 LLM 生成的 tool args 里读 —— LLM 可自我放行 = 安全反转。
- *   脑链路经模块态 setCommandContext('headless') 贯穿 (fail-safe 默认, 见下)。
+ *   脑链路 contextKind 经显式参数贯穿 (think→run→execute(ctx), #005 Step 0), 缺省 headless (fail-safe, 见下)。
  *
  * 四颗审计钉子 (v3 #6 + GLM 预审 #1):
  *   [哨兵 pending]  exec 路径 start 行 exit='pending' 表"未终态"; 消费方禁当 exit=0。
@@ -43,10 +43,11 @@ const AUDIT_DIR = 'audit'
 const AUDIT_FILE = 'openclaw.audit.jsonl'
 const CONFIRM_TIMEOUT_MS = 30_000
 
-// ── contextKind 模块态贯穿 (裁决 #4; 脑链路默认 headless, 入口可覆盖) ──
-let _ctx: ContextKind = 'headless'
-export function setCommandContext(kind: ContextKind): void { _ctx = kind }
-export function getCommandContext(): ContextKind { return _ctx }
+// ── #005 Step 0 (DEV-014 机制切除): contextKind 模块态三件 (let _ctx / setCommandContext / getCommandContext) 已删除 ──
+// 显式贯穿链: 入口 (ChatManager.dispatchToAgent 派生) → think(ctx.contextKind) → run(opts.contextKind) → tool.execute(ctx) → execCommand(contextKind)。
+// 缺省面: BashTool 侧 `ctx?.contextKind ?? 'headless'` (fail-safe)。
+// 零读者证实 (切除前 grep 实证): 生产面读者面唯一 = BashTool (已改显式); 测试面零读者。
+// gateway 轨 (OpenClawGateway.runCommand/executeOperation) 本就参数制 (source 第二参), 不受影响。
 
 // ── 审计路径 ──
 function auditFile(): string {

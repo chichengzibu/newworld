@@ -165,6 +165,9 @@ export class LlmAgentBrain implements AgentBrain {
     history?: Array<{ role: string; content: string }>
     /** #004: 会话 id — checkpoint 快照的归属键 (run 层, 对话层不入快照) */
     conversationId?: string
+    /** #005 Step 0 (DEV-014 切除): contextKind 显式贯穿 — 由入口 (ChatManager 派生值) 经 think→run 传入,
+     *  逐跳携带到 tool.execute(ctx); brain 不自存 (无状态红线)。缺省 = headless (BashTool 侧 fail-safe)。 */
+    contextKind?: 'ui' | 'im_inbound' | 'scheduler' | 'headless'
     /** #004: checkpoint 上推钩子 (纯函数 manager 的 append 入口; brain 零 fs 零 manager import)。
      *  接缝 4 处: 每工具结果落 messages 后 / abort 退出前 / 异常 throw 前 / final_answer。
      *  不传 = 不产生 checkpoint (休眠态, 与 history 参数同一模式); 钩子异常不得影响 run 主流程。 */
@@ -272,7 +275,10 @@ export class LlmAgentBrain implements AgentBrain {
           const tStart = Date.now()
           let exec: ToolExecResult
           try {
-            exec = await tool.execute(args)
+            // #005 Step 0 (DEV-014 切除): contextKind 显式贯穿 — 禁脑读模块态 (全局态已删),
+            // 本 run 的 ctx 由入口派生后经 think→run 携带; 缺省 headless (BashTool 缺省 fail-safe)
+            const toolCtx = { contextKind: opts.contextKind ?? 'headless' }
+            exec = await tool.execute(args, toolCtx)
           } catch (e) {
             exec = { ok: false, result: '', error: `tool execution threw: ${(e as Error).message}` }
           }
@@ -376,6 +382,9 @@ export class LlmAgentBrain implements AgentBrain {
       if (history) runOpts.history = history
       if (ckpt) runOpts.checkpoint = ckpt
       if (ctx.conversationId) runOpts.conversationId = String(ctx.conversationId)
+      // #005 Step 0 (DEV-014 切除): contextKind 入口派生值透传 think→run→tool.execute(ctx)
+      //   —— brain 不自存 (无状态红线); 会话层 (ChatManager) 是唯一派生源
+      if (ctx.contextKind) runOpts.contextKind = ctx.contextKind as 'ui' | 'im_inbound' | 'scheduler' | 'headless'
       const r = await this.run(content, runOpts)
       return { action: 'reply', payload: { text: r.content, model: 'agent-v0.1', durationMs: r.totalDurationMs, iterations: r.iterations, toolCalls: r.toolCalls } }
     } catch (e) {

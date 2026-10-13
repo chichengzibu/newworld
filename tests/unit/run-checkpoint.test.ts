@@ -3,7 +3,6 @@
  *
  * ═══ 红线 (冻结延续) ═══
  *   main.ts / IpcServer / commandDecide / BashTool 零改动;
- *   安全链交互只经既有 execCommand 公开 API (setCommandContext/setConfirmTransport/setAuditSink
  *   是 v3 已就位的注入面, 本文件只【消费】, 不新增、不放宽 mock);
  *   ChatManager:985 接线留 W5 (本单只验证 brain 接缝 + manager 纯函数)。
  *
@@ -31,7 +30,6 @@ import crypto from 'node:crypto'
 
 import {
   execCommand,
-  setCommandContext,
   setConfirmTransport,
   setAuditSink,
 } from '../../electron/agent/tools/commandDecide'
@@ -91,7 +89,6 @@ vi.mock('../../electron/llm/LlmClient', () => ({
 // ─── 环境: 临时目录 (沙盒) — 审计走 setAuditSink 内存探针, 不落盘 ───
 let tmpBase: string
 beforeEach(() => {
-  setCommandContext('headless')
   setConfirmTransport(null)
   const rows: Record<string, unknown>[] = []
   setAuditSink((entry) => { rows.push(entry) })
@@ -102,7 +99,6 @@ beforeEach(() => {
 afterAll(() => {
   setAuditSink(null)
   setConfirmTransport(null)
-  setCommandContext('headless')
 })
 
 // ─── helper: 跑一次 brain.run 并收集 checkpoint 事件 ───
@@ -201,7 +197,6 @@ describe('#004 C-2 (照案) 正常 run → final_answer 后 status=finalized', (
 
 describe('#004 C-3 安全回归: 恢复后 confirm 级命令仍被上下文门拦 (伪造版)', () => {
   it('headless + confirm 级命令 → 仍拒绝 (不因 checkpoint/恢复获得豁免)', async () => {
-    setCommandContext('headless')
     const tool = new BashTool()
     const r = await tool.execute({ command: 'git', args: ['status'] })
     expect(r.ok).toBe(false)

@@ -10,7 +10,6 @@
  *
  * 隔离:
  *   electron mock (electron-setup.ts) + TestHost (per-worker 沙箱目录).
- *   每用例前 afterEach 复原 setCommandContext + setConfirmTransport.
  */
 import { describe, it, expect, afterEach, vi, beforeEach } from 'vitest'
 import * as fsNode from 'node:fs'
@@ -28,7 +27,6 @@ import {
 } from '../../electron/agent/tools/constants'
 import {
   execCommand,
-  setCommandContext,
   setConfirmTransport,
   setAuditSink,
   mcpCallAudit,
@@ -37,7 +35,6 @@ import { TEST_USER_DATA } from './test-host'
 
 // 复原 — 每用例后 (模块态 + transport stub + audit sink)
 afterEach(() => {
-  setCommandContext('headless')
   setConfirmTransport(null)
   setAuditSink(null)
 })
@@ -203,7 +200,6 @@ describe('T7: 四颗审计钉子', () => {
   })
 
   it('钉子①[哨兵 pending] + ②[phase 配对] + 成功路径', async () => {
-    setCommandContext('ui')
     setConfirmTransport(async () => true)
     const r = await execCommand({ command: 'node', args: ['-e', 'console.log(1)'], contextKind: 'ui' })
     expect(r.ok).toBe(true)
@@ -223,7 +219,6 @@ describe('T7: 四颗审计钉子', () => {
 
   it('钉子③[孤儿可检测]: start 成功但进程未产生 finish → 可被扫描识别', async () => {
     // 让 finish 写失败 (探针 sink): start 写完, finish 抛错 → 只剩 start 行 (孤儿).
-    setCommandContext('ui')
     setConfirmTransport(async () => true)
     setAuditSink(failSinkOn('finish'))
     const r = await execCommand({ command: 'node', args: ['-e', 'console.log(1)'], contextKind: 'ui' })
@@ -240,7 +235,6 @@ describe('T7: 四颗审计钉子', () => {
 
   it('钉子④[分段失败①]: start 写失败 → 命令拒 (execFile 不跑)', async () => {
     // 让 start 写抛错 (探针 sink) → fail-closed, 命令直接拒
-    setCommandContext('ui')
     setConfirmTransport(async () => true)
     setAuditSink(failSinkOn('start'))
     const r = await execCommand({ command: 'node', args: ['-e', 'console.log(1)'], contextKind: 'ui' })
@@ -265,7 +259,6 @@ describe('T8: 拒绝语义 + 审计落一行', () => {
   })
 
   it('deny 级 (rm) → 拒 + 审计 phase=deny', async () => {
-    setCommandContext('ui')
     const r = await execCommand({ command: 'rm', args: ['-rf', '/'], contextKind: 'ui' })
     expect(r.ok).toBe(false)
     expect(r.denied).toBe(true)
@@ -277,7 +270,6 @@ describe('T8: 拒绝语义 + 审计落一行', () => {
     }
   })
   it('headless + confirm → 拒 + 审计 reason 含 headless', async () => {
-    setCommandContext('headless')
     const r = await execCommand({ command: 'node', args: ['-e', '1'], contextKind: 'headless' })
     expect(r.ok).toBe(false)
     expect(r.denialReason).toMatch(/headless/)
@@ -318,7 +310,6 @@ describe('T9: execCommand + secrets 段感知', () => {
 // ─────────────────────────────────────────────────────────────────────────────
 describe('T10: 升级 b (finish warn 必须是 console.error 真代码)', () => {
   it('finish 写失败仍让命令成功 (已跑不改判) + console.error 被调', async () => {
-    setCommandContext('ui')
     setConfirmTransport(async () => true)
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {})
     // finish 写抛错 (探针 sink), start 照常 → 触发升级 b 的 console.error (真代码非注释)
@@ -370,7 +361,6 @@ describe('T12: 全链正向 (stub+ui 免费用例)', () => {
   })
 
   it('brain→BashTool→咽喉→确认→执行→审计: 一条龙', async () => {
-    setCommandContext('ui')
     setConfirmTransport(async (req) => {
       expect(req.command).toBe('node')
       return true
@@ -388,7 +378,6 @@ describe('T12: 全链正向 (stub+ui 免费用例)', () => {
   })
 
   it('用户拒绝 → humanConfirm="false" + command 没跑', async () => {
-    setCommandContext('ui')
     setConfirmTransport(async () => false)
     const r = await execCommand({ command: 'node', args: ['-e', 'console.log(1)'], contextKind: 'ui' })
     expect(r.ok).toBe(false)

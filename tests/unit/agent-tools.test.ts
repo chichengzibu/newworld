@@ -23,8 +23,9 @@ import { EditTool, EditToolMetadata } from '../../electron/agent/tools/EditTool'
 import { BashTool, BashToolMetadata } from '../../electron/agent/tools/BashTool'
 import { GlobTool, GlobToolMetadata } from '../../electron/agent/tools/GlobTool'
 import { GrepTool, GrepToolMetadata } from '../../electron/agent/tools/GrepTool'
-// v3 Step D: 命令咽喉点注入 (contextKind 模块态 + confirmTransport)
-import { setCommandContext, setConfirmTransport } from '../../electron/agent/tools/commandDecide'
+// #005 Step 0 (DEV-014 切除): setCommandContext 模块态已删 — BashTool 用例改显式 execute(ctx) 第二参
+//   (裁决要求: 现有测试若依赖模块态注入 → 调用点改显式 ctx, 清单进报告); confirmTransport 注入面保留
+import { setConfirmTransport } from '../../electron/agent/tools/commandDecide'
 
 describe('Agent 5 工具 metadata', () => {
   it('Read 工具 schema 正确', () => {
@@ -123,20 +124,19 @@ describe('BashTool', () => {
   const tool = new BashTool()
 
   afterEach(() => {
-    // 隔离:每用例后复原 (模块态 + transport stub)
-    setCommandContext('headless')
+    // 隔离: 每用例后复原 (confirmTransport stub)
+    // #005 Step 0: contextKind 不再走模块态 — 每用例显式传 execute(args, { contextKind })
     setConfirmTransport(null)
   })
 
   // P1 升级 a: 全链正向 (stub+ui),禁 echo 降级 — 钉"brain→咽喉→确认→执行→审计 humanConfirm='true'"
   it('P1: confirm 级命令 (node) + ctx=ui + stub 允许 → 执行成功 + humanConfirm=true', async () => {
-    setCommandContext('ui')
     let approvedRequest: { command: string; args: string[] } | null = null
     setConfirmTransport(async (req) => {
       approvedRequest = { command: req.command, args: req.args }
       return true
     })
-    const r = await tool.execute({ command: 'node', args: ['-e', 'console.log(42)'] })
+    const r = await tool.execute({ command: 'node', args: ['-e', 'console.log(42)'] }, { contextKind: 'ui' })
     expect(r.ok).toBe(true)
     expect(r.result).toContain('exit=0')
     expect(r.result).toContain('42')
@@ -145,8 +145,7 @@ describe('BashTool', () => {
   })
 
   it('P1b: confirm 级命令 (node) + ctx=headless → 拒 (不弹窗, 执行不了)', async () => {
-    setCommandContext('headless')
-    const r = await tool.execute({ command: 'node', args: ['-e', 'console.log(1)'] })
+    const r = await tool.execute({ command: 'node', args: ['-e', 'console.log(1)'] }, { contextKind: 'headless' })
     expect(r.ok).toBe(false)
     // v3 #4: headless 不允许 confirm 级 → 拒 (审计 humanConfirm='false')
     expect(r.error).toMatch(/headless|confirm|ui/)
@@ -154,40 +153,35 @@ describe('BashTool', () => {
 
   // P3 升级 a: stub+ui 全链 + cwd sandbox 沙箱保留断言
   it('P3: confirm 级 (node) + ctx=ui + stub 允许 → cwd 在 sandbox 内能跑', async () => {
-    setCommandContext('ui')
     setConfirmTransport(async () => true)
-    const r = await tool.execute({ command: 'node', args: ['-e', 'console.log(1)'], cwd: SANDBOX_DIR })
+    const r = await tool.execute({ command: 'node', args: ['-e', 'console.log(1)'], cwd: SANDBOX_DIR }, { contextKind: 'ui' })
     expect(r.ok).toBe(true)
     expect(r.result).toContain('exit=0')
   })
 
   it('P3b: confirm 级 (node) + ctx=ui + stub 允许 → cwd 在 sandbox 外仍被拒 (沙箱红线保留)', async () => {
-    setCommandContext('ui')
     setConfirmTransport(async () => true)
-    const r = await tool.execute({ command: 'node', args: ['-e', 'console.log(1)'], cwd: 'C:\\Windows' })
+    const r = await tool.execute({ command: 'node', args: ['-e', 'console.log(1)'], cwd: 'C:\\Windows' }, { contextKind: 'ui' })
     expect(r.ok).toBe(false)
     expect(r.error).toMatch(/sandbox|workspace/i)
   })
 
   // P2 (P2-框架接受: null byte → execFile 层拒 = 行为不变, 以实测为准)
   it('P2: args 含 null byte 拒绝', async () => {
-    setCommandContext('ui')
     setConfirmTransport(async () => true)
-    const r = await tool.execute({ command: 'echo', args: ['safe\u0000evil'] })
+    const r = await tool.execute({ command: 'echo', args: ['safe\u0000evil'] }, { contextKind: 'ui' })
     expect(r.ok).toBe(false)
     expect(r.error).toMatch(/null byte/i)
   })
 
   it('deny 级命令 (rm) 拒绝 — v3 红线: 未知命令一律 deny', async () => {
-    setCommandContext('ui')
-    const r = await tool.execute({ command: 'rm', args: ['-rf', '/'] })
+    const r = await tool.execute({ command: 'rm', args: ['-rf', '/'] }, { contextKind: 'ui' })
     expect(r.ok).toBe(false)
     expect(r.error).toMatch(/不在自动\/确认名单|denied/i)
   })
 
   it('shell metacharacter 拒绝', async () => {
-    setCommandContext('ui')
-    const r = await tool.execute({ command: 'node; echo PWN', args: [] })
+    const r = await tool.execute({ command: 'node; echo PWN', args: [] }, { contextKind: 'ui' })
     expect(r.ok).toBe(false)
     expect(r.error).toMatch(/非法字符|metachar/i)
   })

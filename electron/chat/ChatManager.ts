@@ -18,7 +18,6 @@ import { TaskExecutor } from '../task/TaskExecutor';
 import { InstructionGenerator } from '../task/InstructionGenerator';
 import { HistoryAssembler } from './HistoryAssembler';
 import { SelfLearner } from '../learning/SelfLearner';
-import { setCommandContext } from '../agent/tools/commandDecide';
 import type { Conversation, ChatMessage, ChatSettings, MessageRole, StreamChunk } from './ChatTypes';
 import type { AgentBrain, Disposable } from '../contracts/types';
 
@@ -980,8 +979,8 @@ export class ChatManager {
     }
     const effectiveKind = contextKind ?? 'headless'
     try {
-      // 模块态贯穿: 在脑执行前设 (裁决 #4), 让 LlmAgentBrain 内部的 tool.call() 继承
-      try { setCommandContext(effectiveKind) } catch { /* noop — 脑侧默认 headless, 兜底 */ }
+      // #005 Step 0 (DEV-014 切除): 派生逻辑留入口 (本处), 经 think(ctx.contextKind) 显式贯穿 —
+      // 模块态 setCommandContext 已删; 本处是唯一派生点 (gateway 轨走 source 参数, 不经此处)。
       const decision = await this.registeredAgent.think({ conversationId: msg.id, content: msg.content, contextKind: effectiveKind });
       this.log.debug('[ChatManager] dispatchToAgent: agent decision', { decision, contextKind: effectiveKind });
     } catch (e) {

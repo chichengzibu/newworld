@@ -7,7 +7,6 @@ import * as path from 'node:path'
 import { TEST_USER_DATA } from './test-host'
 import {
   execCommand,
-  setCommandContext,
   setConfirmTransport,
   setAuditSink,
 } from '../../electron/agent/tools/commandDecide'
@@ -22,16 +21,13 @@ describe('PART4-6: 审计文件人工查验 (真实 sink 落盘)', () => {
   })
 
   it('4 条覆盖: 正向(ui 2 行)+deny(rm)+secrets+headless-confirm → 全合法 JSON + start/finish 配对', async () => {
-    setCommandContext('ui')
     setConfirmTransport(async () => true)
     await execCommand({ command: 'node', args: ['-e', 'console.log(1)'], contextKind: 'ui' })
     let headlessReject: any
-    setCommandContext('headless')
     headlessReject = await execCommand({ command: 'node', args: ['-e', 'console.log(2)'], contextKind: 'headless' })
     expect(headlessReject.denied).toBe(true)
     // headless 拒 → 只 1 行 deny
     expect(headlessReject.humanConfirm).toMatch(/false|not-required/)
-    setCommandContext('ui')
     const rmReject = await execCommand({ command: 'rm', args: ['-rf', '/'], contextKind: 'ui' })
     expect(rmReject.denied).toBe(true)
     await execCommand({ command: 'cat', args: ['/home/u/.ssh/id_rsa'], contextKind: 'ui' })
