@@ -50,6 +50,26 @@ export type LlmAgentEvent =
 
 export type LlmAgentEventHandler = (e: LlmAgentEvent) => void
 
+/**
+ * ============ #004 run 层 checkpoint 事件 (append-only 流的事件类型, A1) ============
+ * 由 brain(生产方)定义类型; 消费者 = RunCheckpointManager(纯函数, A1-A3)。
+ * 依赖方向单向: manager `import type { ... } from './LlmAgentBrain'`;
+ * brain 【不】 import 任何 manager 模块 / fs (接缝仅 opts.checkpoint 回调)。
+ */
+export interface RunSnapshotPayload {
+  runId: string
+  conversationId: string
+  status: 'running' | 'interrupted' | 'finalized'
+  iteration: number
+  /** 含轮内工具结果 (恢复后 LLM 上下文完整, 非 user 单声道) */
+  messages: LlmMessage[]
+  /** run 内工具执行账 (name/ok/durationMs), 恢复后可续跑记账 */
+  toolState: Array<{ name: string; ok: boolean; durationMs: number }>
+}
+export type RunCheckpointEvent =
+  | (RunSnapshotPayload & { type: 'run.snapshot' })
+  | { type: 'run.status'; runId: string; conversationId: string; status: 'running' | 'interrupted' | 'finalized'; reason?: string }
+
 class LlmAgentBrainEventBus {
   private static instance: LlmAgentBrainEventBus
   private handlers: Set<LlmAgentEventHandler> = new Set()
@@ -143,6 +163,12 @@ export class LlmAgentBrain implements AgentBrain {
     /** 多轮历史段 (可选) — 由会话层拉取真源后传入, 拼入 [system, ...history, 当前prompt]。
      *  brain 【不自存】历史 (保持无状态): history 归会话层, #004 checkpoint 才有明确快照对象 (DEV-020) */
     history?: Array<{ role: string; content: string }>
+    /** #004: 会话 id — checkpoint 快照的归属键 (run 层, 对话层不入快照) */
+    conversationId?: string
+    /** #004: checkpoint 上推钩子 (纯函数 manager 的 append 入口; brain 零 fs 零 manager import)。
+     *  接缝 4 处: 每工具结果落 messages 后 / abort 退出前 / 异常 throw 前 / final_answer。
+     *  不传 = 不产生 checkpoint (休眠态, 与 history 参数同一模式); 钩子异常不得影响 run 主流程。 */
+    checkpoint?: (ev: RunCheckpointEvent) => void
   } = {}): Promise<{ runId: string; content: string; iterations: number; totalDurationMs: number; toolCalls: Array<{ name: string; ok: boolean; durationMs: number }> }> {
     const runId = opts.runId ?? `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     const controller = new AbortController()
@@ -177,9 +203,27 @@ export class LlmAgentBrain implements AgentBrain {
 
     let finalContent = ''
     let iterations = 0
+    const convId = opts.conversationId ?? 'unknown'
+    // #004: checkpoint 安全推 — 钩子异常吞掉并记 log, 绝不影响 run 主流程 (红线)
+    const pushCkpt = (ev: RunCheckpointEvent): void => {
+      try { opts.checkpoint?.(ev) } catch (e) { this.log.warn(`LlmAgentBrain: checkpoint 钩子异常(run 不受影响): ${e instanceof Error ? e.message : e}`) }
+    }
+    const takeCkpt = (status: 'running' | 'interrupted' | 'finalized', reason?: string): RunCheckpointEvent =>
+      status === 'interrupted'
+        ? { type: 'run.status', runId, conversationId: convId, status, reason }
+        : ({
+            type: 'run.snapshot' as const,
+            runId,
+            conversationId: convId,
+            status,
+            iteration: iterations,
+            messages: JSON.parse(JSON.stringify(messages)) as LlmMessage[], // 发送瞬间深拷贝 — brain tool-loop 后续 push 不污染快照 (#003-fix B-2 同款防御)
+            toolState: [...toolCallsLog],
+          })
     try {
       for (let iter = 1; iter <= maxIter; iter++) {
         if (state.aborted) {
+          pushCkpt(takeCkpt('interrupted', 'aborted')) // #004 接缝②: 中止前 flush 当前态 (A2 append-only)
           LlmAgentBrainEvents.emit({ type: 'run_aborted', runId, iterations: iter - 1 })
           this.runs.delete(runId)
           return { runId, content: finalContent, iterations: iter - 1, totalDurationMs: Date.now() - startMs, toolCalls: toolCallsLog }
@@ -238,6 +282,7 @@ export class LlmAgentBrain implements AgentBrain {
           // tool 消息: OpenAI 格式用 content 字段, 部分 provider 也会读 name
           const toolContent = exec.ok ? exec.result : `Error: ${exec.error ?? 'unknown'}`
           messages.push({ role: 'tool', content: toolContent, toolCallId: tc.id })
+          pushCkpt(takeCkpt('running')) // #004 接缝①: 每工具结果落 messages 后 upsert (running)
         }
       }
 
@@ -250,12 +295,14 @@ export class LlmAgentBrain implements AgentBrain {
 
       const totalDurationMs = Date.now() - startMs
       LlmAgentBrainEvents.emit({ type: 'final_answer', runId, content: finalContent, iterations, totalDurationMs })
+      pushCkpt(takeCkpt('finalized')) // #004 接缝④: 终态标记 (run 完整, 恢复时无需续跑)
       this.runs.delete(runId)
       return { runId, content: finalContent, iterations, totalDurationMs, toolCalls: toolCallsLog }
     } catch (e) {
       const totalDurationMs = Date.now() - startMs
       const errMsg = e instanceof Error ? e.message : String(e)
       LlmAgentBrainEvents.emit({ type: 'run_error', runId, error: errMsg, iterations, totalDurationMs })
+      pushCkpt(takeCkpt('interrupted', `exception: ${errMsg}`)) // #004 接缝③: 异常 throw 前 flush (spec#5 "异常时 flush")
       this.runs.delete(runId)
       throw e
     }
@@ -323,7 +370,13 @@ export class LlmAgentBrain implements AgentBrain {
     try {
       // DEV-020: think 内把会话层提供的 history 注入 run (brain 仍无状态, 只透传不自存)
       const history = (ctx as { history?: Array<{ role: string; content: string }> }).history
-      const r = await this.run(content, history ? { history } : {})
+      // #004: 会话层可透传 checkpoint 钩子 (W5 接线时由 ChatManager 提供; ctx 索引签名已允许)
+      const ckpt = (ctx as { checkpoint?: (ev: RunCheckpointEvent) => void }).checkpoint
+      const runOpts: Parameters<typeof this.run>[1] = {}
+      if (history) runOpts.history = history
+      if (ckpt) runOpts.checkpoint = ckpt
+      if (ctx.conversationId) runOpts.conversationId = String(ctx.conversationId)
+      const r = await this.run(content, runOpts)
       return { action: 'reply', payload: { text: r.content, model: 'agent-v0.1', durationMs: r.totalDurationMs, iterations: r.iterations, toolCalls: r.toolCalls } }
     } catch (e) {
       this.log.warn('LlmAgentBrain.think: fallback stub', e)
@@ -349,10 +402,14 @@ export class LlmAgentBrain implements AgentBrain {
   }
 
   async checkpoint(): Promise<string> {
-    return `llm-brain-${Date.now()}`
+    // #004: run 层 checkpoint 由会话层经 opts.checkpoint 上推到 RunCheckpointManager (append-only 纯函数)。
+    // 旧 stub (v0.1, 返回时间戳串、零调用者 — P1/P5 实证) 已删除; 契约接口保留 (AgentBrain, DEV-024)。
+    throw new Error('LlmAgentBrain.checkpoint: 已废弃 — 使用会话层 opts.checkpoint 钩子 (#004)')
   }
 
   async restore(_id: string): Promise<void> {
-    this.log.debug(`LlmAgentBrain.restore called (no-op in v0.1)`)
+    // #004: 恢复入口 = RunCheckpointManager.collectForRestore(dir, runId) → 重放 messages (纯读)。
+    // 旧 stub (v0.1 no-op, 零调用者) 已删除; 契约接口保留 (AgentBrain, DEV-024)。
+    throw new Error('LlmAgentBrain.restore: 已废弃 — 使用 RunCheckpointManager (#004)')
   }
 }
