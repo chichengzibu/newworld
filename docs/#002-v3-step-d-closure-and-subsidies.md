@@ -76,11 +76,28 @@
 
 ---
 
-## #3 冒烟剧本 (零代码路径, preload L937 已暴露)
+## #3 冒烟 (S2 改 2026-10-12: Playwright Electron 自动化轨, 签名人 = 自动化证据)
 
-**实读证据**: `electron/preload.ts:L937` 已暴露 `electronAPI.openclaw.execute(request)`, **零新代码**可冒烟
+**裁决变更**: 用户解除人工点击要求, **「弹窗人工冒烟(待用户亲手)」改为「自动化冒烟(Playwright Electron)」**。
+签名证据源 = `tests/e2e/confirm-dialog.smoke.spec.ts` (真 app 启动 + 真 DOM 点按钮 + 审计字段断言, 零生产代码改动)。
 
-**devtools 冒烟 script** (用户在 Hermes 桌面 chat 里开 devtools, console 里贴):
+**运行配方 (S2 要求写进 docs)**:
+```bash
+npm run build                        # 前置: dist-electron/main.js 必须已产出
+E2E_ELECTRON=1 PLAYWRIGHT_BROWSERS_PATH=0 npx playwright test tests/e2e/confirm-dialog.smoke.spec.ts --workers=1
+```
+> `E2E_ELECTRON=1` 才启动 Electron (不设时 2 skipped, CI 防御, 与其余 6 spec 同配方);
+> `PLAYWRIGHT_BROWSERS_PATH=0` 钉死项目本地浏览器;
+> 审计落 fresh temp userData (`<tmp>/pipiclaw-p0-confirm-dialog-*/audit/openclaw.audit.jsonl`), 不涉生产 %APPDATA% 路径。
+
+**S1-allow / S2-deny 签名 (都绑本次调用: 行数差 + 字段解析, 禁只验"文件变长")**:
+- S1-allow: 真点击「允许」→ `res.success===true` (`git --version` 真跑出 `git version 2.55.0.windows.2`); 审计**恰新增 2 行** (start `humanConfirm='true'` `confirmChannel='ui'` / finish `exit=0`, 同 opId)
+- S2-deny: 真点击「拒绝」→ `res.data.errorCode==='PERMISSION_DENIED'`; 审计**恰新增 1 行** (`phase='deny'` `humanConfirm='false'` `confirmChannel='ui-reject/timeout'`)
+- 两例 serial 同文件顺序写, 禁并行
+
+> 命令选择注 (S1 用 `git --version` 而非 `git status`): exec 的 cwd 固定为 `<userData>/sandbox` (commandDecide.ts:256 实读), 该目录非 git repo, `git status` 必 fatal — 链路与审计均真跑通, 仅命令退出码非 0。属既有 sandbox 行为, 非本单引入, 未改生产码。
+
+**devtools 手工复核参考路径** (保留供人工复核, 不再是签名路径; `electron/preload.ts:L937` 证据不变):
 > **补丁批 commit A 后**: `contextKind` 改由 `main` 进程按入口身份派生(渲染端 IPC → `ui`),
 > 渲染端 **不再也不能** 传 `params.contextKind` (gateway 忽略它, 防外部自放行)。
 > 脚本相应改: 去掉 `contextKind` 字段, 直接走 `openclaw:execute` IPC 即可触发 `ui` 派生。
@@ -98,26 +115,18 @@ const res = await window.electronAPI.openclaw.execute({
   }
 });
 console.log('[冒烟结果]', res);
-// 预期:
-//   1. 渲染端弹窗 "命令执行确认" + "$ git status" + 拒绝/允许两键
-//   2. 用户按 允许
-//   3. 命令执行, res.success === true
-//   4. res.data.result.stdout 含 "On branch master"
-//   5. %APPDATA%/PiPiClaw/audit/openclaw.audit.jsonl 末 2 行:
-//        [N]  start  ... git status ... exit="pending" humanConfirm="true" confirmChannel="ui" contextKind="ui"
-//        [N+1] finish ... exit=0 ... (同 opId)
 ```
 
 > **攻击自测 (可选)**: 同一段把 `command:'git'` 换成外部 HTTP 触发 (`localhost:18789/execute`) 且 params 塞 `contextKind:'ui'` →
 > gateway 读不到 `ui` (source='headless') → confirm 级拒 → 冒烟攻击面关闭。已由 `tests/unit/gateway-source-injection.test.ts` 覆盖。
 
-**冒烟通过标准** (用户亲手签):
-- ✅ devtools 执行后 30s 内弹出命令确认弹窗 (标题+`$ git status`+两键)
-- ✅ 按 允许 后 命令真执行 (`res.success === true`)
-- ✅ `%APPDATA%` 审计文件出现 2 行 (start 行 `exit="pending"` + `humanConfirm="true"`; finish 行 `exit=0`, 同 opId)
-- ✅ **用户亲手** 在弹窗里按 "允许", 我**不代签**
+**冒烟通过标准 (S2 改: 自动化证据)**:
+- ✅ spec **2 passed** (真回路全程: 真 app 起 → 弹窗真出现 → 真点击按钮 → IPC 真实返回, 无 DI stub)
+- ✅ 审计断言绑定本次调用 (行数差 = 2 / 1 + 字段解析), 非"文件变长"
+- ✅ 报告标注**签名人 = 自动化证据**, 禁出现"用户已验证"表述
 
-**冒烟后动作**: 我读 `%APPDATA%/PiPiClaw/audit/openclaw.audit.jsonl` 末 2 行贴出来 + 用户口头确认 "冒烟过"。
+~~**冒烟后动作**: 我读 `%APPDATA%/PiPiClaw/audit/openclaw.audit.jsonl` 末 2 行贴出来 + 用户口头确认 "冒烟过"。~~
+(2026-10-12 作废 — S2 裁决改自动化签; 上列手工动作仅留作复核参考路径时的操作提示)
 
 ---
 
