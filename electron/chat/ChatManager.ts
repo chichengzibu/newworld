@@ -16,6 +16,7 @@ import { ModelManager } from '../models/ModelManager';
 import { HermesMemory } from '../hermes/HermesMemory';
 import { TaskExecutor } from '../task/TaskExecutor';
 import { InstructionGenerator } from '../task/InstructionGenerator';
+import { HistoryAssembler } from './HistoryAssembler';
 import { SelfLearner } from '../learning/SelfLearner';
 import { setCommandContext } from '../agent/tools/commandDecide';
 import type { Conversation, ChatMessage, ChatSettings, MessageRole, StreamChunk } from './ChatTypes';
@@ -240,7 +241,13 @@ export class ChatManager {
       const instructionGenerator = InstructionGenerator.getInstance();
       const taskExecutor = TaskExecutor.getInstance();
 
-      const steps = await instructionGenerator.generateTaskSteps(content, providerId, modelId);
+      // DEV-020 修冷启动: 从真源 (main 侧 ChatConfig.conversations[id].messages) 拉前 N-1 轮历史
+      //   userMessage 已在 L235 addMessage 落真源 → 用 userMessage.id 排除, 防当前轮被重复拼
+      //   HistoryAssembler: 窗口 10 轮 + 16000 字符, system 恒首位/当前 user 恒末位 (生成器侧拼装)
+      const _conv = this.config.getConversation(conversationId);
+      const _history = HistoryAssembler.buildHistory(_conv?.messages ?? [], userMessage.id);
+
+      const steps = await instructionGenerator.generateTaskSteps(content, providerId, modelId, _history);
       
       if (steps && steps.length > 0) {
         this.log.info(`[ChatManager] [${traceId}] 大模型生成了 ${steps.length} 个步骤，开始执行`);

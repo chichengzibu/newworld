@@ -140,6 +140,9 @@ export class LlmAgentBrain implements AgentBrain {
     maxIterations?: number
     systemPrompt?: string
     apiBaseUrl?: string
+    /** 多轮历史段 (可选) — 由会话层拉取真源后传入, 拼入 [system, ...history, 当前prompt]。
+     *  brain 【不自存】历史 (保持无状态): history 归会话层, #004 checkpoint 才有明确快照对象 (DEV-020) */
+    history?: Array<{ role: string; content: string }>
   } = {}): Promise<{ runId: string; content: string; iterations: number; totalDurationMs: number; toolCalls: Array<{ name: string; ok: boolean; durationMs: number }> }> {
     const runId = opts.runId ?? `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     const controller = new AbortController()
@@ -157,8 +160,17 @@ export class LlmAgentBrain implements AgentBrain {
 
     LlmAgentBrainEvents.emit({ type: 'run_start', runId, prompt, tools: selectedToolNames })
 
+    // DEV-020 修冷启动: 拼多轮历史段 [system, ...history, 当前prompt]
+    //   history 由会话层提供 (brain 无状态, 不自存); 保持无状态 → #004 checkpoint 快照对象明确
+    const historySeg: LlmMessage[] = (opts.history && opts.history.length > 0)
+      ? (opts.history as Array<{ role: string; content: string }>).map((m) => ({
+          role: (m.role as LlmMessage['role']),
+          content: m.content,
+        }))
+      : []
     const messages: LlmMessage[] = [
       { role: 'system', content: systemPrompt },
+      ...historySeg,
       { role: 'user', content: prompt },
     ]
     const llmSchema = toolsToLlmSchema(selectedTools)
@@ -309,7 +321,9 @@ export class LlmAgentBrain implements AgentBrain {
       return { action: 'reply', payload: { text: '', model: '', durationMs: 0 } }
     }
     try {
-      const r = await this.run(content)
+      // DEV-020: think 内把会话层提供的 history 注入 run (brain 仍无状态, 只透传不自存)
+      const history = (ctx as { history?: Array<{ role: string; content: string }> }).history
+      const r = await this.run(content, history ? { history } : {})
       return { action: 'reply', payload: { text: r.content, model: 'agent-v0.1', durationMs: r.totalDurationMs, iterations: r.iterations, toolCalls: r.toolCalls } }
     } catch (e) {
       this.log.warn('LlmAgentBrain.think: fallback stub', e)

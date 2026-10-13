@@ -1,52 +1,44 @@
 /**
- * #003 多轮冷启动验证 —— 两管道各一组判定测试 (Step B, 测试先行, 禁直接修)
+ * #003-fix 多轮记忆实施验证 + 回归钉 (DEV-020)
+ *
+ * ═══ 本文件职责 (Step B-4) ═══
+ *   修复已实施 (HistoryAssembler + 两管道 history 接缝)。判定测试从
+ *   #003 的 it.fails(锁定冷启动)【翻正】为 it(验证多轮记忆生效), 并新增
+ *   HistoryAssembler 正向断言 (助手轮次在场 / 窗口截断 / 真源映射回归钉)。
  *
  * ═══ 红线 (用户 2026-10-12) ═══
- *   "注入假 LLM server（替身，非放宽 mock——红线语义不变）"
- *   → 被测单元(管道A=InstructionGenerator / 管道B=LlmAgentBrain.run) 走【真实代码】,
+ *   "注入假 LLM server（替身，非放宽 mock）" → 被测单元走【真实代码】,
  *     只在【传输层】插替身:
- *       - 管道A: 假 http LLM server (真 makeRequest → 真 protocol.request → 假 127.0.0.1)
- *       - 管道B: 假 LlmClient.streamChat (真 callLlmOnce → 稳定 async generator 委托)
- *   → 请求体在传输边界被【真实捕获】, 非对被测单元内部 mock。
+ *       - 管道A: 假 http LLM server (真 makeRequest → 真 protocol.request → 127.0.0.1)
+ *       - 管道B: 稳定 streamChat 委托 (真 callLlmOnce → async generator)
+ *   → 请求体在传输边界被【真实捕获】。
  *
- * ═══ 判定的两个形态 (ROE: 禁假绿, 红=证据) ═══
- *   - [harness] = 普通断言 (绿): 证伪"假阳性 RED" —— 替身通路可用 + 当轮指令确实在请求体
- *   - [判定]    = `it.fails()` (绿 当前): 断言"多轮【应】携带第一轮 user 消息 + 工具结果"
- *                  当前该理想断言【失败】→ `.fails` 判为绿 = 正式锁定"冷启动【属实】"这一判定。
- *     ★ 语义: it.fails 绿 = 确认冷启动; 将来 Step C 修复后该断言转通过 → `.fails` 反而变红
- *                 → 即"冷启动已修, 移除 .fails 标记", 天然自校验, 无需人工记得。
+ * ═══ 架构 (修正确认, 非冷启动) ═══
+ *   会话层 (ChatManager) 用 HistoryAssembler 从真源拉历史 → 显式参数传给
+ *   InstructionGenerator.generateTaskSteps(history) / LlmAgentBrain.run({history})。
+ *     - generator / brain 【无状态】, 不自存历史 (禁新增模块态; #004 checkpoint 前提)
+ *     - 真源 = main 侧 ChatConfig.conversations[id].messages (前 N-1 轮在此)
+ *   → 故断言场景 = "会话层接线后, 第二轮请求体应含第一轮"(修复生效的判据)
  *
- * ═══ Step A 侦察结论 (file:line, 只读) ═══
- *   管道A (活跃): ChatManager.sendMessage ChatManager.ts:243
- *     → generateTaskSteps(content,...) 只带当轮 content (签名无 conversationId/历史)
- *     → InstructionGenerator.callModel InstructionGenerator.ts:308-311
- *         硬编码 messages = [{system},{user: userInstruction}]  ← 无历史入口
- *     → makeRequest → ollama/openai 走 /chat/completions | /api/chat (InstructionGenerator.ts:375-379)
- *   管道B (休眠): LlmAgentBrain.run LlmAgentBrain.ts:160-163
- *     每次 run 重建 messages = [{system},{user: prompt}]
- *     run 内 tool 结果 push 进【本次 run 局部数组】(L188/L228), 下一次 run 冷启
- *     think LlmAgentBrain.ts:312 → run(content) 也只传 content
- *     (代码自证: LlmAgentBrain.ts:12 "每次 think() 都是独立一次 multi-turn run")
- *
- * ═══ 禁 ═══ main.ts 接线 / 安全链(咽喉/审计/确认)一律不碰 (本文件纯读+断言, 零生产改动)
+ * ═══ 禁 ═══ main.ts 接线 / 安全链(咽喉/审计/确认)一律不碰 (本文件断言层零生产改动)
  */
 import { describe, it, expect, vi, beforeAll, afterAll } from 'vitest'
 import http from 'node:http'
+import { HistoryAssembler, HISTORY_WINDOW_TURNS, HISTORY_MAX_CHARS } from '../../electron/chat/HistoryAssembler'
 
-// ── 替身: electron 文件级 mock (LogManager/tools 可能间接依赖 BrowserWindow) ──
 vi.mock('electron', () => ({
   BrowserWindow: Object.assign(vi.fn(function () {}), { getAllWindows: () => [] }),
   shell: { openExternal: vi.fn() },
   clipboard: { readText: vi.fn(() => ''), writeText: vi.fn() },
 }))
 
-// ── 管道A 替身: ModelManager → baseUrl 委托到 holderA (每次 getProvider 调用时读当前值, 运行时可重定向) ──
+// ── 管道A 替身: ModelManagerbaseUrl 委托 holderA (每次 getProvider 求值, 运行时重定向) ──
 const holderA = vi.hoisted(() => ({ ref: { url: 'http://127.0.0.1:0' } }))
 vi.mock('../../electron/models/ModelManager', () => ({
   ModelManager: { getInstance: () => ({
     getProvider: () => ({
       id: 'fake', name: 'FakeLLM', type: 'openai', apiKey: 'test-key',
-      baseUrl: holderA.ref.url,   // 每次调用求值 → beforeAll 里设成真假服务器端口
+      baseUrl: holderA.ref.url,
       models: [{ id: 'fake-model', name: 'Fake Model', enabled: true }],
     }),
     getAllProviders: () => [],
@@ -59,7 +51,7 @@ vi.mock('../../electron/skill/SkillLoader', () => ({
   }) },
 }))
 
-// ── 管道B 替身: 空 tools + 稳定 streamChat 委托 (构造时绑定本函数, 非值拷贝 null) ──
+// ── 管道B 替身: 空 tools + 稳定 streamChat 委托 (构造时绑定函数, 非值拷贝 null) ──
 vi.mock('../../electron/agent/tools/index.ts', () => ({
   BUILTIN_TOOLS: [],
   toolsToLlmSchema: () => [],
@@ -67,15 +59,15 @@ vi.mock('../../electron/agent/tools/index.ts', () => ({
 const llmCaptureB = vi.hoisted(() => ({ reqs: [] as any[] }))
 vi.mock('../../electron/llm/LlmClient', () => ({
   LlmClient: { getInstance: () => ({
-    // 稳定 async generator: 每次被调都 push 到 llmCaptureB (holder 引用不变, 避免构造时值拷贝 null)
     streamChat: async function* (_req: any) {
-      llmCaptureB.reqs.push(_req)
+      // 发送瞬间深拷贝 messages 快照 (忠实捕获"请求体", 避免 brain tool-loop 后续 push 污染)
+      llmCaptureB.reqs.push({ ..._req, messages: JSON.parse(JSON.stringify(_req.messages ?? [])) })
       yield { type: 'content', delta: 'DONE', accumulated: { content: 'DONE' } }
     },
   }) },
 }))
 
-// ── 假 LLM http server (管道A): 捕获请求体, 恒返 200 空 choices (makeRequest → null) ──
+// ── 假 LLM http server (管道A): 捕获请求体, 恒返 200 空 choices ──
 type FakeLlm = { url: string; captured: any[]; close: () => void }
 async function startFakeLlmServer(): Promise<FakeLlm> {
   const captured: any[] = []
@@ -96,9 +88,79 @@ async function startFakeLlmServer(): Promise<FakeLlm> {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// 管道A (活跃链) — InstructionGenerator 多轮冷启动判定
+// HistoryAssembler 正向断言 (唯一实现, 两管道共用)
 // ═══════════════════════════════════════════════════════════════════
-describe('#003 管道A (活跃链 InstructionGenerator) 多轮冷启动判定', () => {
+describe('HistoryAssembler 正向断言 (助手轮次 + 窗口截断 + 真源映射)', () => {
+  const turn = (n: number, assistant = true) =>
+    assistant
+      ? [{ id: `u${n}`, role: 'user', content: `USER-${n}`, status: 'sent' },
+         { id: `a${n}`, role: 'assistant', content: `ASSISTANT-${n}`, status: 'sent' }]
+      : [{ id: `u${n}`, role: 'user', content: `USER-${n}`, status: 'sent' }]
+
+  it('H-1 助手轮次在场 + 当前 user 恒末位 (非 user 单声道)', () => {
+    // 真实场景: 前两轮完整 (user+assistant), 当前轮 user 是【末条】(其后无 assistant, 那是未来回复)
+    const src = [
+      ...turn(1),   // u1, a1
+      ...turn(2),   // u2, a2
+      { id: 'u3', role: 'user', content: 'USER-3-CURRENT', status: 'sent' }, // 当前轮, 末条
+    ]
+    const h = HistoryAssembler.buildHistory(src, 'u3')   // 排除当前 u3
+    expect(h.map((m) => m.content), '保留 u1,a1,u2,a2, 当前 u3 排除').toEqual(['USER-1', 'ASSISTANT-1', 'USER-2', 'ASSISTANT-2'])
+    expect(h[h.length - 1].role, '历史段末位应是 assistant (非被排除的当前 user)').toBe('assistant')
+    // compose: system 恒首位 + 当前 user 恒末位
+    const full = HistoryAssembler.compose('SYS-PROMPT', h, 'CURRENT-INSTRUCTION')
+    expect(full[0]).toEqual({ role: 'system', content: 'SYS-PROMPT' })
+    expect(full[full.length - 1]).toEqual({ role: 'user', content: 'CURRENT-INSTRUCTION' })
+  })
+
+  it('H-2 窗口截断: K+1 轮时最老轮被丢 (超 maxTurns 保留最近 N 轮)', () => {
+    // 5 轮, 窗口 10 → 全保留
+    let src: any[] = []
+    for (let i = 1; i <= 5; i++) src.push(...turn(i))
+    expect(HistoryAssembler.buildHistory(src, 'u999').filter((m) => m.role === 'user').length).toBe(5)
+    // 15 轮, 窗口 10 → 只留最近 10 user
+    src = []
+    for (let i = 1; i <= 15; i++) src.push(...turn(i))
+    const h15 = HistoryAssembler.buildHistory(src, 'u999')
+    const users = h15.filter((m) => m.role === 'user')
+    expect(users.length, '15 轮超窗, 应剩 10 user').toBe(HISTORY_WINDOW_TURNS)
+    expect(users[0].content, '最老 USER-1 被丢, 应从 USER-6 起').toBe('USER-6')
+    expect(users[users.length - 1].content).toBe('USER-15')
+  })
+
+  it('H-3 字符上限: 超 maxChars 从最老 turn 删 (至少留 1 轮)', () => {
+    // 4 轮, 每轮 content 6000 字符 (总 24000 > 16000) 窗口不限
+    const big = (c: string) => ({ id: 'u', role: 'user', content: c, status: 'sent' })
+    const src = [
+      big('A'.repeat(6000)), big('B'.repeat(6000)),
+      big('C'.repeat(6000)), big('D'.repeat(6000)),
+    ]
+    const h = HistoryAssembler.buildHistory(src, 'zzz', { maxTurns: 100 })
+    const total = h.reduce((s, m) => s + m.content.length, 0)
+    expect(total, '总字符应 <= HISTORY_MAX_CHARS').toBeLessThanOrEqual(HISTORY_MAX_CHARS)
+    // 保留的应是最近的 (D 一定在, A 最老应被丢)
+    expect(h.some((m) => m.content.startsWith('D'))).toBe(true)
+    expect(h.some((m) => m.content.startsWith('A')), '最老 A 应被丢').toBe(false)
+  })
+
+  it('H-4 真源映射回归钉: streaming 空壳 + 当前 user 被剔除', () => {
+    const src = [
+      { id: 'u1', role: 'user', content: 'USER-1', status: 'sent' },
+      { id: 'a1', role: 'assistant', content: '', status: 'streaming' }, // 空壳占位不入历史
+      { id: 'a1f', role: 'assistant', content: 'ASSISTANT-1', status: 'sent' },
+      { id: 'u2', role: 'user', content: 'USER-2-CURRENT', status: 'sent' }, // 当前轮
+    ]
+    const h = HistoryAssembler.buildHistory(src, 'u2')
+    expect(h.map((m) => m.role)).toEqual(['user', 'assistant'])
+    expect(h.some((m) => m.content === '')).toBe(false)
+    expect(h.some((m) => m.content === 'USER-2-CURRENT'), '当前 user 排除').toBe(false)
+  })
+})
+
+// ═══════════════════════════════════════════════════════════════════
+// 管道A (活跃链) — 会话层接线后, 第二轮请求体含第一轮 (修复生效)
+// ═══════════════════════════════════════════════════════════════════
+describe('#003-fix 管道A (活跃链) 多轮记忆 — 会话层接线验证', () => {
   let fake: FakeLlm
   beforeAll(async () => {
     fake = await startFakeLlmServer()
@@ -106,63 +168,76 @@ describe('#003 管道A (活跃链 InstructionGenerator) 多轮冷启动判定', 
   })
   afterAll(() => { fake?.close() })
 
-  const gen = async () =>
-    (await import('../../electron/task/InstructionGenerator')).InstructionGenerator.getInstance()
+  const ctx = async () => {
+    const { HistoryAssembler } = await import('../../electron/chat/HistoryAssembler')
+    const { InstructionGenerator } = await import('../../electron/task/InstructionGenerator')
+    return { HistoryAssembler, gen: InstructionGenerator.getInstance() }
+  }
 
-  it('A-1 [harness 绿] 两轮均发往假 LLM 且第二轮含当轮指令 (证伪假阳性 RED = 通路可用)', async () => {
+  it('A-1 [harness 绿] 通路可用 + 当轮指令在场 (证伪假阳性)', async () => {
     fake.captured.length = 0
-    const g = await gen()
-    await g.generateTaskSteps('TURN-ONE-SENTINEL', 'fake', 'fake-model')   // 第一轮
-    await g.generateTaskSteps('TURN-TWO-SENTINEL', 'fake', 'fake-model')   // 第二轮
-    const bodies = fake.captured
-    expect(bodies.length, '两轮应各发出 LLM 请求 (含重试 ≥2)').toBeGreaterThanOrEqual(2)
-    const turn2 = bodies.find((b) => JSON.stringify(b).includes('TURN-TWO-SENTINEL'))
-    expect(turn2, '第二轮请求体应被假 LLM 捕获').toBeTruthy()
-    expect(JSON.stringify(turn2), '通路证伪: 第二轮请求体应含当轮指令 TURN-TWO-SENTINEL').toContain('TURN-TWO-SENTINEL')
+    const { gen } = await ctx()
+    await gen.generateTaskSteps('TURN-TWO-SENTINEL', 'fake', 'fake-model')
+    const turn2 = fake.captured.find((b) => JSON.stringify(b).includes('TURN-TWO-SENTINEL'))
+    expect(turn2, '请求体应被假 LLM 捕获').toBeTruthy()
+    expect(JSON.stringify(turn2), '当轮指令应在请求体').toContain('TURN-TWO-SENTINEL')
+    // system 恒首位
+    expect(turn2.messages[0].role).toBe('system')
   })
 
-  it.fails('A-2 [判定·冷启动属实] 第二轮请求【应】携带第一轮 user 消息 + 工具结果 (当前不成立)', async () => {
+  it('A-2 [翻正·多轮记忆生效] 会话层拉真源历史 → 第二轮请求体含第一轮 user + 助手轮次', async () => {
     fake.captured.length = 0
-    const g = await gen()
-    await g.generateTaskSteps('TURN-ONE-SENTINEL', 'fake', 'fake-model')   // 第一轮 (user 消息)
-    await g.generateTaskSteps('TURN-TWO-SENTINEL', 'fake', 'fake-model')   // 第二轮
+    const { HistoryAssembler, gen } = await ctx()
+    // 真源 (main 侧 ChatConfig.conversations[id].messages): 第 1 轮 user + 助手已落盘 + 当前第 2 轮 user
+    const source = [
+      { id: 'u1', role: 'user', content: 'TURN-ONE-SENTINEL', status: 'sent' },
+      { id: 'a1', role: 'assistant', content: 'TURN-ONE-ASSISTANT-SENTINEL', status: 'sent' },
+      { id: 'u2', role: 'user', content: 'TURN-TWO-SENTINEL', status: 'sent' }, // 当前轮
+    ]
+    const history = HistoryAssembler.buildHistory(source, 'u2') // 排除当前轮
+    await gen.generateTaskSteps('TURN-TWO-SENTINEL', 'fake', 'fake-model', history)
     const turn2 = fake.captured.find((b) => JSON.stringify(b).includes('TURN-TWO-SENTINEL'))
     expect(turn2, '第二轮请求体应被捕获').toBeTruthy()
-    const blob = JSON.stringify(turn2)
-    // ── 多轮对话的正确行为: 第二轮必须记得第一轮 (当前该断言失败 = 冷启动属实的判据) ──
-    expect(blob, '应携带第一轮 user 消息').toContain('TURN-ONE-SENTINEL')
-    expect(blob, '应携带工具结果').toMatch(/"role"\s*:\s*"tool"/)
+    const blob = JSON.stringify(turn2.messages)
+    expect(blob, '多轮记忆①: 第二轮应携带第一轮 user 消息').toContain('TURN-ONE-SENTINEL')
+    expect(blob, '多轮记忆②: 助手轮次必须在场 (非 user 单声道)').toContain('TURN-ONE-ASSISTANT-SENTINEL')
+    expect(turn2.messages[0].role, 'system 恒首位').toBe('system')
+    expect(turn2.messages[turn2.messages.length - 1].content, '当前 user 恒末位').toBe('TURN-TWO-SENTINEL')
   })
 })
 
 // ═══════════════════════════════════════════════════════════════════
-// 管道B (休眠 LlmAgentBrain) — 同实例两轮 run 冷启动判定
+// 管道B (休眠 LlmAgentBrain) — run({history}) 多轮记忆验证
 // ═══════════════════════════════════════════════════════════════════
-describe('#003 管道B (休眠 LlmAgentBrain) 同实例两轮 run 冷启动判定', () => {
+describe('#003-fix 管道B (LlmAgentBrain) 多轮记忆 — run(history) 验证', () => {
   const brain = async () =>
     (await import('../../electron/agent/LlmAgentBrain')).LlmAgentBrain.getInstance()
 
-  it('B-1 [harness 绿] 两次 run 均发 LLM 请求且第二次含当轮 prompt (证伪假阳性 RED = 通路可用)', async () => {
+  it('B-1 [harness 绿] run 发 LLM 请求且当轮 prompt 在场 (通路可用)', async () => {
     llmCaptureB.reqs.length = 0
     const b = await brain()
-    await b.run('TURN-ONE-SENTINEL', { provider: 'openai' })   // 第一轮 run
-    await b.run('TURN-TWO-SENTINEL', { provider: 'openai' })   // 第二轮 run (同实例)
-    expect(llmCaptureB.reqs.length, '两轮 run 应各发出 LLM 请求 (≥2)').toBeGreaterThanOrEqual(2)
+    await b.run('TURN-TWO-SENTINEL', { provider: 'openai' })
     const turn2 = llmCaptureB.reqs.find((r) => JSON.stringify(r.messages ?? []).includes('TURN-TWO-SENTINEL'))
-    expect(turn2, '第二次 run 的 LLM 请求应被捕获').toBeTruthy()
-    expect(JSON.stringify(turn2.messages), '通路证伪: 应含当轮 prompt TURN-TWO-SENTINEL').toContain('TURN-TWO-SENTINEL')
+    expect(turn2, 'run 的 LLM 请求应被捕获').toBeTruthy()
+    expect(turn2.messages[0].role, 'system 恒首位').toBe('system')
   })
 
-  it.fails('B-2 [判定·冷启动属实] 第二次 run【应】携带第一轮 user 消息 + 工具结果 (当前不成立)', async () => {
+  it('B-2 [翻正·多轮记忆生效] run 携带会话层历史 → 请求体含第一轮 user + 工具结果', async () => {
     llmCaptureB.reqs.length = 0
     const b = await brain()
-    await b.run('TURN-ONE-SENTINEL', { provider: 'openai' })   // 第一轮
-    await b.run('TURN-TWO-SENTINEL', { provider: 'openai' })   // 第二轮
+    // 会话层提供第一轮历史 (含工具结果 — OpenAI role:'tool')
+    const history = [
+      { role: 'user', content: 'TURN-ONE-SENTINEL' },
+      { role: 'assistant', content: 'TURN-ONE-ASSISTANT' },
+      { role: 'tool', content: 'TOOL-RESULT-ONE-SENTINEL' },
+    ]
+    await b.run('TURN-TWO-SENTINEL', { provider: 'openai', history })
     const turn2 = llmCaptureB.reqs.find((r) => JSON.stringify(r.messages ?? []).includes('TURN-TWO-SENTINEL'))
-    expect(turn2, '第二次 run 的 LLM 请求应被捕获').toBeTruthy()
+    expect(turn2, 'run 请求体应被捕获').toBeTruthy()
     const blob = JSON.stringify(turn2.messages)
-    // ── 多轮对话的正确行为: 第二次 run 必须记得第一次 run 的 user 消息与工具结果 (当前失败 = 冷启动属实) ──
-    expect(blob, '应携带第一轮 user 消息').toContain('TURN-ONE-SENTINEL')
-    expect(blob, '应携带第一轮工具结果').toMatch(/"role"\s*:\s*"tool"/)
+    expect(blob, '多轮记忆①: 第二轮应携带第一轮 user 消息').toContain('TURN-ONE-SENTINEL')
+    expect(blob, '多轮记忆②: 第二轮应携带第一轮工具结果').toContain('TOOL-RESULT-ONE-SENTINEL')
+    expect(turn2.messages[turn2.messages.length - 1].role, '当前 user 恒末位').toBe('user')
+    expect(turn2.messages[turn2.messages.length - 1].content).toBe('TURN-TWO-SENTINEL')
   })
 })

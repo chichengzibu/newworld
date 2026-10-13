@@ -38,10 +38,17 @@ export class InstructionGenerator {
 
   /**
    * 从用户指令生成操作步骤
+   * @param history 多轮历史段 (可选) — 由会话层 (ChatManager) 用 HistoryAssembler 从真源拉取后传入;
+   *                非空时拼入 [system, ...history, user], 让模型记得前几轮 (DEV-020 修冷启动)
    */
-  public async generateTaskSteps(userInstruction: string, preferredProviderId?: string, preferredModelId?: string): Promise<GeneratedStep[] | null> {
+  public async generateTaskSteps(
+    userInstruction: string,
+    preferredProviderId?: string,
+    preferredModelId?: string,
+    history?: Array<{ role: string; content: string }>,
+  ): Promise<GeneratedStep[] | null> {
     this.log.info(`[InstructionGenerator] 生成步骤: ${userInstruction}`);
-    this.log.info(`[InstructionGenerator] 用户选择: provider=${preferredProviderId || '未指定'}, model=${preferredModelId || '未指定'}`);
+    this.log.info(`[InstructionGenerator] 用户选择: provider=${preferredProviderId || '未指定'}, model=${preferredModelId || '未指定'}, history=${history?.length ?? 0} 条`);
 
     try {
       let provider: any = null;
@@ -76,7 +83,7 @@ export class InstructionGenerator {
       this.log.info(`[InstructionGenerator] 实际使用: provider=${provider.name}(${provider.type}), model=${model.name || model.id}`);
 
       // 生成步骤
-      let steps = await this.callModel(userInstruction, provider, model);
+      let steps = await this.callModel(userInstruction, provider, model, history);
       
       // 【修改2：增加本地校验与补救】
       if (steps && steps.length > 0) {
@@ -241,7 +248,8 @@ export class InstructionGenerator {
   private async callModel(
     userInstruction: string,
     provider: any,
-    model: any
+    model: any,
+    history?: Array<{ role: string; content: string }>,
   ): Promise<GeneratedStep[] | null> {
     // 获取技能摘要和匹配的技能
     const skillSummaries = this.skillLoader.getAllSkillSummaries();
@@ -305,8 +313,12 @@ ${skillSummaries}
       this.log.info('[InstructionGenerator] 注入匹配技能到提示词');
     }
 
+    // DEV-020 修冷启动: 拼多轮历史段 [system, ...history, 当前user]
+    //   system 恒首位, 当前 user 恒末位; history = 会话层从真源拉取 (非 user 单声道)
+    const historySeg = (history && history.length > 0) ? history : [];
     const messages = [
       { role: 'system', content: systemPrompt },
+      ...historySeg,
       { role: 'user', content: userInstruction }
     ];
 
