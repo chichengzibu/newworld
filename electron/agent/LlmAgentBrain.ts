@@ -19,6 +19,8 @@ import type { LlmMessage, LlmToolCall, LlmStreamChunk } from '../llm/types'
 import type { AgentBrain, AgentContext, Decision, ToolCall, ToolResult, SubTask, SubAgent } from '../contracts/types'
 
 const MAX_ITERATIONS = 10
+/** #005 spawn R2 钉: v1 一层深度上限 — 超限 throw (非静默降级); 递归 Swarm 进 backlog, 届时移 AgentConfig 批 */
+const MAX_SPAWN_DEPTH = 1
 const DEFAULT_MODEL = 'qwen3.5:9b' // M1 v0.1 default: 本地 ollama, tool-capable
 
 const SYSTEM_PROMPT = `你是 PiPiClaw 代码助手 (M1 v0.1), 跟 ClaudeCode 一样能用 5 个工具:
@@ -65,10 +67,28 @@ export interface RunSnapshotPayload {
   messages: LlmMessage[]
   /** run 内工具执行账 (name/ok/durationMs), 恢复后可续跑记账 */
   toolState: Array<{ name: string; ok: boolean; durationMs: number }>
+  /** #005 spawn ⑥: 父 runId (子代理快照溯源; 父 run 快照无此字段) */
+  parentRunId?: string
 }
 export type RunCheckpointEvent =
   | (RunSnapshotPayload & { type: 'run.snapshot' })
-  | { type: 'run.status'; runId: string; conversationId: string; status: 'running' | 'interrupted' | 'finalized'; reason?: string }
+  | { type: 'run.status'; runId: string; conversationId: string; status: 'running' | 'interrupted' | 'finalized'; reason?: string; parentRunId?: string }
+
+/**
+ * #005 spawn (R1 工厂 + R3 单例保留): 新实例构造上下文。
+ * R1 钉: 子代理 = 【新 LlmAgentBrain 实例】(独立 messages/runId), 禁 `brain: this` 自引用 (旧 stub 债已删)。
+ * R3 钉: getInstance() 单例保留 (main.ts:217 类型面依赖); 子实例一律经 create() 工厂产出。
+ */
+export interface SpawnContext {
+  /** 深度 (父=0); 子 = 父+1; 超过 MAX_SPAWN_DEPTH 的 spawn 调用立即 throw */
+  depth: number
+  /** 父 runId (子快照溯源 parentRunId; 审计 DEV-023 同点接线批消费) */
+  parentRunId: string
+  /** 父上下文类型 (Step 0 机制承载: 显式传递, 禁模块态/禁子自派生) */
+  contextKind?: 'ui' | 'im_inbound' | 'scheduler' | 'headless'
+  /** 父 checkpoint 钩子 (子继承 → 同一 append-only 流 + parentRunId 溯源; 不接线 = 子无钩子, 休眠态) */
+  checkpointHook?: (ev: RunCheckpointEvent) => void
+}
 
 class LlmAgentBrainEventBus {
   private static instance: LlmAgentBrainEventBus
@@ -105,16 +125,27 @@ export class LlmAgentBrain implements AgentBrain {
   private tools: Map<string, PiPiTool> = new Map()
   /** runId → state */
   private runs: Map<string, RunState> = new Map()
+  /** #005 spawn: 出生上下文 (仅子实例持有; 父/单例为 undefined)。只读 — run 时显式下传, 不入脑内可变态 */
+  private readonly spawnCtx?: SpawnContext
 
-  private constructor() {
-    // 注册 5 工具
+  private constructor(spawnCtx?: SpawnContext) {
+    // 注册 5 工具 (父子同源 BUILTIN_TOOLS — 工具面零提权, spawn 案⑤)
     for (const t of BUILTIN_TOOLS) this.tools.set(t.metadata.name, t)
-    this.log.info(`LlmAgentBrain v0.1 初始化: ${this.tools.size} tools`)
+    this.spawnCtx = spawnCtx
+    this.log.info(`LlmAgentBrain v0.1 初始化: ${this.tools.size} tools${spawnCtx ? ` (子代理 parent=${spawnCtx.parentRunId}, depth=${spawnCtx.depth})` : ' (单例)'}`)
   }
 
   public static getInstance(): LlmAgentBrain {
     if (!LlmAgentBrain.instance) LlmAgentBrain.instance = new LlmAgentBrain()
     return LlmAgentBrain.instance
+  }
+
+  /**
+   * #005 spawn R3 钉: 工厂 — 子代理唯一构造入口 (单例 getInstance 保留, main.ts:217 依赖)。
+   * 新实例 = 独立工具注册表 / 独立 runs Map (同 BUILTIN_TOOLS 源, 零提权)。
+   */
+  public static create(spawnCtx: SpawnContext): LlmAgentBrain {
+    return new LlmAgentBrain(spawnCtx)
   }
 
   /** 列已注册 tool 的 metadata (供 agent:list-tools IPC 用) */
@@ -165,6 +196,11 @@ export class LlmAgentBrain implements AgentBrain {
     history?: Array<{ role: string; content: string }>
     /** #004: 会话 id — checkpoint 快照的归属键 (run 层, 对话层不入快照) */
     conversationId?: string
+    /** #005 spawn (预算刹车): token 预算上限 — 由 usage chunk 聚合; 超限时停 tool 循环取最后 assistant
+     *  为 final_answer + run_error 事件 (降级到 final, 不中断会话/不 throw)。缺省 = 不限 (本单不强加全局预算, spawn R1 裁决) */
+    maxTokens?: number
+    /** #005 spawn ⑥: 父 runId — 子 run 快照溯源 (RunCheckpointEvent.parentRunId 字段落事件流) */
+    parentRunId?: string
     /** #005 Step 0 (DEV-014 切除): contextKind 显式贯穿 — 由入口 (ChatManager 派生值) 经 think→run 传入,
      *  逐跳携带到 tool.execute(ctx); brain 不自存 (无状态红线)。缺省 = headless (BashTool 侧 fail-safe)。 */
     contextKind?: 'ui' | 'im_inbound' | 'scheduler' | 'headless'
@@ -207,13 +243,28 @@ export class LlmAgentBrain implements AgentBrain {
     let finalContent = ''
     let iterations = 0
     const convId = opts.conversationId ?? 'unknown'
+    // #005 spawn (预算隔离): usage 聚合 + 刹车判定 (run 局部变量, 无状态红线)
+    let totalTokens = 0
+    let budgetBraked = false
+    const budgetCheck = (): boolean => {
+      if (opts.maxTokens !== undefined && totalTokens >= opts.maxTokens && !budgetBraked) {
+        budgetBraked = true
+        this.log.warn(`LlmAgentBrain: run ${runId} token 预算刹车 (total=${totalTokens} >= max=${opts.maxTokens}) — 停 tool 循环取最后 assistant 为 final`)
+        LlmAgentBrainEvents.emit({ type: 'run_error', runId, error: `token budget exceeded (${totalTokens} >= ${opts.maxTokens})`, iterations, totalDurationMs: Date.now() - startMs })
+        return true
+      }
+      return false
+    }
     // #004: checkpoint 安全推 — 钩子异常吞掉并记 log, 绝不影响 run 主流程 (红线)
     const pushCkpt = (ev: RunCheckpointEvent): void => {
-      try { opts.checkpoint?.(ev) } catch (e) { this.log.warn(`LlmAgentBrain: checkpoint 钩子异常(run 不受影响): ${e instanceof Error ? e.message : e}`) }
+      // #005 spawn ⑥: 子实例 opts 未显式传钩子时继承 spawnCtx.checkpointHook (同一 append-only 流, parentRunId 溯源)
+      const hook = opts.checkpoint ?? this.spawnCtx?.checkpointHook
+      try { hook?.(ev) } catch (e) { this.log.warn(`LlmAgentBrain: checkpoint 钩子异常(run 不受影响): ${e instanceof Error ? e.message : e}`) }
     }
+    const parentRunId = opts.parentRunId ?? this.spawnCtx?.parentRunId
     const takeCkpt = (status: 'running' | 'interrupted' | 'finalized', reason?: string): RunCheckpointEvent =>
       status === 'interrupted'
-        ? { type: 'run.status', runId, conversationId: convId, status, reason }
+        ? { type: 'run.status', runId, conversationId: convId, status, reason, ...(parentRunId ? { parentRunId } : {}) }
         : ({
             type: 'run.snapshot' as const,
             runId,
@@ -222,6 +273,7 @@ export class LlmAgentBrain implements AgentBrain {
             iteration: iterations,
             messages: JSON.parse(JSON.stringify(messages)) as LlmMessage[], // 发送瞬间深拷贝 — brain tool-loop 后续 push 不污染快照 (#003-fix B-2 同款防御)
             toolState: [...toolCallsLog],
+            ...(parentRunId ? { parentRunId } : {}), // #005 spawn ⑥: 子快照溯源 (类型层: RunSnapshotPayload 扩展位)
           })
     try {
       for (let iter = 1; iter <= maxIter; iter++) {
@@ -231,6 +283,9 @@ export class LlmAgentBrain implements AgentBrain {
           this.runs.delete(runId)
           return { runId, content: finalContent, iterations: iter - 1, totalDurationMs: Date.now() - startMs, toolCalls: toolCallsLog }
         }
+        // #005 spawn (预算刹车): 每轮 LLM 调用前判定 — 超限即停 tool 循环,
+        // 下方 maxIter 收尾块取【最后 assistant】为 final (降级到 final, 不 throw 不中断会话)
+        if (budgetCheck()) break
         iterations = iter
         LlmAgentBrainEvents.emit({ type: 'iteration', runId, iter, message: `第 ${iter}/${maxIter} 轮` })
 
@@ -239,6 +294,8 @@ export class LlmAgentBrain implements AgentBrain {
           provider: opts.provider,
           model: opts.model ?? DEFAULT_MODEL,
         })
+        // #005 spawn 预算: 聚合本轮 usage → run 级 totalTokens (budgetCheck 下轮前判定)
+        if (typeof result.totalTokens === 'number') totalTokens += result.totalTokens
 
         // 把 assistant message 回写
         const assistantMsg: LlmMessage = { role: 'assistant', content: result.content }
@@ -276,8 +333,8 @@ export class LlmAgentBrain implements AgentBrain {
           let exec: ToolExecResult
           try {
             // #005 Step 0 (DEV-014 切除): contextKind 显式贯穿 — 禁脑读模块态 (全局态已删),
-            // 本 run 的 ctx 由入口派生后经 think→run 携带; 缺省 headless (BashTool 缺省 fail-safe)
-            const toolCtx = { contextKind: opts.contextKind ?? 'headless' }
+            // 本 run 的 ctx 由入口派生后经 think→run 携带; 子实例 (spawnCtx) 继承出生 ctx; 均无 → 'headless' (fail-safe)
+            const toolCtx = { contextKind: opts.contextKind ?? this.spawnCtx?.contextKind ?? 'headless' }
             exec = await tool.execute(args, toolCtx)
           } catch (e) {
             exec = { ok: false, result: '', error: `tool execution threw: ${(e as Error).message}` }
@@ -292,11 +349,14 @@ export class LlmAgentBrain implements AgentBrain {
         }
       }
 
-      if (!finalContent && iterations >= maxIter) {
-        // 超过 max 轮, 取最后一轮 assistant content
+      if (!finalContent && (budgetBraked || iterations >= maxIter)) {
+        // 预算超限 或 超过 max 轮 — 取最后一轮 assistant content (降级到 final, 不中断会话)
         const lastAssistant = messages.filter(m => m.role === 'assistant').pop()
         finalContent = lastAssistant?.content ?? ''
-        LlmAgentBrainEvents.emit({ type: 'run_error', runId, error: `超过 max iterations (${maxIter}), 强制结束`, iterations, totalDurationMs: Date.now() - startMs })
+        // budgetBraked 时 run_error 已在 budgetCheck() 内 emit, 此处只补 max 轮场景
+        if (!budgetBraked) {
+          LlmAgentBrainEvents.emit({ type: 'run_error', runId, error: `超过 max iterations (${maxIter}), 强制结束`, iterations, totalDurationMs: Date.now() - startMs })
+        }
       }
 
       const totalDurationMs = Date.now() - startMs
@@ -322,7 +382,7 @@ export class LlmAgentBrain implements AgentBrain {
     runId: string,
     signal: AbortSignal,
     opts: { provider?: 'openai' | 'openai-compatible' | 'anthropic' | 'zhipu'; model: string }
-  ): Promise<{ content: string; reasoning: string; toolCalls: LlmToolCall[]; error?: string }> {
+  ): Promise<{ content: string; reasoning: string; toolCalls: LlmToolCall[]; error?: string; totalTokens?: number }> {
     const req = {
       model: opts.model,
       messages,
@@ -332,6 +392,7 @@ export class LlmAgentBrain implements AgentBrain {
     }
     let content = ''
     let reasoning = ''
+    let totalTokens = 0 // #005 spawn 预算刹车: usage chunk 聚合 (LlmClient:99-100 既有流面)
     const toolAcc: Map<number, LlmToolCall> = new Map()
     try {
       for await (const chunk of this.llm.streamChat(req, signal)) {
@@ -344,6 +405,8 @@ export class LlmAgentBrain implements AgentBrain {
           LlmAgentBrainEvents.emit({ type: 'thinking_delta', runId, iter, delta: ch.delta, accumulated: reasoning })
         } else if (ch.type === 'tool_call' && ch.toolCall) {
           toolAcc.set(toolAcc.size, ch.toolCall)
+        } else if (ch.type === 'usage' && ch.usage) {
+          totalTokens = Math.max(totalTokens, ch.usage.totalTokens ?? 0)
         } else if (ch.type === 'error') {
           throw new Error(ch.error ?? 'unknown stream error')
         }
@@ -363,6 +426,7 @@ export class LlmAgentBrain implements AgentBrain {
       content,
       reasoning,
       toolCalls: Array.from(toolAcc.values()),
+      totalTokens,
     }
   }
 
@@ -404,10 +468,26 @@ export class LlmAgentBrain implements AgentBrain {
     }
   }
 
-  async spawn(subtask: SubTask): Promise<SubAgent> {
+  async spawn(subtask: SubTask, parentCtx?: { contextKind?: SpawnContext['contextKind']; parentRunId: string; checkpoint?: (ev: RunCheckpointEvent) => void }): Promise<SubAgent> {
+    // #005 spawn R2 钉: 深度上限 MAX_SPAWN_DEPTH=1 — 子实例(带 spawnCtx)再 spawn 即超限, 立即 throw (非静默降级, 非静默降级到脑内递归)。
+    // 用「是否已带出生上下文」判定, 不依赖 depth 计数字段 — 单例(undefined)=父允许, 子实例(有)=已达上限。
+    if (this.spawnCtx !== undefined) {
+      throw new Error(`LlmAgentBrain.spawn: 深度超限 (MAX_SPAWN_DEPTH=${MAX_SPAWN_DEPTH}) — 子代理禁止再 spawn [${subtask.instruction.slice(0, 30)}]`)
+    }
+    // #005 spawn R1 钉: 显式 parentCtx 必传 — 禁模块态/禁子自派生 (Step 0 机制贯穿的 spawn 面)。
+    if (!parentCtx || typeof parentCtx.parentRunId !== 'string' || parentCtx.parentRunId.length === 0) {
+      throw new Error('LlmAgentBrain.spawn: 缺 parentCtx — 需显式传 { parentRunId, contextKind?, checkpoint? } (禁模块态)')
+    }
+    // #005 spawn ① 独立性: 新实例 (独立 tools Map / runs Map, 同 BUILTIN_TOOLS 源零提权), 禁 brain:this 自引用 (旧 stub 债已删)。
+    const child = LlmAgentBrain.create({
+      depth: (this.spawnCtx?.depth ?? 0) + 1, // 父=0 → 子=1 (= MAX_SPAWN_DEPTH)
+      parentRunId: parentCtx.parentRunId,
+      contextKind: parentCtx.contextKind,
+      checkpointHook: parentCtx.checkpoint,
+    })
     const id = `llm-sub-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
-    this.log.info(`LlmAgentBrain.spawn: ${id} (${subtask.instruction.slice(0, 40)})`)
-    return { id, brain: this }
+    this.log.info(`LlmAgentBrain.spawn: 子实例 ${id} (parent=${parentCtx.parentRunId}, kind=${parentCtx.contextKind ?? 'headless'}) [${subtask.instruction.slice(0, 30)}]`)
+    return { id, brain: child }
   }
 
   async checkpoint(): Promise<string> {
