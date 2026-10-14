@@ -37,6 +37,7 @@ import {
   contextAllowsConfirm,
   type ContextKind,
 } from './constants'
+import { ConfigStore } from '../../core/ConfigStore'
 
 const execFileAsync = promisify(execFile)
 const AUDIT_DIR = 'audit'
@@ -153,6 +154,68 @@ function isCwdInSandbox(resolvedCwd: string): boolean {
   }
 }
 
+// ── #005 D6 (可信目录联动, 触达面×授权级别解耦) ───────────────────────────
+//
+// 诚实条款 (裁决 #2 / DEV-022 同款):
+//   ① 可信目录即「信任授予」—— 配置方须谨慎, **勿添加主目录/祖先目录** (如 C:\Users\, ~/)
+//   ② symlink 逃逸: 本函数**不做 realpath 解析** (词法归一 + 前缀匹配); 若 trusted 目录
+//      内被建 symlink 指向外部, 仍可能触达外部文件 —— 预留 DEV-025, 本单不实施。
+//   ③ args 路径穿越: 不解析 args 里的 ../ ; trusted 扩的是 **cwd 触达面**, args 行为
+//      由具体命令自行处理 (e.g. `cat ../.ssh/id_rsa` 由 cat 处理, 仍会被 secrets guard 拦)。
+//
+// 解耦钉子 (本设计核心):
+//   可信目录只扩 **cwd 可触达面** (触达面层); **不**改授权级别 (AUTO/CONFIRM/其余 名单逻辑零改)。
+//   D6-4 硬断言: trusted 内确认级命令 (e.g. git) + headless ctx → denial 含 "仅 ui 放行"
+//   (授权级别拒), **不是** "cwd 必须在..." (触达面拒)。
+//
+// 实现: 与 sandbox 同文件 (commandDecide.ts), 同词法归一 (path.resolve + win32 大小写折叠);
+// 与 isCwdInSandbox 的唯一区别是 "trusted 列表" 来源 (ConfigStore 键, 测试探针可替换)。
+/** ConfigStore 键 (裁决 #4: 复用 ConfigStore, 不新加文件) */
+const TRUSTED_DIRS_KEY = 'agent.trusted-dirs'
+
+/** #005 D6 (裁决 #2 + #4): 读可信目录名单 (ConfigStore 键 → string[]; 缺键=[]) */
+export function configGetTrustedDirs(): string[] {
+  try {
+    const v = ConfigStore.getInstance().get(TRUSTED_DIRS_KEY)
+    return Array.isArray(v) ? (v as string[]).map(s => (typeof s === 'string' ? s : String(s))) : []
+  } catch {
+    return []
+  }
+}
+
+/** #005 D6 测试探针 (同 setAuditSink / setConfirmTransport 模式): 替换 trusted 目录列表 */
+let _testTrustedDirs: string[] | null = null
+export function setTrustedDirsForTest(dirs: string[] | null): void { _testTrustedDirs = dirs }
+
+/** 供测试断言的当前 trusted 目录 (测试探针优先; 否则 ConfigStore) */
+export function getTrustedDirsForTest(): string[] {
+  return _testTrustedDirs !== null ? _testTrustedDirs : configGetTrustedDirs()
+}
+
+/**
+ * #005 D6: 判断 resolvedCwd 是否落在可信目录内 (或可信目录自身)。
+ * - 词法归一: path.resolve + lowercase (win32 大小写折叠); 前缀 = 可信目录 + path.sep
+ * - 不做 realpath (DEV-025 预留); 不做 symlink 解析
+ * - 非绝对路径的可信目录条目: 归一后 (相对当前 CWD) 不参与比较 (path.resolve 会基于进程 CWD)
+ * - 默认 [] / 全空 → 恒 false (与 sandbox 行为对齐, D6-1 零回归)
+ */
+export function isCwdInTrustedDir(resolvedCwd: string): boolean {
+  if (!resolvedCwd) return false
+  const dirs = getTrustedDirsForTest()
+  if (dirs.length === 0) return false
+  const norm = (p: string) => {
+    const r = path.resolve(p).toLowerCase()
+    return r.endsWith(path.sep.toLowerCase()) ? r : r + path.sep.toLowerCase()
+  }
+  const target = path.resolve(resolvedCwd).toLowerCase()
+  for (const d of dirs) {
+    if (typeof d !== 'string' || d.length === 0) continue
+    const dNorm = norm(d)
+    if (target === dNorm.slice(0, -1) || target.startsWith(dNorm)) return true
+  }
+  return false
+}
+
 export interface CommandExecArgs {
   command: string
   args?: string[]
@@ -244,12 +307,12 @@ async function doExecFile(
     }
   }
 
-  // v3 #9: sandbox cwd 防护保留
+  // v3 #9: sandbox cwd 防护保留 + #005 D6 扩: sandbox ∪ trusted dirs (触达面只扩, 授权级别零改)
   let resolvedCwd: string
   if (cwdIn) {
     resolvedCwd = path.resolve(cwdIn)
-    if (!isCwdInSandbox(resolvedCwd)) {
-      const reason = `cwd 必须在 sandbox/workspace 内, 实际: ${resolvedCwd}`
+    if (!isCwdInSandbox(resolvedCwd) && !isCwdInTrustedDir(resolvedCwd)) {
+      const reason = `cwd 必须在 sandbox/workspace/可信目录内, 实际: ${resolvedCwd}`
       writeDenyRow(opId, norm, cmdArgs, resolvedCwd, reason, ctx, humanConfirm)
       return { ok: false, opId, stdout: '', stderr: '', exitCode: null, denied: true, denialReason: reason, humanConfirm }
     }
