@@ -208,6 +208,11 @@ export class LlmAgentBrain implements AgentBrain {
      *  接缝 4 处: 每工具结果落 messages 后 / abort 退出前 / 异常 throw 前 / final_answer。
      *  不传 = 不产生 checkpoint (休眠态, 与 history 参数同一模式); 钩子异常不得影响 run 主流程。 */
     checkpoint?: (ev: RunCheckpointEvent) => void
+    /** #006.5 R-1 (休眠 brain 链, W5 接线后生效): 相关记忆上下文注入位 — 显式参数 (#003-fix 同模式,
+     *  会话层派生经 opts 透传, brain 不自存 — 无状态红线; 字符串 = HermesAdapter.recall() 已渲染结果,
+     *  本类零 HermesAdapter import / 零 embedText 调用 — 不新增外部依赖, 不引入模块态)。
+     *  不传 = 不注入 (休眠态, 与 history 参数同一模式)。 */
+    memoryContext?: string
   } = {}): Promise<{ runId: string; content: string; iterations: number; totalDurationMs: number; toolCalls: Array<{ name: string; ok: boolean; durationMs: number }> }> {
     const runId = opts.runId ?? `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     const controller = new AbortController()
@@ -216,7 +221,12 @@ export class LlmAgentBrain implements AgentBrain {
 
     const startMs = Date.now()
     const maxIter = opts.maxIterations ?? MAX_ITERATIONS
-    const systemPrompt = opts.systemPrompt ?? SYSTEM_PROMPT
+    // #006.5 R-1 (休眠 brain 链, W5 接线后生效): memoryContext 显式参数注入位 —
+    //   与 history/checkpoint 同模式 (brain 无状态, 参数透传不自存);
+    //   拼接为系统提示词的固定追加段 (非覆盖, 不改变 SYSTEM_PROMPT 本体)
+    const systemPrompt = (opts.memoryContext && opts.memoryContext.trim())
+      ? `${opts.systemPrompt ?? SYSTEM_PROMPT}\n\n相关记忆 (管线召回, stub 口径):\n${opts.memoryContext.trim()}`
+      : (opts.systemPrompt ?? SYSTEM_PROMPT)
     const selectedToolNames = opts.tools ?? Array.from(this.tools.keys())
     const selectedTools = selectedToolNames
       .map(n => this.tools.get(n))
@@ -449,6 +459,9 @@ export class LlmAgentBrain implements AgentBrain {
       // #005 Step 0 (DEV-014 切除): contextKind 入口派生值透传 think→run→tool.execute(ctx)
       //   —— brain 不自存 (无状态红线); 会话层 (ChatManager) 是唯一派生源
       if (ctx.contextKind) runOpts.contextKind = ctx.contextKind as 'ui' | 'im_inbound' | 'scheduler' | 'headless'
+      // #006.5 R-1: 会话层派生的相关记忆上下文 (已渲染字符串) 透传 think→run→systemPrompt 追加段。
+      //   brain 不自存 / 零 HermesAdapter import (无状态红线 + 零新增依赖); 派生源归会话层 (与 contextKind 同模式)
+      if (typeof ctx.memoryContext === 'string' && ctx.memoryContext.trim()) runOpts.memoryContext = ctx.memoryContext
       const r = await this.run(content, runOpts)
       return { action: 'reply', payload: { text: r.content, model: 'agent-v0.1', durationMs: r.totalDurationMs, iterations: r.iterations, toolCalls: r.toolCalls } }
     } catch (e) {

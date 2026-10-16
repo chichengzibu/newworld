@@ -9,11 +9,13 @@
 import https from 'https';
 import http from 'http';
 import { URL } from 'url';
+import { createHash } from 'node:crypto';
 import { BrowserWindow } from 'electron';
 import { LogManager } from '../core/LogManager';
 import { ChatConfig } from './ChatConfig';
 import { ModelManager } from '../models/ModelManager';
 import { HermesMemory } from '../hermes/HermesMemory';
+import { HermesAdapter, RECALL_CHAT_MIN_SCORE } from '../hermes/HermesAdapter';
 import { TaskExecutor } from '../task/TaskExecutor';
 import { InstructionGenerator } from '../task/InstructionGenerator';
 import { HistoryAssembler } from './HistoryAssembler';
@@ -434,7 +436,25 @@ export class ChatManager {
         .map(m => ({ role: m.role, content: m.content }));
 
       const hermes = HermesMemory.getInstance();
-      const memoryPrompt = hermes.buildMemoryPrompt(content);
+      // #006.5 R-2 口径声明 (buildMemoryPrompt 内容清单 = HermesMemory.ts:182-201, 仅 2 段):
+      //   段1 "## 用户核心记忆" — getCoreMemory() 读 USER.md 全文 (HermesMemory.ts:183/188-190)
+      //   段2 "## 相关历史记忆" — retrieveRelevantMemories() 按 importance-时间 排序 (HermesMemory.ts:184/192-198)
+      // R-2 降级声明: 第 3 段 "## 相关记忆 (管线召回)" 为 #006.5 叠加, stub embedding 管线验收口径
+      //   (stub 伪向量余弦, 非真实语义排序; 真 embedding 接 DEV-027 同批后阈值语义重审);
+      //   前 2 段【本体内容零动】 + 【其他消费者零动】 (S2 实查: 生产调用方仅本处 ChatManager.ts:437)
+      const memoryPromptBase = hermes.buildMemoryPrompt(content);
+      let memoryPrompt = memoryPromptBase;
+      try {
+        const adapter = HermesAdapter.getInstance();
+        const recalled = await adapter.recall(content, { topK: 3, minScore: RECALL_CHAT_MIN_SCORE, useVector: true, useKeyword: false });
+        if (recalled.length > 0) {
+          const vecMem = recalled.map(m => `- ${m.content}`).join('\n');
+          memoryPrompt = `${memoryPrompt}\n## 相关记忆 (管线召回, stub 口径)\n${vecMem}\n`.trim();
+        }
+      } catch (e) {
+        // R-2 容错: recall 失败不阻塞活跃链 chat 流 — 降级为仅前 2 段 (memoryPromptBase)
+        this.log.warn('[ChatManager] #006.5 R-2 recall 降级: 管线召回段失败, 核心记忆+历史记忆段仍生效', e);
+      }
 
       let systemPrompt = '你是PiPiClaw智能助手，一个专业的AI自动化助手，内置OpenClaw本地执行引擎。';
       if (memoryPrompt.trim()) {
@@ -469,6 +489,22 @@ export class ChatManager {
             `用户请求: ${content}\nAI回复: ${finalMsg.content.substring(0, 500)}${finalMsg.content.length > 500 ? '...' : ''}`,
             50
           );
+          // #006.5 W1: 向量层同步沉淀 — 幂等 (同 conversationId+content → 同 id → Map 覆盖; 禁 Date.now() id,
+          //   否则二次 store 同内容产生两条向量, 违反 #006 V3 upsert 同-id 覆盖的幂等口径)
+          //   容错: catch→log, 不阻塞 chat 主流 (订单开工令)
+          try {
+            const adapter = HermesAdapter.getInstance();
+            const content05 = `用户请求: ${content}\nAI回复: ${finalMsg.content.substring(0, 500)}${finalMsg.content.length > 500 ? '...' : ''}`;
+            const idHash = createHash('sha256').update(`${conversationId}|${content05}`).digest('hex').slice(0, 16);
+            await adapter.store({
+              id: `chat-${idHash}`,
+              content: content05,
+              score: 50,
+              createdAt: Date.now(),
+            });
+          } catch (e) {
+            this.log.warn('[ChatManager] #006.5 W1 向量层沉淀失败 (不阻塞 chat 流)', e);
+          }
         }
       }
 

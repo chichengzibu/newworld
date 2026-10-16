@@ -13,6 +13,19 @@ export interface AdapterRecallOptions extends RecallOptions {
   useKeyword?: boolean
 }
 
+/**
+ * #006.5 阈值常量 (顶层 const, 非模块态 let — 红线沿用 #005 模块态零新增)
+ * 口径: 此处"相关度过滤"为【管线验收口径】— stub embedding 下 score 为伪向量余弦,
+ *       不构成真实语义排序; 真 embedding 接入后 (DEV-027 同批) 重新裁定阈值语义。
+ * 禁"语义检索"措辞: 全单统一用 "相关度过滤 / 管线召回"。
+ */
+export const RECALL_DEFAULT_TOPK = 5
+export const RECALL_DEFAULT_MIN_SCORE = 0.1
+/** #006.5 R-1 (休眠 brain 链, W5 接线后生效): 宽召回 — 备选上下文宁多勿漏 */
+export const RECALL_BRAIN_MIN_SCORE = 0.5
+/** #006.5 R-2 (活跃链, 立即生效): 严召回 — 注入 prompt 的条目质量阈值更高 */
+export const RECALL_CHAT_MIN_SCORE = 0.7
+
 interface ScoredMemory extends Memory {
   _score: number
 }
@@ -40,8 +53,8 @@ export class HermesAdapter implements HermesMemoryInterface {
 
   async recall(query: string, opts: RecallOptions = {}): Promise<Memory[]> {
     const adapterOpts = opts as AdapterRecallOptions
-    const topK = opts.topK ?? 5
-    const minScore = opts.minScore ?? 0.1
+    const topK = opts.topK ?? RECALL_DEFAULT_TOPK
+    const minScore = opts.minScore ?? RECALL_DEFAULT_MIN_SCORE
     const useVector = adapterOpts.useVector !== false
     const useKeyword = adapterOpts.useKeyword !== false
 
