@@ -66,9 +66,33 @@ windows.forEach(window => {
 ```
 → 推送机制已就位，无缺口。
 
-**F6** — `checkDuplicateSkill` 去重实现（`SelfLearner.ts:213` 调用，实现需核实）。**推断**：基于 name 字符串精确匹配。**缺口**：语义相近（"生成周报" vs "每周周报生成"）视为不同技能 → 重复提案 → 订单 DEV-027 要求接真 embedding 时一并闭环。
+**F6** — `checkDuplicateSkill` 判重实现（`SelfLearner.ts:657-695` 实读实文，**非 name 精确匹配**）：
+```ts
+private async checkDuplicateSkill(proposal: SkillProposal): Promise<boolean> {
+  const enabledProviders = this.modelManager.getEnabledProviders()
+  if (enabledProviders.length === 0) {
+    this.log.warn('[SelfLearner] 没有启用的模型，无法进行去重检查')
+    return false
+  }
+  const skills = this.skillLoader.getAllSkills()
+  for (const existingSkill of skills) {
+    const prompt = `当前提案的技能触发条件：${proposal.triggerCondition}...请判断：这两个触发条件描述的是否是同一种用户意图？只回答"是"或"否"。`
+    const response = await this.makeChatCompletionRequest(provider, modelId, prompt)
+    if (normalized.includes('是') || normalized.includes('yes')) return true
+  }
+  return false
+}
+```
+→ **事实定性**：判重机制 = **LLM 意图级语义判定**（非 name 精确，非 embedding cosine）
+→ **fail-open 行为实读**：无启用模型 / LLM 调用失败 → `return false` → 走 `pendingProposal` 挂起 → 人审门兜底（UI 三按钮 `SkillsView.vue:41-43` 已在位）
+→ **G4"cosine 补充"前提不成立**：现状**已是语义级**（LLM 意图级 > cosine 向量级），叠加 cosine 属双闸重复，替换则丢意图级粒度。本设计稿**撤销 G4**（详见 G4 段 + 收口段 + DEV-027 状态改写）。
 
-**F7** — **观察来源**（observe 方法）：全仓 grep 生产调用面**零命中**（仅 `SelfLearner.ts` 内部定义 + `test`/`spec`）。**观察端未接入** —— 用户执行操作后谁调 `observe(...)`？需核实（见 G3 缺口）。
+**F7** — **观察来源**（`SelfLearner.observeExecution(...)` 生产调用面零命中，**实读坐实**）：
+- **方法名实读**：`SelfLearner.ts:124` — `public observeExecution(instruction: string, steps: any[], _result: any): void`（**非** `observe()`，本设计稿早期"observe"写法为臆造，此处一并修正）
+- **生产调用面**：全仓生产 grep 零命中（`SelfLearner.ts` 内部定义 + `test`/`spec`，`chat-execution-ui.test.ts:51` 为 mock 面）
+- **内置去重**：L128-134 `normalizeInstruction` 精确比较 — **同指令跳过**（已存在，非 #007 新增）
+- **窗口实读**：L145-149 固定 `> 10` shift（订单既定 10→100，本单改）
+- **观察端未接入活链** —— 用户执行操作后谁调 `observeExecution`？见 G3
 
 ## 订单既定四项 (四裁决已落定, 非开放点)
 
@@ -106,45 +130,78 @@ windows.forEach(window => {
 ```
 + 类常量 `ANALYSIS_THRESHOLD = 10`（可配置，v1 锁 10）。
 
-### G2 缺口：`callModelForAnalysis` LLM 调用核实（需实跑 grep 后落地）
+### G2 缺口：`callModelForAnalysis` LLM 调用核实（已实读坐实，撤回原假设）
 
-**设计稿假设**：走 `EmbeddingService` / `LlmClient` 任一。**核实方法**：`grep -n "callModelForAnalysis\|LlmClient\|embedText" electron/learning/SelfLearner.ts`。**加固方向**：
-- 走 #006 `EmbeddingService`（已持久化的 embedding 链）— 语义匹配去重
-- LLM 分析走 `LlmClient`（真实大模型，不 stub）
-- **不重写**（订单红线），只补接口一致性
+**原稿假设**（撤回）：走 `EmbeddingService` / `LlmClient` 任一。
+
+**实读坐实**（`SelfLearner.ts:261-303`）：
+- `callModelForAnalysis(prompt)` → `makeChatCompletionRequest(provider, modelId, prompt)` — **走 LLM chat 请求**，**不走 EmbeddingService**
+- provider 来源：`this.modelManager.getEnabledProviders()`（L280+ 实文）
+- 无模型时 `return null` → L202 `analysisResult` 空 → 不生成提案
+→ **不重写**：既有 LLM 调用路径已通，本单只在参数层微调（`slice(-ANALYSIS_THRESHOLD)`），不动调用面。
 
 ### G3 缺口：观察端未接入
 
-`SelfLearner.observe` 生产调用面零命中。**加固方向**（三选一，订单裁决）：
-- **O1** · `ChatManager` 对话轮次完成时 `SelfLearner.getInstance().observe({ instruction: finalMsg.content, steps: [] })` — **推荐**
+`SelfLearner.observeExecution(...)` 生产调用面零命中（F7）。**加固方向**（三选一，**O1 已按订单 A 案裁决**）：
+- **O1** · `ChatManager` 对话轮次完成时 `SelfLearner.getInstance().observeExecution(instruction, steps, _result)` — **已定案**
+  - 接入点实文锚点：`ChatManager.ts` `shouldPrecipitate` 块末尾（紧邻 #006.5 W1 `store()` 块之后，#006.5 `ab5e9ac` 交付的既有锚点）
+  - 参数三元组实证：`instruction: <final user msg content>` / `steps: <当前已执行的 step 摘要[]> (可空 [])` / `_result: <执行结果摘要 'ok' | 'fail' | ''>`
+  - **注意**：`observeExecution` 第 3 参 `_result` 现签名带下划线（未用），#007 实施时可填"成功 / 失败"语义，不动方法签名（订单红线：只扩调用面，不改方法名与签名）
 - O2 · `BashTool` 命令执行后 — 需扩安全链面，**禁**（红线）
 - O3 · 用户显式"记住这个"指令 — 后置
+- **技能消费面硬答（第④条）**：`saveSkillFromProposal` (`SelfLearner.ts:701-736`) 写 `skill.md` + `reloadSkills()` 热加载 → `InstructionGenerator.ts:255-284` 把 `getAllSkillSummaries()` 注入 systemPrompt "技能系统 - 优先使用" 段 → LLM 后续指令生成时优先选已有技能 → **G4 的判重保护的是活路，非死路**（fail-open 有真实代价：重复技能 → 触发匹配 `SelfLearner.ts:636-642` LLM 逐对问"是否符合触发条件" → 用户重复看到相似提案 → 人审门疲劳）。**定性**：v1 走 H1 人审门兜底（订单既定），无需 cosine 二次闸
 
-### G4 缺口：`checkDuplicateSkill` 精确匹配 → 语义去重（DEV-027 闭环）
+### G4 缺口：**撤销**（原"cosine 语义去重"前提不成立）
 
-**现状**：`name === proposal.name` 精确匹配（推断，需实跑核实）。
+**原稿前提**（撤回）：`checkDuplicateSkill` 是 `name === proposal.name` 精确匹配，需接 #006 embedding 加 cosine 闸。
 
-**加固方案**（接 #006 持久化 embedding 链）：
-```ts
-// SelfLearner.ts, checkDuplicateSkill 扩展
-- if (existingSkill.name === proposal.name) return true
-+ // DEV-027: 语义去重 — 接 #006 EmbeddingService
-+ const v = await this.embedder.embedText(proposal.name + ' ' + proposal.triggerCondition)
-+ for (const s of existingSkills) {
-+   if (await this.cosineSimilarity(v, s.vector) > 0.92) return true
-+ }
-```
-- 候选阈值 0.92（订单建议）
-- Skill 需新增 `vector` 字段（或 skill 文件扩展）
-- **不重写**，只扩 `checkDuplicateSkill`
+**实读坐实推翻**（`SelfLearner.ts:657-695`）：
+- 现状已是 **LLM 意图级语义判重**（非 name 精确，非 cosine）
+- 每个 existing skill 逐问 LLM "触发条件是否为同一种用户意图" → "是/yes" 判重
+- **fail-open 行为**：无启用模型 / LLM 调用失败 → `return false` → 不判重 → `pendingProposal` 挂起 → **人审门兜底**（`SkillsView.vue:41-43` 三按钮已在位）
 
-### 既有加固 5 项（不动核心逻辑）
+**裁决**：撤销 cosine 接入。理由：
+1. **LLM 意图级 > cosine 向量级**（cosine 只判向量近，意图判可覆盖同义/近义/反义）
+2. **叠加 = 双闸重复**（cosine 先筛 + LLM 再判 = LLM 调用量翻 N 倍，无增益）
+3. **替换 = 丢粒度**（LLM 的"是否同种意图"语义比"向量距离"细）
+4. **stub 下 cosine 无意义**（stub = SHA-256 无余弦语义，#006 已证）
+
+**替代加固**：
+- H1 提案超时自动忽略（订单既定，人审门超时兜底）
+- H2 同批 N 次忽略学习（v2 备查）
+- **fail-open 成本定性**：重复提案 → 人审门疲劳（不是"技能错跑"），v1 可接受
+- **预筛优化候选**（订单收口段登记）：接真 embedding 时（W5 / DEV-027 同批）在 LLM 判重**前**加 cosine 预筛（阈值 0.92 粗过滤），把 100 技能 × LLM N 调降为 O(1) cosine + O(少量) LLM — **非 #007 交付，登记备查**
+
+### 既有加固 5 项（不动核心逻辑，**G4 撤销**）
 
 1. **W1 窗口 10 → 100**（F1）
 2. **W2 阈值 3 → 10**（F2）
 3. **G1 联动 slice + 类常量**（F3）
-4. **G3 观察端接入 ChatManager**（O1，推荐）
-5. **G4 checkDuplicateSkill 语义化**（DEV-027 闭环）
+4. **G3 观察端接入 ChatManager**（O1，已定案）
+5. **G4 checkDuplicateSkill** — **撤销**（现状已是 LLM 意图级，无需 cosine；替代 = H1 人审门超时 + H2 v2 备查；cosine 预筛优化登记备查，W5 接真 embedding 时同批做）
+
+### 分析周期小节（订单 c 项补，成本口径坐实）
+
+**触发条件**（三重 AND）：
+1. `observationCount >= this.ANALYSIS_THRESHOLD (= 10)`
+2. `!this.analysisInProgress`（既有单飞锁，`SelfLearner.ts:204+`）
+3. `!this.pendingProposal`（无挂起提案，`SelfLearner.ts:208+`）
+
+**频率**：
+- v1 同步：每轮 chat 完成时 `observeExecution` 推 1 条 → 10 轮触发 1 次 `analyzeAndGenerateSkill`
+- 无定时器（**无 cron / schedule / setTimeout** 驱动 `analyzeAndGenerateSkill`，实读核）— 完全"事件驱动"（chat 完成是触发点）
+- 若需后台定时分析（如每小时空跑一次），**v1 不加**，W5 接线批评估
+
+**LLM 成本口径**（每 1 次 `analyzeAndGenerateSkill`，实读 `SelfLearner.ts:196-307`）：
+| 调用 | 位置 | 触发 |
+|---|---|---|
+| ① 分析 | L202 `callModelForAnalysis(prompt)` → L261 `makeChatCompletionRequest` | 每次必触发（除非 analysisResult 空） |
+| ② 判重 | L676 `makeChatCompletionRequest` | 仅当 analysisResult 通过 skillShape 且 checkDuplicateSkill 进入循环（每个现有技能 1 次，最多 = `getAllSkills().length`） |
+| ③ 触发匹配 | L640 `makeChatCompletionRequest` | **不在分析链路**，在用户后续指令进来时 `SkillLoader` 触发侧（`InstructionGenerator` 消费面） |
+| ④ 双技能路由 | L793 `makeChatCompletionRequest` | **同上**，在用户指令触发两个技能歧义时 |
+
+**v1 成本上限（每 10 轮 chat）**：1 × 分析 + ≤ N × 判重（N = `getAllSkills().length`，冷启动无 skill = **1 次 LLM**）。
+**单飞守卫**（订单 5 条件之一）：`analysisInProgress` 字段既有，并发 chat 只入队不并发分析 ✅。
 
 ### 人审门加固（F4 已存在，补 3 项）
 
@@ -164,36 +221,35 @@ windows.forEach(window => {
 
 | 文件 | 改动 |
 |---|---|
-| `electron/learning/SelfLearner.ts` | W1 窗口 L147 / W2 阈值 L159 / G1 slice L196 / G3 observe 接入点 / G4 checkDuplicateSkill / H1-H3 |
-| `electron/chat/ChatManager.ts` | G3: `observe` 调用点（1 行，对话轮次完成时，紧邻 #006.5 W1 块） |
-| `electron/hermes/EmbeddingService.ts` | `embedText` 已存在，G4 调既有接口 — **零改** |
-| `src/views/SkillsView.vue` | H1-H3：banner 加 `createdAt` 字段显示 + 超时逻辑（1 处） |
-| `electron/skills/SkillLoader.ts` | G4: `vector` 字段存储（扩 schema） |
-| `tests/unit/self-learner-loop.test.ts` | 新建（L1-L6 用例） |
-| `tests/unit/self-learner-dedupe.test.ts` | 新建（G4 语义去重用例） |
+| `electron/learning/SelfLearner.ts` | W1 窗口 / W2 阈值 / G1 slice 联动 / H1 超时（**G4 撤销**，见 G4 段） |
+| `electron/chat/ChatManager.ts` | G3: `observeExecution` 调用点（1 行，对话轮次完成时，紧邻 #006.5 W1 块） |
+| `src/views/SkillsView.vue` | H1：`createdAt` 显示 + 超时提示"提案已超期自动忽略"（订单 d 4 诚实文案） |
+| `tests/unit/self-learner-loop.test.ts` | 新建（L1-L4, L6 用例；**L5 G4 用例撤销**，见 G4 段） |
+| `docs/deviation-ledger.md` | DEV-027 状态改写："已覆盖·机制修正"（cosine 补充取消，LLM 意图级实读坐实，预筛优化候选登记） |
 
-## 测试案（以案计，6 例 + 2 备查）
+## 测试案（以案计，**5 例 + 2 备查**，L5 G4 撤销）
 
-**L1** · 窗口 10→100：写入 105 条 → 断言保留最近 100 条（最早 5 条被 shift）
+**L1** · W1 窗口 10→100：写入 105 条 → 断言保留最近 100 条（最早 5 条被 shift）
 
-**L2** · 阈值 3→10：`observations.length = 9` 不触发；`= 10` 触发 `analyzeAndGenerateSkill`（mock 断言）
+**L2** · W2 阈值 3→10：`observations.length = 9` 不触发；`= 10` 触发 `analyzeAndGenerateSkill`（mock 断言）
 
 **L3** · G1 联动：`observations.length = 10` 时 `slice(-this.ANALYSIS_THRESHOLD)` 返回最近 10 条（非 3 条）
 
-**L4** · G3 observe 接入：chat 完成 → `SelfLearner.observe` 被调一次（spy mock）
+**L4** · G3 observe 接入：chat 完成 → `SelfLearner.observeExecution` 被调一次（spy mock，**方法名实读 L124**）
 
-**L5** · G4 语义去重：两提案 "生成周报"/"每周周报生成" cosine > 0.92 → `checkDuplicateSkill` 返回 true → 不重推
+**L5** · ~~G4 语义去重~~ — **撤销**（原"cosine 0.92 → checkDuplicateSkill 返回 true"前提错，现有 LLM 意图级判重无需 cosine，实读 L657-695）
 
-**L6** · H1 超时：pendingProposal `createdAt + 30min` 已过 → 自动 dismiss → `pendingProposal = null`
+**L6** · H1 超时：pendingProposal `createdAt + 30min` 已过 → 自动 dismiss → `pendingProposal = null` + **UI 提示文案**实断言"提案已超期自动忽略"（订单 d 诚实文案）
 
 **L7**（备查）· H2 N 次忽略 → disable — v1 不实施，用例登记备查
 **L8**（备查）· H3 版本追踪 — v1 不实施，用例登记备查
 
+**新增 L9** · 技能消费面硬答实跑断言（订单 b 第④条）：`saveSkillFromProposal` 写入后 `getAllSkillSummaries()` 返回含新 skill 的摘要；`getSkillContext(instruction)` 用相同触发条件 query 时返回含该 skill 的上下文 — **消费面活的实证**
+
 ## 电池预期
 
-基线 83 文件 / 1018 过（#006 收官）
-+ #006.5 若先落：约 85 文件 / 1020 过
-+ #007：+ 2 新测试文件 / + 6 用例 = **87 文件 / 1026 过**（实跑为准，禁口算）
+基线 **84 文件 / 1024 过 / 8 skip**（#006.5 A 案收官 `1e00693`）
++ #007：+ 1 新测试文件（`self-learner-loop.test.ts`）/ + 6 用例（**L1-L4 + L6 + L9**，L5 G4 撤销） = **85 文件 / 1030 过**（实跑为准，禁口算）
 
 ## 红线核查
 
@@ -203,11 +259,19 @@ windows.forEach(window => {
 - **brain 无状态原则**：`analysisInProgress` 是实例字段（既有），不新增模块态 ✅
 - **既有真实现上加固**：只改 5 处常量/方法，不动核心分析逻辑 ✅
 
-## 开放点（待 GLM 逐条复审裁定）
+## 开放点（已定案，非开放）
 
-1. **G3 观察端接入点**：O1 ChatManager 轮次完成（推荐，紧邻 #006.5 W1 块，#006.5 已交付 `ab5e9ac` 锚点就绪）/ O2 BashTool（禁，安全链面）/ O3 显式用户指令（后置）？
-2. **G4 cosine 阈值**：0.92（订单建议）/ 0.85（宽）/ 0.95（严）？
-3. **H1-H3 v1 是否落**：推荐 **H1 落**（超时防挂起），H2/H3 登记备查（v2 实施）
-4. **"技能落地"定义**：订单"技能落地" = 保存技能文件（`SkillLoader` 既有面）？还是包含"下次用户触发时真的能跑"（涉及 `LlmAgentBrain` tool 注册，W5 接线批受益）？推荐 v1 只定义"保存技能文件 + 下次启动时 `SkillLoader` 加载"，W5 接线批时接"跑起来"。
+> **定案**（订单 A 案放行路径 2/3）：
+
+1. **G3 观察端接入点**：**O1 已定案**（ChatManager 轮次完成 `observeExecution`，紧邻 #006.5 W1 块 `ab5e9ac` 既有锚点，O2 安全链禁，O3 后置）
+2. **G4 cosine 阈值**：**撤销**（订单 A 案放行进 3 裁决）— 现状 LLM 意图级判重实读坐实（L657-695），cosine 叠加无增益，失败兜底走 H1 人审门
+3. **H1-H3 v1 落位**：**H1 落**（超时防挂起 + UI 诚文案"提案已超期自动忽略"），H2/H3 登记备查（v2）
+4. **"技能落地"定义**：**v1 只定义"保存技能文件 + 热加载 + 触发侧摘要可见"**（消费面实证 L9：`saveSkillFromProposal` → `reloadSkills` → `InstructionGenerator.ts:255-284` 注入 systemPrompt "技能系统 - 优先使用"）**+ "跑起来" = W5 接线批**（brain tool 注册）
+
+> **ROE 附录**（订单 A 案放行进 4 新增，落点 = `docs/#002-v3-step-b-c-diff-and-matrix.md:806`）：
+
+| 新行号 | 条款 | 等级 |
+|---|---|---|
+| 7 | 设计稿复审抽验 F 段 ≥2 条 file:line（指挥层自查条款，防臆造方法名 / 推断机制被误当事实） | 严格 |
 
 > **既定（非开放）**：提交顺序 — #006.5 已交付 `ab5e9ac`（消费端先落地），#007 满足开工前置，本单随后实施。顺序铁律已执行，不再作开放点。

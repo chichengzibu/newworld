@@ -804,6 +804,7 @@ expect(rLs.ok).toBe(true)
 | 4 | 审计文件 `%APPDATA%/pipiclaw/audit/openclaw.audit.jsonl` 人工可读 | start 行含哨兵 `exit:'pending'`+`phase:'start'`+`humanConfirm` 字段；finish 行含 `exit:0`+`phase:'finish'`；含至少 1 条 deny 条目 |
 | 5 | `git status --porcelain` 干净（除 gitignore） | 空 |
 | 6 | ROE 任一红 → **BLOCKED** 报回，不带伤往下走 | 严格 |
+| 7 | 设计稿复审抽验 F 段 ≥2 条 file:line（指挥层自查条款，防臆造方法名 / 推断机制被误当事实）— **#007 首落（2026-10-16 修正版 A 放行进 4）** | 严格 |
 
 ### PART 4 附录 · pre-flight 修复方针备案（预裁决 3，实施仍在本 PART 4 内）
 
