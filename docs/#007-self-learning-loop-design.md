@@ -31,7 +31,7 @@ if (this.observations.length >= 3 && !this.analysisInProgress) {
   this.analyzeAndGenerateSkill();
 }
 ```
-→ **订单要求 3 → 10**：`>= 3` 改 `>= 10`（L159）。
+→ **订单既定阈值 3 → 10**：`>= 3` 改 `>= ANALYSIS_THRESHOLD`（L159），常量 `ANALYSIS_THRESHOLD = 10` 锁于类顶部（可注入测试）。
 
 **F3** — `electron/learning/SelfLearner.ts:185-234`（`analyzeAndGenerateSkill` 完整链路）：
 - `this.analysisInProgress` 单飞（无并发重入）
@@ -69,6 +69,28 @@ windows.forEach(window => {
 **F6** — `checkDuplicateSkill` 去重实现（`SelfLearner.ts:213` 调用，实现需核实）。**推断**：基于 name 字符串精确匹配。**缺口**：语义相近（"生成周报" vs "每周周报生成"）视为不同技能 → 重复提案 → 订单 DEV-027 要求接真 embedding 时一并闭环。
 
 **F7** — **观察来源**（observe 方法）：全仓 grep 生产调用面**零命中**（仅 `SelfLearner.ts` 内部定义 + `test`/`spec`）。**观察端未接入** —— 用户执行操作后谁调 `observe(...)`？需核实（见 G3 缺口）。
+
+## 订单既定四项 (四裁决已落定, 非开放点)
+
+**(A) 窗口 10→100 / 阈值 3→10**：订单原话既定值，非开放点。窗口 L147 改 `>100`，阈值 L159 改 `>= ANALYSIS_THRESHOLD`(10)，常量锁于类顶部可注入。
+
+**(B) 加固不改写**：订单红线"既有真实现(首轮审计已证)上加固,不重写" → 本稿只动 5 处常量/方法(窗口/阈值/slice 联动/observe 接入/dedupe)，**分析核心逻辑零触碰**（`analyzeAndGenerateSkill`/`callModelForAnalysis`/`generateSkillProposalFromAnalysis` 全部保留原样）。
+
+**(C) 人审门 UI 现状实读**：`src/views/SkillsView.vue:30-44` 三按钮 banner 已存在（"保存技能/忽略/查看详情"）——**非缺口**，是"待加固"。UI 归 #007 实施范围（**非后置**，UI 已就位，本单只补 H1 超时自动忽略一行定时器防挂起）；H2 N 次忽略学习 / H3 版本追踪登记备查（v2 实施）。
+
+**(D) 顺序铁律**：#006.5 未落地 → #007 零实施。**#006.5 已落地并签收**（`ab5e9ac`，84 文件/1023 过/0 失败）→ G3 observe 接入锚 `ChatManager` shouldPrecipitate 块（#006.5 W1 相邻行）就绪，#007 满足开工前置。
+
+## DEV-027 状态改写 (文档先行)
+
+**原 DEV-027**（#006 收官登记，台账现状）：
+> "v1 无相似度去重（LRU 按 ts 淘汰，语义重叠条目不去重）"
+> 状态：**预留**（触发 = 用户反馈语义重叠 / 后续批次要求）
+
+**#007 修订**：
+> "向量层/技能去重的相似度判重（cosine 阈值 + 合并策略）**归 #007 实施范围** — #006.5 已交付 `HermesAdapter.recall()` + `EmbeddingService.embedText()` 共用入口，G4 `checkDuplicateSkill` 扩 cosine 判重时一并落"
+> 状态：从"预留"改定为"**#007 实施范围**"（触发 = #007 开工，非用户反馈被动触发）
+
+**理由**（实据）：#006 收官时 `HermesAdapter.recall/embedText` 无生产消费点 → 只能登记"预留"；#006.5 交付 `W1/R-1/R-2` 共用 recall() 入口（电池 84/1023 已实跑），G4 接入锚就绪 → 升级为"本单范围"。台账 `deviation-ledger.md` DEV-027 状态行在 #007 实施提交时同步改写（本笔仅设计稿修订，台账随实施一并落，保持"#007 实施与台账变更同提交"红线）。
 
 ## 加固清单（G1-G4 缺口 + 5 项既有加固）
 
@@ -181,10 +203,11 @@ windows.forEach(window => {
 - **brain 无状态原则**：`analysisInProgress` 是实例字段（既有），不新增模块态 ✅
 - **既有真实现上加固**：只改 5 处常量/方法，不动核心分析逻辑 ✅
 
-## 开放点（裁决）
+## 开放点（待 GLM 逐条复审裁定）
 
-1. **G3 观察端接入点**：O1 ChatManager 轮次完成（推荐，紧邻 #006.5 W1 块）/ O2 BashTool（禁，安全链面）/ O3 显式用户指令（后置）？
+1. **G3 观察端接入点**：O1 ChatManager 轮次完成（推荐，紧邻 #006.5 W1 块，#006.5 已交付 `ab5e9ac` 锚点就绪）/ O2 BashTool（禁，安全链面）/ O3 显式用户指令（后置）？
 2. **G4 cosine 阈值**：0.92（订单建议）/ 0.85（宽）/ 0.95（严）？
 3. **H1-H3 v1 是否落**：推荐 **H1 落**（超时防挂起），H2/H3 登记备查（v2 实施）
 4. **"技能落地"定义**：订单"技能落地" = 保存技能文件（`SkillLoader` 既有面）？还是包含"下次用户触发时真的能跑"（涉及 `LlmAgentBrain` tool 注册，W5 接线批受益）？推荐 v1 只定义"保存技能文件 + 下次启动时 `SkillLoader` 加载"，W5 接线批时接"跑起来"。
-5. **本单与 #006.5 提交顺序**：裁决"两单并行起草，分两笔提交；#006.5 先实施"。推荐 **#006.5 先交付**（消费端立即生效），#007 后交付（加固单，依赖 #006.5 W1 块作为观察端接入锚点）—— **#006.5 W1 是 #007 G3 的前置锚点**，两单存在隐性依赖。
+
+> **既定（非开放）**：提交顺序 — #006.5 已交付 `ab5e9ac`（消费端先落地），#007 满足开工前置，本单随后实施。顺序铁律已执行，不再作开放点。
