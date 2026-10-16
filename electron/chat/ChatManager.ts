@@ -373,8 +373,14 @@ export class ChatManager {
         
         // ============ Hermes 自我学习 ============
         if (result.success) {
+          // #007 G3 观察端覆盖声明 (订单 b①):
+          // 本行 = G3 在【任务流分支】的既有观察端 (chat 任务成功执行时, 既有链, #007 补声明不动代码)
+          //        三元组: instruction=用户消息原文 / steps=任务steps[] / _result=TaskExecutor 返回对象 (result.success 语义)
+          // 本块外的 handleNormalChat shouldPrecipitate 块 (L515-529) = G3 在【普通对话流】的新增观察端 (#007 本单)
+          //        三元组: instruction=用户消息原文 / steps=[] (v1 不接步骤摘要, W5 接线批扩) / _result='ok'|'fail' (依据 finalMsg.status)
+          // 两分支互斥 (任务流失败 → 回退普通对话流; chat-execution-ui B-1/B-2 走任务流 → 本行覆盖) → 无重复观察
           const selfLearner = SelfLearner.getInstance();
-          
+
           // 观察执行 - SelfLearner内部会自动检查是否达到分析阈值
           selfLearner.observeExecution(content, steps, result);
           // 注意：分析是异步的，前端通过 skills:new-proposal 事件接收通知
@@ -504,6 +510,20 @@ export class ChatManager {
             });
           } catch (e) {
             this.log.warn('[ChatManager] #006.5 W1 向量层沉淀失败 (不阻塞 chat 流)', e);
+          }
+
+          // #007 G3 O1 (订单定案): 轮次完成后推 1 条观察 → 触发 SelfLearner 分析池
+          //   三元组实证: instruction = 用户消息原文 / steps = [] (v1 不接 TaskExecutor 步骤摘要, W5 接线批扩)
+          //              _result = 'ok' | 'fail' (依据 finalMsg.status, 现签名第 3 参下划线未用, #007 填语义, 不动方法签名)
+          //   容错: catch→log, 不阻塞 chat 主流 (沿用 #006.5 W1 容错红线)
+          try {
+            SelfLearner.getInstance().observeExecution(
+              content,
+              [],
+              finalMsg.status === 'error' ? 'fail' : 'ok'
+            );
+          } catch (e) {
+            this.log.warn('[ChatManager] #007 G3 observeExecution 失败 (不阻塞 chat 流)', e);
           }
         }
       }

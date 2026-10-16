@@ -81,16 +81,16 @@ describe('P2-T2.1: SelfLearner observeExecution records patterns', () => {
     expect(stats.observationCount).toBe(1) // 重复的跳过
   })
 
-  it('T2.1: 超过 10 条观察自动截断到最近 10', () => {
+  it('T2.1: 超过 100 条观察自动截断到最近 100 (#007 W1 窗口 10 → 100, 订单既定)', () => {
     const learner = SelfLearner.getInstance()
     learner.resetStats()
 
-    for (let i = 0; i < 15; i++) {
+    for (let i = 0; i < 105; i++) {
       learner.observeExecution(`unique instruction ${i}`, [{ type: 'x' }], { ok: true })
     }
 
     const stats = learner.getStats()
-    expect(stats.observationCount).toBe(10)
+    expect(stats.observationCount).toBe(100)
   })
 
   it('T2.1: getPendingProposal 初始为 null', () => {

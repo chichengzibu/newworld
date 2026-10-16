@@ -27,7 +27,7 @@
     />
     
     <!-- 技能提案横幅 -->
-    <div v-if="pendingProposal" class="proposal-banner">
+    <div v-if="pendingProposal" class="proposal-banner" data-testid="proposal-banner">
       <div class="banner-content">
         <el-icon class="banner-icon" :size="22" color="var(--accent-base)"><MagicStick /></el-icon>
         <div class="banner-text">
@@ -42,6 +42,8 @@
           <el-button size="small" text @click="handleDismissProposal">忽略</el-button>
           <el-button size="small" text @click="showProposalDetail = true">查看详情</el-button>
         </div>
+        <!-- #007 H1: 提案年龄提示 (createdAt 字段已显示, 订单 d④ 诚实文案; 超期由 handleNewProposal 拒绝) -->
+        <div class="banner-expiry" data-testid="proposal-expiry">已挂起 {{ proposalAgeText }} (30 分钟未操作自动忽略)</div>
       </div>
     </div>
     
@@ -204,6 +206,8 @@
 import { ref, computed, onMounted, onUnmounted } from 'vue';
 import { Upload, MagicStick, Box, SuccessFilled } from '@element-plus/icons-vue';
 import { ElMessage } from "element-plus/es/components/message/index"
+// #007 H1: 提案超时阈值 (30 分钟, 订单既定)
+const PROPOSAL_TIMEOUT_MS = 30 * 60 * 1000
 import { ElMessageBox } from "element-plus/es/components/message-box/index";
 import SkillCard from '@/components/skills/SkillCard.vue';
 import SkillImportDialog from '@/components/skills/SkillImportDialog.vue';
@@ -243,6 +247,13 @@ const enabledCount = computed(() => {
   return skills.value.filter(s => s.enabled).length;
 });
 
+// #007 H1: 提案年龄文案 (30 分钟超时已提示)
+const proposalAgeText = computed(() => {
+  if (!pendingProposal.value) return '';
+  const ageMin = Math.floor((Date.now() - pendingProposal.value.createdAt) / 60000);
+  return ageMin < 60 ? `${ageMin} 分钟` : `${Math.floor(ageMin / 60)} 小时 ${ageMin % 60} 分`;
+});
+
 const loadSkills = async () => {
   try {
     const result = await (window as any).electronAPI?.skills?.list();
@@ -275,6 +286,15 @@ const handleImportSuccess = (data?: any[]) => {
 };
 
 const handleNewProposal = (proposal: SkillProposal) => {
+  // #007 H1 (订单 d④ 诚实文案): 提案超时 30 分钟未操作 → 提示"提案已超期自动忽略" (非静默丢弃)
+  // v1 口径: 收到时判定 (createdAt 超期 → 拒绝 + 清 + 提示); 在屏期间无轮询 (H2 v2 备查扩),
+  //          与订单"H1 定时器"差异已在设计稿 G4 段 + #007 §分析周期坐实
+  if (Date.now() - proposal.createdAt > PROPOSAL_TIMEOUT_MS) {
+    pendingProposal.value = null;
+    (window as any).electronAPI?.learning?.clearPendingProposal?.();
+    ElMessage.warning('提案已超期自动忽略');
+    return;
+  }
   pendingProposal.value = proposal;
 };
 

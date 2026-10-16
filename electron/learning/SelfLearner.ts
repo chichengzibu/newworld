@@ -75,6 +75,18 @@ export class SelfLearner {
   private pendingProposal: SkillProposal | null = null;
   private analysisInProgress = false;
 
+  /**
+   * #007 W2: 分析阈值 (订单既定 3→10, 可配置类常量, 实例可覆盖)
+   * — 非模块态 let, 红线: 模块态零新增
+   * 联动 G1: analyzeAndGenerateSkill 内 slice(-ANALYSIS_THRESHOLD) 与本阈值同参
+   */
+  public ANALYSIS_THRESHOLD: number = 10;
+
+  /**
+   * #007 W1: 观察窗口 (订单既定 10→100, 观察数据是 LLM 分析输入池, 不主动清 — H1 观察保留钉)
+   */
+  private OBSERVATION_WINDOW: number = 100;
+
   private constructor() {
     // 初始化学习数据目录
     this.learningDir = path.join(getHost().getPath('userData'), 'hermes-learning');
@@ -142,9 +154,9 @@ export class SelfLearner {
         timestamp: Date.now()
       };
 
-      // 只保留最近10条观察记录
+      // #007 W1: 窗口 10→100 (订单既定; 观察数据 = LLM 分析输入池, H1 保留钉 — 不主动清)
       this.observations.push(observation);
-      if (this.observations.length > 10) {
+      if (this.observations.length > this.OBSERVATION_WINDOW) {
         this.observations.shift();
       }
 
@@ -155,8 +167,8 @@ export class SelfLearner {
         observationCount: this.observations.length 
       });
 
-      // 检查是否达到分析阈值
-      if (this.observations.length >= 3 && !this.analysisInProgress) {
+      // #007 W2: 阈值 3→10 (类常量, 实例可覆盖; G1 联动 = slice(-ANALYSIS_THRESHOLD) 同参)
+      if (this.observations.length >= this.ANALYSIS_THRESHOLD && !this.analysisInProgress) {
         this.analyzeAndGenerateSkill();
       }
 
@@ -192,8 +204,8 @@ export class SelfLearner {
     try {
       this.log.info('[SelfLearner] 开始分析用户行为模式');
 
-      // 获取最近的3条观察记录
-      const recentObservations = this.observations.slice(-3);
+      // #007 G1: 分析输入 = 最近 ANALYSIS_THRESHOLD 条 (联动 W2 阈值, 非硬编码 3)
+      const recentObservations = this.observations.slice(-this.ANALYSIS_THRESHOLD);
 
       // 构造提示词
       const prompt = this.buildAnalysisPrompt(recentObservations);
@@ -756,6 +768,23 @@ export class SelfLearner {
    */
   public clearPendingProposal(): void {
     this.pendingProposal = null;
+  }
+
+  /**
+   * #007 H1: 提案超时判定 (订单既定 30 分钟; 诚实文案"提案已超期自动忽略"由 UI 侧消费)
+   * v1 口径: 主进程侧守卫 — 收到时刻或前端拉取时刻判定, 超期 → {expired:true, reason};
+   *          未超期 → {expired:false, reason:null}. 纯判定不 clear, clear 由调用方 (UI 或 IPC) 显式执行,
+   *          保持单飞语义 (主进程侧不做任何定时器 — 订单 H1 "IPC 定时器" 由前端 v2 扩展, 见 H2 备查)
+   */
+  public isProposalExpired(now: Date, timeoutMs: number = 30 * 60 * 1000): { expired: boolean; reason: string | null } {
+    const p = this.pendingProposal;
+    if (!p) return { expired: false, reason: null };
+    const elapsed = now.getTime() - p.createdAt;
+    if (elapsed > timeoutMs) {
+      const min = Math.floor(elapsed / 60000);
+      return { expired: true, reason: `提案已存在 ${min} 分钟, 超过 30 分钟有效期` };
+    }
+    return { expired: false, reason: null };
   }
 
   /**
