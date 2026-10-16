@@ -220,6 +220,28 @@
 - **状态**：**预留**（未触发；触发条件 = 门禁判"symlink 逃逸风险" / 用户裁决加 realpath；v1 默认空表 = 零行为回归, 触达面未扩时本条无实际暴露）。
 - **登记**：2026-10-13 #004 verdict 批（#005 裁决 #5 明示登记）
 
+### DEV-026 — 退出 flush 依赖既有 dispose 链（W5 接线时验证）
+- **描述**：#006 `MemoryVectorStore.flush()` 为显式排空入口（N1 写队列排空 + 原子 rename 落盘）。**退出路径未接 `app.on('before-quit')`**（main.ts 冻结面），退出时未 flush 的 debounce 窗口内写（≤500ms）依赖既有 dispose 链的 `await adapter.dispose()` 触发 `flush()` — 若既有 dispose 链未覆盖向量层，退出时会有 ≤500ms 的写丢失窗口。
+- **根因**：main.ts 是 #006 冻结面（五红线），不能新增 `app.on('before-quit')` 接线位；`HermesAdapter` 构造链的反序析构若存在则自然触发 `flush()`，需 W5 接线批验证。
+- **修法（W5）**：W5 接线批显式 `await hermesAdapter.dispose()`（dispose 链若已含向量层则本条自动关闭）；若不存在 dispose 链，补 `HermesAdapter.dispose()` → `MemoryVectorStore.flush()` 链，并在 `app.on('before-quit')`（main.ts 接线面，W5 解冻后）触发。
+- **状态**：**预留**（W5 接线批验证；本单 #006 只落 `flush()` 入口，不接退出钩子）。
+- **登记**：2026-10-16 #006 Step A verdict（裁决 3 明示登记）
+
+### DEV-027 — v1 无相似度去重（语义重叠条目不去重，LRU 按 ts 淘汰）
+- **描述**：#006 向量层去重走 **id 精确覆盖**（`upsert` 同 id 覆盖 content/vector），**未做语义相似度去重**——若两条 content 语义相近但 id 不同（如"用户要 14 寸笔记本" vs "我 14 寸笔记本偏好"），向量层保留两条，容量上限 200 被语义重叠条目占用；LRU 按 ts 淘汰，无法识别语义重叠。
+- **根因**：v1 红线 "简单可解释，禁花哨"（订单原文）— 相似度阈值 + 余弦判重的语义（阈值多少算"重叠"？合并谁？谁淘汰谁？）需要单独批次论证，v1 不实施。
+- **修法（backlog）**：后续批次论证 "相似度阈值 + 合并策略"（候选：cosine > 0.92 视为重叠，保留 score 更高条，淘汰更低条）；若论证通过，进 `MemoryVectorStore.evictIfOverflow` 前的独立 `dedupBySimilarity` 步骤，不破坏 v1 LRU 规则。
+- **状态**：**预留**（v1 无此能力；触发条件 = 用户反馈语义重叠条目过多 / 容量不足，或后续批次显式要求）。
+- **登记**：2026-10-16 #006 Step A 设计稿 B.7 预占（原编号 DEV-026，因 #006 verdict 裁决 3 将 DEV-026 语义改指"退出 flush 依赖 dispose 链"，本条顺延为 DEV-027）
+
+### DEV-028 — 记忆内存态（首轮审计原债，已修·持久化）
+- **描述**：首轮审计指出"记忆内存态"—— #006 实施前 `MemoryVectorStore.entries` 为纯内存 Map，进程重启后清空；`EmbeddingService` 同（重启全部重算）。**文本真源层**（`HermesMemory` → ConfigStore 键 `hermes.memories`）**已持久化**，缺的是**向量缓存层**（重启清空 + 重算 embedding = D5 违背）。
+- **根因**：v1 架构未考虑重启场景（#000/#001 期向量层仅做 in-memory 语义匹配，未规划持久化）。
+- **修法（#006 已修）**：#006 实施 — `MemoryVectorStore` 新增 `loadFromDisk()` + `persist()` + `flush()` + `writeChain`（N1 写队列）+ 原子 rename（N2）+ 先载后写（N3），落盘 `userData/hermes-memory/vector-cache.json`，LRU 容量 200；D5 默认 stub-deterministic 零网络。
+- **状态**：**已修·持久化**（#006 本单关闭）。
+- **备注**：本债在首轮审计产物中**未独立落账到 deviation-ledger.md**（session_search 坐实 docs 全目录无该条独立条目，仅 #006 订单描述"首轮审计原债"一句引用），本笔补登即关闭，来源诚实标注为"首轮审计"（不冒充已登记条目）。
+- **登记**：2026-10-16 #006 Step A verdict（裁决 3 要求关闭"记忆内存态"，本笔补登 + 关闭同动作）
+
 ---
 
 ## 台账迁移对照表（旧 #N → DEV-NNN）
@@ -250,5 +272,8 @@
 | — | DEV-023 | W5 停放 (审计行 run 关联, 接线批修) |
 | — | DEV-024 | W5 停放 (旧三件套清理, 本单仅删 LlmAgentBrain 两 stub) |
 | — | DEV-025 | 预留 (可信目录 symlink 逃逸 realpath 未解析, v1 文档标注) |
+| — | DEV-026 | 预留 (退出 flush 依赖既有 dispose 链, W5 接线批验证) |
+| — | DEV-027 | 预留 (v1 无相似度去重, LRU 按 ts 淘汰, 语义重叠进 backlog) |
+| — | DEV-028 | 已修·持久化 (#006 本单关闭, 首审原债补登即关闭) ★ |
 
 > **注**：`DEV-015` 空缺，保留为未来批次预留（终身不复用规则：已分配的 ID 即使删除也不回收）。

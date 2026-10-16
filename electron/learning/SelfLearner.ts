@@ -7,6 +7,15 @@
  * 2. 达到阈值时调用大模型分析行为模式
  * 3. 生成泛化的技能提案（语义理解→抽象模式→创建技能）
  * 4. 实现语义匹配的技能触发机制
+ *
+ * ── #006 X1 反向注释 (与 MemoryVectorStore 正反向一致) ─────────
+ * 本类 = 执行行为层 (observations.json, "用户做了什么")。
+ * 与 electron/hermes/ 的文本记忆层 (hermes.memories + vector-cache.json,
+ * "用户要什么语义") 语义正交 — 两套体系不合并, 各自独立持久化。
+ * 详见: electron/hermes/MemoryVectorStore.ts 顶部 X1 正向注释
+ *       docs/#006-memory-persistence-design.md § B.5
+ * 若未来需要跨层桥接 (如"从执行观察提炼语义偏好"), 应显式通过
+ * HermesMemory.addExperienceMemory 入口, 而非本类直接写向量层。
  */
 
 import * as fs from 'fs';
