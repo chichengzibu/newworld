@@ -21,7 +21,25 @@ export interface AdapterRecallOptions extends RecallOptions {
  */
 export const RECALL_DEFAULT_TOPK = 5
 export const RECALL_DEFAULT_MIN_SCORE = 0.1
-/** #006.5 R-1 (休眠 brain 链, W5 接线后生效): 宽召回 — 备选上下文宁多勿漏 */
+/**
+ * #006.5 R-1 (休眠 brain 链) 阈值常量 — 宽召回 — 备选上下文宁多勿漏
+ *
+ * ═══ 消费点钉 (#006.5·A 案 b 项) ═══════════════════════════════════════
+ * 当前生产消费面: **零** (grep 实查: 仅本定义处, 未在任何调用点出现)
+ *   原因: #006.5 R-1 现行实现 = brain 内走 opts.memoryContext **显式参数**透传
+ *   (ChatManager/会话层派生时调 recall() 渲染成字符串传 brain, #003-fix 同模式
+ *    最严格读法 — brain 零 adapter import, 零 embedText 调用, 无状态红线)。
+ *   → 本常量当前未消费。
+ *
+ * 未来消费点 (W5 接线批):
+ *   会话层 (ChatManager / dispatchToAgent 入口) 派生 memoryContext 字符串时, 调用
+ *   `HermesAdapter.getInstance().recall(query, { minScore: RECALL_BRAIN_MIN_SCORE })`
+ *   → 把 0.5 作为 brain 链的宽召回阈值 (比 R-2 活跃链 0.7 宽, 备选上下文宁多勿漏)。
+ *
+ * 禁删除: 语义召回阈值面保留 (W5 接线 + DEV-027 真 embedding 接入后激活)。
+ * 禁"已在生产生效"措辞: 当前零消费, 是**预留常量**, 非**生产闸**。
+ * ═══════════════════════════════════════════════════════════════════
+ */
 export const RECALL_BRAIN_MIN_SCORE = 0.5
 /** #006.5 R-2 (活跃链, 立即生效): 严召回 — 注入 prompt 的条目质量阈值更高 */
 export const RECALL_CHAT_MIN_SCORE = 0.7

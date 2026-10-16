@@ -60,6 +60,35 @@ describe('#006.5 Q1 管线往返 (管线验收, 非语义验收)', () => {
       expect(res[0].entry?.id).toBe(`q1-${i}`)
     }
   })
+
+  it('Q1b minScore 闸行为: 同文命中 (score≈1.0) + 异文高阈值 0.99 全排除 (minScore 过滤断言)', async () => {
+    // A 案 c 项: 0.7 生产闸 (R-2) 的行为本身必须有测试覆盖
+    // 异文 = 不同文本 → SHA-256 哈希向量残差余弦 ≈ 0 < 0.99 → minScore 排除
+    const svc = EmbeddingService.getInstance()
+    const w = MemoryVectorStore.__forTest()
+    w.__setPersistencePathForTest(cacheFile)
+
+    const stored = 'Q2 探针串 Z1-alpha-beta'
+    const other = 'completely different text 完全不同的异文查询串 xyz'
+    await w.upsert({ id: 'q2', content: stored, score: 80, createdAt: Date.now() } as Memory,
+      await svc.embedText(stored, { cache: false }), 'stub-deterministic')
+    await w.flush()
+
+    const r = MemoryVectorStore.__forTest()
+    r.__setPersistencePathForTest(cacheFile)
+    r.__loadFromDiskForTest()
+
+    // 同文 query → 余弦 = 1.0 → top-1 (minScore 0.0 关闭闸)
+    const same = await r.search(await svc.embedText(stored, { cache: false }), 3, 0.0)
+    expect(same.length).toBeGreaterThanOrEqual(1)
+    expect(same[0].entry?.id).toBe('q2')
+    expect(same[0].score).toBeCloseTo(1.0, 5)
+
+    // 异文 query + minScore 0.99 闸 → 残差余弦 < 0.99 → 全排除 → 空结果
+    const qvOther = await svc.embedText(other, { cache: false })
+    const out = await r.search(qvOther, 3, 0.99)
+    expect(out.length).toBe(0)
+  })
 })
 
 // ── W1 幂等 (同 id 二次 upsert → 零重复, content 取最新) ───────────────
