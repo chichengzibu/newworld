@@ -489,5 +489,20 @@ export default {
     testFailed: 'Connection test failed',
     testFailedWithReason: 'Connection test failed: {reason}',
     unknownError: 'Unknown error'
+  },
+  orb: {
+    status: {
+      idle: 'Idle',
+      listening: 'Listening',
+      thinking: 'Thinking',
+      speaking: 'Speaking',
+      hidden: 'Hidden'
+    },
+    suggestions: {
+      s1: 'List files in my Downloads folder',
+      s2: 'Organize screenshots on my desktop',
+      s3: 'Remember I prefer dark mode',
+      s4: 'Show recent task executions'
+    }
   }
 };

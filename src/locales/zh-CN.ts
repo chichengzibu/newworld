@@ -503,5 +503,20 @@ export default {
     testFailed: '连接测试失败',
     testFailedWithReason: '连接测试失败: {reason}',
     unknownError: '未知错误'
+  },
+  orb: {
+    status: {
+      idle: '待命',
+      listening: '聆听中',
+      thinking: '思考中',
+      speaking: '回复中',
+      hidden: '隐藏'
+    },
+    suggestions: {
+      s1: '帮我列出下载文件夹里的文件',
+      s2: '整理桌面上的截图',
+      s3: '记住我偏好深色模式',
+      s4: '查看最近的任务执行情况'
+    }
   }
 };
