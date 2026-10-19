@@ -248,6 +248,24 @@
 
 ---
 
+### DEV-029 — ollama-real-link 环境预检(测试卫生, 非放宽)
+- **描述**：`tests/integration/ollama-real-link.test.ts` 默认 `OLLAMA_MODEL=qwen3:14b`；本机 Ollama tag 不匹配时 404 → 6 用例 60s 超时污染电池信号。**环境依赖噪声, 非代码缺陷。**
+- **根因**：原 beforeAll 只硬断言 `/api/version`（host 可达性），未验证指定模型 tag 在本机；S1-S6 用该 tag 真链路时 host 可达但模型缺位 → 真 LLM 调用 404/慢响应触发 timeout。
+- **修法（NOVA #003-A 已落）**：顶层 ESM `await` 探测 `http://localhost:11434/api/tags`（3s 超时）→ 三态分流：
+  - **A. host 不可达** → beforeAll 硬抛（既有硬失败语义保持）
+  - **B. host 可达 + tag 在位** → S1-S6 正常执行（断言一字未动）
+  - **C. host 可达 + tag 缺位** → 六处 S1-S6 `maybeSkipModel(ctx) → ctx.skip('[SKIP] ...')` 显式 SKIP + `console.warn('[SKIP] Ollama host lacks model <tag> (in place: ...)')`
+  - **D. /api/tags 接口异常**（host 可达但 5xx/不可解析）→ MODEL_PRESENT=true 兜底，S1-S6 正常执行（不应因 tags 单点故障把真链路误判为缺位）
+- **实现机制(为什么用 `ctx.skip` 而非 `it.skipIf`)**：vitest 1.6.1 实测 `it.skipIf(condition)` 声明只 1 参（`node_modules/@vitest/runner/dist/index.js:518-520` `taskFn.skipIf = function(condition) { return condition ? this.skip : this }`），带 name/timeout 多参会被 JS 静默丢弃（实测 S1-S6 全变 `<anonymous>` + 12ms"假通过"函数体不执行）。故改用 vitest 官方文档明确的 `context.skip(condition, message)`（`it(name, timeout, async (ctx) => { if(!MODEL_PRESENT) ctx.skip(...) ... })`，运行时判 condition，name/timeout 保留正确）。顶层 ESM await 是必要的：让 probe 在模块求值阶段完成 → describe 注册 + beforeAll + 用例执行时 MODEL_PRESENT 已是最终值。
+- **落点(实测 file:line)**：`tests/integration/ollama-real-link.test.ts:33` NOVA #003-A 顶层注释头 + `:49-61` 顶层 ESM await probe 块（四态 A/B/C/D 分流）+ `:66-69` `maybeSkipModel` shim（模型缺位时 `ctx.skip('[SKIP] Ollama host lacks model <tag>')`）+ `:72-84` describe/beforeAll（保留既有 host 硬失败语义 + LlmConfigStore.set）+ 六处 `maybeSkipModel(ctx)` 调用（实测 L87/L104/L142/L158/L183/L196；断言体逐字符与 pre-#003-A 一致）。
+- **边界**：
+  - 白名单 2 文件：该测试文件 + `docs/deviation-ledger.md` 本条目 + 对照表一行。零其他改动。
+  - `docs/deviation-ledger.md:251` 本条目详细区 + `:300` 对照表 DEV-029 行(实测)。
+  - **非放宽**：S1-S6 断言体逐字符保持(实测 S1-S6 函数内代码与 pre-#003-A 一致)。
+- **验收对应(本轮交付后复跑, 原样贴回)**：见提交消息与聊天归档。
+- **备注**：并发负载致实时链路超时属环境噪声(2026-10-19 11:23 轮归档定性, 已在 #002 汇报报备) — 本条机制落地后, 无模型 tag 的环境不再污染信号。
+- **登记**：2026-10-19 NOVA #003-A verdict 批登记。
+
 ## 台账迁移对照表（旧 #N → DEV-NNN）
 
 | 旧 ID | DEV ID | 状态 |
@@ -279,5 +297,7 @@
 | — | DEV-026 | 预留 (退出 flush 依赖既有 dispose 链, W5 接线批验证) |
 | — | DEV-027 | 已覆盖·机制修正 (#007 修正版 A 放行进 3 改写; 技能侧 LLM 意图级判重实读坐实, cosine 预筛登记备查, 接真 embedding 时同批做) ★ |
 | — | DEV-028 | 已修·持久化 (#006 本单关闭, 首审原债补登即关闭) ★ |
+| — | DEV-029 | 已加·测试卫生 (NOVA #003-A: ollama-real-link 环境预检 — 指定模型 tag 不在本机 → S1-S6 六处 maybeSkipModel(ctx)→ctx.skip 显式 SKIP + [SKIP] 日志, 非放宽; 时序关键点: it.skipIf(condition) 声明只 1 参(实测 node_modules/@vitest/runner/dist/index.js:518-520), 多参会静默丢 name/timeout, 故改用官方 context.skip API + 顶层 ESM await probe) |
+
 
 > **注**：`DEV-015` 空缺，保留为未来批次预留（终身不复用规则：已分配的 ID 即使删除也不回收）。
