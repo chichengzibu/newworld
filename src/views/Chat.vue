@@ -23,6 +23,11 @@
                 {{ getModelName(chatStore.currentConversation.providerId, chatStore.currentConversation.modelId) }}
               </el-tag>
             </div>
+            <!-- NOVA #002: 生命体 Orb 状态区 (28px + i18n statusText; 纯展示, 不动消息逻辑) -->
+            <div class="nova-orb-status nova-tech-surface nova-hud-corner" role="status" :aria-label="t(orbStore.statusText)">
+              <NovaOrb :size="28" :state="orbStore.state" />
+              <span class="nova-orb-text">{{ t(orbStore.statusText) }}</span>
+            </div>
           </div>
 
            <div class="messages-container" ref="messagesContainer" @scroll="handleScroll">
@@ -235,10 +240,28 @@
 
         <div class="empty-chat" v-else>
           <div class="empty-content">
+            <!-- NOVA #002: 空状态中央 120px 生命体 Orb (idle 呼吸) -->
+            <div class="nova-empty-orb">
+              <NovaOrb :size="120" :state="orbStore.state" />
+              <span class="nova-empty-orb-text">{{ t(orbStore.statusText) }}</span>
+            </div>
             <div class="empty-greeting">
               <el-icon class="empty-icon" :size="36" color="var(--fg-tertiary)"><Sunny /></el-icon>
               <h2 class="empty-title">{{ greetingText }}</h2>
               <p class="empty-desc">PiPiClaw 已经准备就绪。从下面挑一个开始,或者直接输入问题。</p>
+            </div>
+
+            <!-- NOVA #002: 4 条建议 chips (i18n 静态文案; 点击填入输入框并发送) -->
+            <div class="nova-suggest-chips" v-if="enabledProviders.length > 0" role="list">
+              <button
+                v-for="key in ['s1', 's2', 's3', 's4']"
+                :key="key"
+                class="nova-chip nova-tech-surface nova-scanline"
+                role="listitem"
+                @click="handleNovaSuggestion(key)"
+              >
+                {{ t(`orb.suggestions.${key}`) }}
+              </button>
             </div>
 
             <div class="empty-prompts-host" v-if="enabledProviders.length > 0">
@@ -460,6 +483,7 @@
 import { ref, computed, reactive, onMounted, watch, nextTick, onUnmounted } from 'vue';
 import { useVirtualizer, type Virtualizer } from '@tanstack/vue-virtual';
 import { useRoute, useRouter } from 'vue-router';
+import { useI18n } from 'vue-i18n';
 import { ElMessage } from "element-plus/es/components/message/index"
 import { ElMessageBox } from "element-plus/es/components/message-box/index";
 import { Plus, Promotion, CopyDocument, RefreshRight, DArrowRight, Search, Close, Loading, Setting, WarningFilled, Memo, EditPen, MagicStick, ChatDotRound, Lightning, User, Sunny, CircleCheck, CircleClose, Refresh, Clock } from '@element-plus/icons-vue';
@@ -472,6 +496,7 @@ import QuickPrompts from '@/components/chat/QuickPrompts.vue';
 import ThinkingBlock from '@/components/chat/ThinkingBlock.vue';
 import ChatSidebar from '@/components/chat/ChatSidebar.vue';
 import ChatInput from '@/components/chat/ChatInput.vue';
+import NovaOrb from '@/components/nova/NovaOrb.vue';
 
 import { useChatStore } from '@/stores/chat';
 import { useModelsStore } from '@/stores/models';
@@ -480,6 +505,7 @@ import { useModelRouterStore } from '@/stores/modelRouter';
 import { useHermesMemoryStore } from '@/stores/hermesMemory';
 import { useGatewayStore } from '@/stores/gateway';
 import { usePermissionsStore } from '@/stores/permissions';
+import { useOrbStore } from '@/stores/orb';
 
 // P1-6: marked + highlight.js/core 首次渲染消息时再加载
 // 用 lib/core (不带全语言注册),仅按需注册 10 种常用语言
@@ -556,6 +582,9 @@ const modelRouterStore = useModelRouterStore();
 const hermesMemoryStore = useHermesMemoryStore();
 const gatewayStore = useGatewayStore();
 const permissionsStore = usePermissionsStore();
+// NOVA #002: Orb 状态机 (M4 预留 listening/speaking; 本版 Chat 只驱动 thinking/idle)
+const orbStore = useOrbStore();
+const { t } = useI18n();
 const route = useRoute();
 const router = useRouter();
 
@@ -980,6 +1009,20 @@ watch(() => {
   }
 }, { deep: true });
 
+// NOVA #002: 流式回复结束 → Orb 回 idle (监听最后一条 assistant 消息 status 退出 streaming)
+watch(() => {
+  const conv = chatStore.currentConversation;
+  const msgs = conv?.messages ?? [];
+  const last = msgs[msgs.length - 1];
+  return last && last.role === 'assistant' ? last.status : null;
+}, (status) => {
+  if (status && status !== 'streaming' && status !== 'sending') {
+    // M1 语义: 回复结束/失败/停止 → 一次交互结束 → 归位 idle (finish 为生命周期出口,
+    // 不走 setState 优先级判定 — thinking/speaking/listening 可回 idle, idle/hidden 幂等)
+    orbStore.finish('nova#002 reply settled');
+  }
+});
+
 function getModelName(providerId?: string, modelId?: string): string {
   if (!providerId || !modelId) return '未知模型';
   const provider = modelsStore.getProviderById(providerId);
@@ -1274,9 +1317,20 @@ async function handleConfirmExecute(): Promise<void> {
   await chatStore.confirmExecuteTask();
 }
 
+// NOVA #002: 空状态建议 chip 点击 → 填入输入框并发射 (复用既有 handleSend 链路, 零新逻辑)
+function handleNovaSuggestion(key: string): void {
+  const text = key ? t(`orb.suggestions.${key}`) : '';
+  if (!text) return;
+  inputMessage.value = text;
+  void handleSend();
+}
+
 async function handleSend(): Promise<void> {
   const content = inputMessage.value.trim();
   if ((!content && attachedFiles.value.length === 0) || chatStore.sending) return;
+
+  // NOVA #002: 发送 → Orb 进入 thinking (thinking 优先级 > idle, 允许升级)
+  orbStore.setState('thinking', 'nova#002 user sent');
 
   console.log('[Chat.vue] ========== handleSend 被调用 ==========');
   console.log('[Chat.vue] 消息内容:', content);
@@ -2680,5 +2734,65 @@ async function handleSaveSettings(): Promise<void> {
 
 .chat-sidebar-resize-handle:hover {
   background-color: var(--el-color-primary-light-5);
+}
+/* NOVA #002 皮肤层消费 (.nova-tech-surface / .nova-hud-corner 定义在 tokens.css 追加段;
+   此处仅 Chat 页局部布局, 不动既有 .chat-header — 其 flex/space-between 已在 L1530) */
+.nova-orb-status {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-sm, 8px);
+  padding: 4px 10px 4px 8px;
+  flex: 0 0 auto;
+  user-select: none;
+}
+.nova-orb-text {
+  font-size: var(--font-size-xs, 11px);
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.72);
+  white-space: nowrap;
+}
+.nova-empty-orb {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--space-md, 12px);
+  margin-bottom: var(--space-lg, 24px);
+}
+.nova-empty-orb-text {
+  font-size: var(--font-size-sm, 12px);
+  font-weight: 500;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--fg-tertiary, rgba(0, 0, 0, 0.52));
+}
+.nova-suggest-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-sm, 8px);
+  justify-content: center;
+  margin: var(--space-lg, 24px) auto;
+  max-width: 720px;
+}
+.nova-chip {
+  appearance: none;
+  font-family: inherit;
+  font-size: var(--font-size-sm, 12px);
+  line-height: 1.5;
+  padding: 8px 14px;
+  border-radius: var(--radius-pill, 9999px);
+  cursor: pointer;
+  transition: transform var(--nova-dur-fast, 180ms) var(--ease-standard, ease),
+              box-shadow var(--nova-dur-fast, 180ms) var(--ease-standard, ease);
+  text-align: center;
+}
+.nova-chip:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 18px rgba(34, 211, 238, 0.20), inset 0 0 0 1px rgba(34, 211, 238, 0.35);
+}
+.nova-chip:focus-visible {
+  outline: 2px solid var(--nova-cyan, #22d3ee);
+  outline-offset: 2px;
 }
 </style>
