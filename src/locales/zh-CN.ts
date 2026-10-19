@@ -518,5 +518,24 @@ export default {
       s3: '记住我偏好深色模式',
       s4: '查看最近的任务执行情况'
     }
+  },
+  // NOVA #003-C · M2(第③笔): Boot 启动幕阶段标签(纯追加; 禁删/禁改既有 orb.*/settings.*)
+  //   消费面钉(诚实声明, 仿 #006.5 A案 RECALL_BRAIN_MIN_SCORE 处置):
+  //   当前渲染消费面 = 零 —— splash.html 走双语硬编码(I18N 表), 不走 Vite 管线, 无法 import 本对象;
+  //   本 key 是 splash I18N 表的"权威值来源对齐基准"(splash.html 注释锁定), 并供 M4+ 给
+  //   BootDirector.labelFor(stage) 注入真实 i18n 消费。禁以"已生效/已在渲染层启用"措辞引用。
+  nova: {
+    boot: {
+      subtitle: 'PiPiClaw 正在唤醒…',
+      label: {
+        config: '内核初始化',
+        ipc: 'IPC 服务',
+        'llm-config': 'LLM 通道',
+        memory: '记忆装载',
+        skills: '技能注册',
+        chats: '会话索引',
+        channels: 'IM 通道'
+      }
+    }
   }
 };

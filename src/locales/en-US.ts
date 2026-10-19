@@ -504,5 +504,25 @@ export default {
       s3: 'Remember I prefer dark mode',
       s4: 'Show recent task executions'
     }
+  },
+  // NOVA #003-C · M2(bis-3): Boot phase labels (append-only).
+  //   Consumer note (honest, mirrors #006.5 A案 RECALL_BRAIN_MIN_SCORE treatment):
+  //   current render consumer = none — splash.html uses a hardcoded bilingual I18N table
+  //   (no Vite pipeline) and cannot import this object; these keys are the
+  //   "canonical value alignment source" pinned in splash.html comments, and are
+  //   reserved for M4+ to feed BootDirector.labelFor(stage). Do not cite as active.
+  nova: {
+    boot: {
+      subtitle: 'PiPiClaw is waking up…',
+      label: {
+        config: 'Core init',
+        ipc: 'IPC services',
+        'llm-config': 'LLM channel',
+        memory: 'Loading memory',
+        skills: 'Registering skills',
+        chats: 'Indexing chats',
+        channels: 'IM channels'
+      }
+    }
   }
 };

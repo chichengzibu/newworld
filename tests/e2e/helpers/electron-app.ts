@@ -65,6 +65,11 @@ export const test = base.extend<{
         // 强制 WindowManager 走 prod 路径(loadFile dist/index.html),
         // 否则会去找 vite dev server (localhost:5173)
         PIPICLAW_E2E: '1',
+        // NOVA #003-C · M2(第③笔): 显式 splash 旁路(命令 §F6 硬条件)。
+        //   BootOrchestrator 对 PIPICLAW_E2E='1' 同样 bypass, 此处显式声明是
+        //   双保险 + 自文档化: 防止未来重构拆开 E2E/SPLASH 耦合时 splash 劫持
+        //   firstWindow()(34 个既有 e2e 全部会因首个窗口是 splash 而超时)。
+        PIPICLAW_SKIP_SPLASH: '1',
         ELECTRON_DISABLE_SECURITY_WARNINGS: '1',
       },
       timeout: 30_000,
