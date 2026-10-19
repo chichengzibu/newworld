@@ -61,6 +61,14 @@ app.use(router);
 app.use(i18n);
 app.mount('#app');
 
+// ============ NOVA #003-C · M2 — 渲染端首帧握手(第②笔, 最小 diff: 只发不添逻辑) ============
+//   Vue mount 完成 = 首帧就绪 → 通知主进程 BootDirector(点亮节拍判定之一, 设计稿 F5)
+//   非 Electron 环境(纯浏览器/单测)下 electronAPI 不存在, 静默跳过
+try {
+  const api = (window as unknown as { electronAPI?: { nova?: { notifyRendererReady?: () => Promise<unknown> } } }).electronAPI;
+  void api?.nova?.notifyRendererReady?.();
+} catch { /* 非 Electron 环境或 preload 未就绪, 降级: 主进程 10s 兜底强切(设计稿 F7-d) */ }
+
 // ============ 渲染错误兜底:把 Vue / 资源错误写到 DOM 上 ============
 // 背景: 白屏问题排查时,普通用户开 DevTools 门槛高,直接挂屏显错更直观。
 // 三种来源都覆盖: Vue render error / 资源加载失败 / unhandledrejection。

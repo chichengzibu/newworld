@@ -15,6 +15,14 @@ import '@sentry/electron/preload';
 // ========== IPC通道定义 ==========
 
 const IpcChannels = {
+  // ========== NOVA #003-C · M2 — BootDirector handshake(第②笔, 纯追加) ==========
+  //   命名空间 nova:* 与既有 webcontainer:* / runtime:* 不冲突
+  //   交叉引用: IpcServer.ts L386-397 的 nova:renderer-ready / nova:boot-skip handler
+  //   splash.html(第③笔) 在 window.nova 命名空间下消费
+  NOVA_RENDERER_READY: 'nova:renderer-ready',
+  NOVA_BOOT_SKIP: 'nova:boot-skip',
+  NOVA_BOOT_EVENT: 'nova:boot-event',
+
   // 文件选择器
   DIALOG_OPEN_FILE: 'dialog:openFile',
 
@@ -1226,6 +1234,19 @@ const electronAPI = {
   // ========== W13: WebContainerRunner renderer bridge ==========
   webcontainer: {
     notifyRendererReady: () => ipcRenderer.invoke('webcontainer:renderer-ready')
+  },
+
+  // ========== NOVA #003-C · M2 — Boot handshake(第②笔, 纯追加) ==========
+  //   渲染端 Chat 壳首帧后 → window.electronAPI.nova.notifyRendererReady()
+  //   splash 内 click/keydown → window.electronAPI.nova.skip()
+  nova: {
+    notifyRendererReady: () => ipcRenderer.invoke(IpcChannels.NOVA_RENDERER_READY),
+    skip: () => ipcRenderer.send(IpcChannels.NOVA_BOOT_SKIP),
+    onBootEvent: (handler: (ev: Record<string, unknown>) => void) => {
+      const wrapped = (_e: IpcRendererEvent, payload: Record<string, unknown>) => handler(payload);
+      ipcRenderer.on(IpcChannels.NOVA_BOOT_EVENT, wrapped);
+      return () => ipcRenderer.removeListener(IpcChannels.NOVA_BOOT_EVENT, wrapped);
+    }
   },
 
   // ========== Phase 4 Task 4: Auto-updater API ==========

@@ -36,6 +36,10 @@ import { registerD5RecordingToSkill } from './skill/builtin/D5RecordingToSkill';
 // 若 LlmClient 不可用,getInstance()/构造函数会抛错,因此包在 try 中。
 import { LlmAgentBrain } from './agent/LlmAgentBrain';
 import { initHost, isOhos } from './platform';
+// NOVA #003-C · M2(第②笔): Boot 编排 + 子系统无信号实例的 .getInstance() 触发
+import { BootOrchestrator } from './core/BootOrchestrator';
+import { LlmConfigStore } from './llm/LlmConfigStore';
+import { SkillLoader } from './skill/SkillLoader';
 
 // ============ 真实用户监控 (Sentry / Electron 主进程) ============
 // 主进程统一持有 Sentry client;渲染端经 preload 桥接转发事件到此上报。
@@ -128,9 +132,47 @@ app.whenReady().then(async () => {
     // 还没注册。Settings.vue 调用 -> No handler registered -> console error
     new AutoUpdater().registerIpcHandlers()
 
-    // 3. 创建主窗口
+    // 3. 主窗显示门(设计稿 §5 / F5): 在 createMainWindow 之前挂接, 让 ready-to-show 受 BootDirector 调度
+    //   旁路(PIPICLAW_SKIP_SPLASH / PIPICLAW_E2E)= true → ready-to-show 立即 show, 等价既有行为
+    //   正常路径 = false → 挂起, 待 BootOrchestrator.reveal() → WindowManager.revealMainWindow() 显示
+    const bypass =
+      process.env.PIPICLAW_SKIP_SPLASH === '1' ||
+      process.env.PIPICLAW_E2E === '1';
     windowManager = WindowManager.getInstance();
+    windowManager.setRevealGate(() => bypass);
+
+    // 3.bis NOVA #003-C · M2(第②笔): 创建主窗(受门控) + Boot 编排 — 收口调度主窗显示 + splash 生命周期
+    //   交叉引用: core/BootOrchestrator.ts(编排) + core/BootDirector.ts(状态机, 11 例单测)
+    //   + core/SplashWindow.ts(splash) + WindowManager.setRevealGate/revealMainWindow(门控+收口)
+    //   旁路: PIPICLAW_SKIP_SPLASH=1 / PIPICLAW_E2E=1 → 立即放行, splash 不启动(e2e 路径)
     await windowManager.createMainWindow();
+    if (bypass) {
+      // e2e 旁路: ready-to-show 已被 gate=true 直接 show; 显式补一次 revealMainWindow 兜底
+      //   (若 ready-to-show 早于 gate 到位则 pendingReveal 挂起, revealMainWindow 补齐)
+      windowManager.revealMainWindow();
+    }
+    try {
+      BootOrchestrator.getInstance()
+        .setLog({
+          info: (m, e) => log.info(m, e),
+          warn: (m, e) => log.warn(m, e),
+          error: (m, e) => log.error(m, e),
+        })
+        .start(
+          {
+            // 三"无信号"子系统的同步 .getInstance() 触发(设计稿 F3: 禁造 onReady/warmup)
+            'llm-config': () => LlmConfigStore.getInstance(),
+            memory: () => HermesAdapter.getInstance(),
+            skills: () => SkillLoader.getInstance(),
+          },
+          () => windowManager.revealMainWindow(),
+        );
+    } catch (err) {
+      // Boot 编排失败不致命: 降级直开主窗(设计稿 F7)
+      log.warn('[main] NOVA boot 编排启动异常, 降级直开主窗', err);
+      windowManager.setRevealGate(null); // 拆门 → ready-to-show 直接 show
+      windowManager.revealMainWindow();
+    }
 
     // 4. 初始化全局快捷键
     globalShortcut = GlobalShortcut.getInstance();

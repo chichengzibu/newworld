@@ -8,6 +8,37 @@ import { LogManager } from './LogManager';
 import { ConfigStore } from './ConfigStore';
 
 export class WindowManager {
+  // NOVA #003-C · M2(第②笔): 主窗显示由 BootDirector 收口调度(设计稿 §5 / F5)。
+  //   - 默认(null): 无 boot 编排(e2e 旁路/单测/降级)时 ready-to-show 立即 show, 与既有行为一致
+  //   - 注入(返回 false): 挂起显示, BootDirector 收口后由 BootOrchestrator 调 show()
+  private revealGate: ((win: BrowserWindow) => boolean) | null = null;
+  private pendingReveal = false;
+
+  /** 挂接显示门(BootOrchestrator 注入): 返回 true = 放行 show, false = 挂起待收口; null = 拆除门 */
+  setRevealGate(gate: ((win: BrowserWindow) => boolean) | null): void {
+    this.revealGate = gate;
+    if (gate === null && this.pendingReveal) {
+      this.finalizeReveal();
+    }
+  }
+
+  /** BootDirector 收口后调用: 完成主窗显示(含竞态兜底: ready-to-show 尚未触发时直接 show) */
+  revealMainWindow(): void {
+    if (!this.mainWindow || this.mainWindow.isDestroyed()) return;
+    if (this.pendingReveal) {
+      this.finalizeReveal();
+    } else if (!this.mainWindow.isVisible()) {
+      // 竞态兜底(设计稿 F7): 收口早于 ready-to-show → 直接 show
+      //   不吞错: show 若窗口已销毁会抛, 此处 isDestroyed 已过滤
+      this.mainWindow.center();
+      this.mainWindow.show();
+    }
+  }
+
+  private finalizeReveal(): void {
+    this.pendingReveal = false;
+    this.mainWindow?.show();
+  }
   private static instance: WindowManager;
   private mainWindow: BrowserWindow | null = null;
   private log = LogManager.getInstance();
@@ -70,7 +101,19 @@ export class WindowManager {
     this.mainWindow.once('ready-to-show', () => {
       this.log.info('窗口准备就绪，显示窗口');
       this.initialized = true;
-      this.mainWindow?.show();
+      // NOVA #003-C · M2(第②笔): 显示由 BootDirector 收口调度(命令 §2 "主窗显示改由 BootDirector 收口调度")
+      //   门控返回 false → 挂起待收口(BootOrchestrator.reveal 时调 show);
+      //   无门控(e2e 旁路/单测/降级直开) → 立即 show, 与既有行为逐字一致。
+      if (this.revealGate) {
+        const allow = this.revealGate(this.mainWindow);
+        if (allow) {
+          this.mainWindow?.show();
+        } else {
+          this.pendingReveal = true;
+        }
+      } else {
+        this.mainWindow?.show();
+      }
     });
 
     this.mainWindow.on('maximize', () => {

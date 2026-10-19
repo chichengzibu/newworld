@@ -38,6 +38,15 @@ import { IMMessageStore } from '../channel/IMMessageStore';
 import { FileTransferManager } from '../channel/FileTransferManager';
 import { IMMessageRouter } from '../channel/IMMessageRouter';
 import { IMPermissionManager } from '../channel/IMPermissionManager';
+// NOVA #003-C · M2 BootDirector 桥接接口(第②笔) — main.ts 把 BootDirector + SplashWindow
+//   挂到这里, 本文件两个 nova:* handler 只经接口调用, 不直接 import 业务单例,
+//   避免 IpcServer → electron 启动时序耦合。Bridge 未挂载时 handler 静默 no-op。
+export interface NovaBootBridge {
+  /** nova:renderer-ready → BootDirector.markRendererReady() */
+  markRendererReady(): void;
+  /** nova:boot-skip → BootDirector.markSkipped() + SplashWindow.close() */
+  markSkipped(): void;
+}
 import { ChannelRouter } from '../channel/ChannelRouter';
 import { ClawHubManager } from '../skill/ClawHubManager';
 import { ClawHubRegistry } from '../skill/ClawHubRegistry';
@@ -57,6 +66,12 @@ export class IpcServer {
   private handlers: Map<string, Function> = new Map();
 
   private constructor() {}
+
+  // ========== NOVA #003-C · M2 — BootDirector bridge(第②笔) ==========
+  // 见 nova:renderer-ready / nova:boot-skip handler(本类 registerHandlers 内)
+  private novaBoot: NovaBootBridge | null = null;
+  public setNovaBootBootBridge(bridge: NovaBootBridge | null): void { this.novaBoot = bridge; }
+  get novaBootBridge(): NovaBootBridge | null { return this.novaBoot; }
 
   public static getInstance(): IpcServer {
     if (!IpcServer.instance) {
@@ -367,6 +382,29 @@ export class IpcServer {
       } catch (error) {
         this.log.error('skills:reload 失败', error);
         return { success: false, error: String(error) };
+      }
+    });
+
+    // ========== NOVA #003-C · M2 — BootDirector handshake (第②笔) ==========
+    // 命名空间 nova:* (与既有 webcontainer:renderer-ready 命名空间分属, 不冲突)
+    //   交叉引用: electron/preload.ts:1228 webcontainer.notifyRendererReady → 'webcontainer:renderer-ready'
+    //   本处只追加 nova:renderer-ready / nova:boot-skip, 零改动既有语义
+    //   nova:boot-event 走 main→splash 推(SplashWindow.pushEvent), 不经 ipcMain
+    //
+    ipcMain.handle('nova:renderer-ready', async () => {
+      try {
+        this.novaBoot?.markRendererReady();
+        return { success: true };
+      } catch (error) {
+        return { success: false, error: String(error as Error) };
+      }
+    });
+
+    ipcMain.on('nova:boot-skip', () => {
+      try {
+        this.novaBoot?.markSkipped();
+      } catch (error) {
+        this.log.warn(`NOVA: nova:boot-skip 回调异常: ${String(error as Error)}`);
       }
     });
 
