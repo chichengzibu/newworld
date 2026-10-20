@@ -298,6 +298,15 @@
 | — | DEV-027 | 已覆盖·机制修正 (#007 修正版 A 放行进 3 改写; 技能侧 LLM 意图级判重实读坐实, cosine 预筛登记备查, 接真 embedding 时同批做) ★ |
 | — | DEV-028 | 已修·持久化 (#006 本单关闭, 首审原债补登即关闭) ★ |
 | — | DEV-029 | 已加·测试卫生 (NOVA #003-A: ollama-real-link 环境预检 — 指定模型 tag 不在本机 → S1-S6 六处 maybeSkipModel(ctx)→ctx.skip 显式 SKIP + [SKIP] 日志, 非放宽; 时序关键点: it.skipIf(condition) 声明只 1 参(实测 node_modules/@vitest/runner/dist/index.js:518-520), 多参会静默丢 name/timeout, 故改用官方 context.skip API + 顶层 ESM await probe) |
+| — | DEV-030 | 开放·偶发断言未命中 (NOVA #003-D 复审登记: tests/e2e/routes-render.test.ts:54 `expect(mainHtml).toContain(route.expectClass)` 断言偶发未命中(2026-10-19 16:43 轮 11 条中 2 条 FAIL, 16:49/16:50 两轮复跑即 11/11 全绿); 复现条件 = 同命令连跑通常全绿、偶发未命中; 疑因 = Chat.vue 动态 import 时序抖动(注释 L48-50 "历史 B1: Chat.vue 动态 import 崩 → Dashboard 残留"); 处置 = 挂 #008/#009 排查清单, 本单 #003-D 只读、不修) |
+
+### DEV-030 明细（NOVA #003-D 复审登记，2026-10-19）
+
+- **现象**：`tests/e2e/routes-render.test.ts:54` 的 `expect(mainHtml).toContain(route.expectClass)` 在 #003-C 终验期间（16:43:03 轮）11 条路由用例中 2 条偶发未命中（FAIL），同命令 16:49:43 / 16:50:04 两轮连续复跑即 11/11 全绿（Duration 各 ~18.9s）。
+- **定性**：非 #003-C 引入回归——#003-C 三笔（826e62f/514f8ed/335961a）对该文件 `--numstat` 零命中，仅 `tests/e2e/helpers/electron-app.ts +5`（`PIPICLAW_SKIP_SPLASH` 旁路 env 注入，非用例体）。
+- **历史锚定**：该断言文件唯一变更 commit = `4041252 test(e2e): 纯 Web 渲染 e2e 独立化 — routes-render 11 例实跑全绿`（早于 #003-C）；用例骨架 L37 `expectClass: string` + L54 断言 + L61-70 `CORE_ROUTES` 9 条 + L73-75 `REDIRECT_CASES` 1 条 + L100/L106 两个 for 循环生成 10 条 `it` + L111 独立 Chat 断言 `it` = 实跑 11 条（以 16:49:43 / 16:50:04 两轮 `Tests 11 passed (11)` 为准）。
+- **疑因**：L52-53 注释自述 "不是 fallback 内容(历史 B1: Chat.vue 动态 import 崩 → Dashboard 残留)"，指向 Chat.vue 动态 import 时序；与 #003-C 的 BootOrchestrator 收口调度主窗显示无直接关联（e2e 旁路路径 `gate=true` 下 `ready-to-show` 立即 show，行为等价既有）。
+- **处置**：挂 #008/#009 排查清单；#003-D 复审令仅做登记，不在本轮回修。
 
 
 > **注**：`DEV-015` 空缺，保留为未来批次预留（终身不复用规则：已分配的 ID 即使删除也不回收）。
