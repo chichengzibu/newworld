@@ -22,6 +22,7 @@ const IpcChannels = {
   NOVA_RENDERER_READY: 'nova:renderer-ready',
   NOVA_BOOT_SKIP: 'nova:boot-skip',
   NOVA_BOOT_EVENT: 'nova:boot-event',
+  NOVA_SEARCH: 'nova:search',
 
   // 文件选择器
   DIALOG_OPEN_FILE: 'dialog:openFile',
@@ -1246,7 +1247,12 @@ const electronAPI = {
       const wrapped = (_e: IpcRendererEvent, payload: Record<string, unknown>) => handler(payload);
       ipcRenderer.on(IpcChannels.NOVA_BOOT_EVENT, wrapped);
       return () => ipcRenderer.removeListener(IpcChannels.NOVA_BOOT_EVENT, wrapped);
-    }
+    },
+    // ========== NOVA #004-B · M3 — 联网搜索(第②笔, 纯追加) ==========
+    // 入参: { query: string, count?: number, locale?: string }
+    // 出参: { success: boolean, data?: SearchResult[], error?: string, code?: string, elapsedMs?: number }
+    search: (q: { query: string; count?: number; locale?: string }) =>
+      ipcRenderer.invoke(IpcChannels.NOVA_SEARCH, q),
   },
 
   // ========== Phase 4 Task 4: Auto-updater API ==========

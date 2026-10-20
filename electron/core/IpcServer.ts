@@ -73,6 +73,10 @@ export class IpcServer {
   public setNovaBootBootBridge(bridge: NovaBootBridge | null): void { this.novaBoot = bridge; }
   get novaBootBridge(): NovaBootBridge | null { return this.novaBoot; }
 
+  // ========== NOVA #004-B · M3 — nova:search 接线(第②笔) ==========
+  // provider 单例只注册一次(进程级; 测试内各 fork 独立, 无跨测试污染)
+  private static novaSearchSeeded = false;
+
   public static getInstance(): IpcServer {
     if (!IpcServer.instance) {
       IpcServer.instance = new IpcServer();
@@ -405,6 +409,47 @@ export class IpcServer {
         this.novaBoot?.markSkipped();
       } catch (error) {
         this.log.warn(`NOVA: nova:boot-skip 回调异常: ${String(error as Error)}`);
+      }
+    });
+
+    // ========== NOVA #004-B · M3 — 联网搜索 (第②笔, 追加式; NovaBootBridge 零改) ==========
+    // 命名空间 nova:* 续段; 与 nova:renderer-ready / nova:boot-skip (M2) 同命名空间分属。
+    // 红线: 不进 commandDecide / 安全确认链(稿 F3 §2 结论); 端点域名硬编码在 provider 内。
+    // 动态 import(对齐本文件 llm-config:test / llm:chat 段的 await import 既有惯例)。
+    // 单例注册只发生一次(static 标志); 单测隔离由 vitest pool:forks 天然保证。
+    ipcMain.handle('nova:search', async (_: unknown, args: { query: string; count?: number; locale?: string }) => {
+      type NovaSearchModule = typeof import('../core/search');
+      let mod: NovaSearchModule;
+      try {
+        mod = await import('../core/search');
+      } catch (error) {
+        return { success: false, error: String(error) };
+      }
+      const { SearchRegistry, DuckDuckGoHtmlProvider, SearchError, DEFAULT_TIMEOUT_MS } = mod;
+      if (!IpcServer.novaSearchSeeded) {
+        SearchRegistry.getInstance().register(new DuckDuckGoHtmlProvider());
+        IpcServer.novaSearchSeeded = true;
+      }
+      const provider = SearchRegistry.getInstance().default();
+      if (!provider) {
+        return { success: false, error: 'no provider registered' };
+      }
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), DEFAULT_TIMEOUT_MS);
+      try {
+        const startedAt = Date.now();
+        const data = await provider.search({
+          query: typeof args?.query === 'string' ? args.query : '',
+          count: typeof args?.count === 'number' ? args.count : undefined,
+          locale: typeof args?.locale === 'string' ? args.locale : undefined,
+          signal: controller.signal,
+        }, globalThis.fetch);
+        return { success: true, data, elapsedMs: Date.now() - startedAt };
+      } catch (error) {
+        const code = error instanceof SearchError ? error.code : 'network';
+        return { success: false, error: String(error), code };
+      } finally {
+        clearTimeout(timer);
       }
     });
 
