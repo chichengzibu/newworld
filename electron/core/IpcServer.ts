@@ -77,6 +77,11 @@ export class IpcServer {
   // provider 单例只注册一次(进程级; 测试内各 fork 独立, 无跨测试污染)
   private static novaSearchSeeded = false;
 
+  // ========== NOVA #005-B · M4 — nova:voice 接线(第②笔) ==========
+  // settings 持久化往返只发生一次(进程级 ConfigStore 单例注入; 避免重复 fs 写);
+  // 单测隔离由 vitest pool:forks 天然保证。
+  private static novaVoiceSeeded = false;
+
   public static getInstance(): IpcServer {
     if (!IpcServer.instance) {
       IpcServer.instance = new IpcServer();
@@ -453,7 +458,65 @@ export class IpcServer {
       }
     });
 
-    ipcMain.handle('skills:importFile', async (_, filePath: string) => {
+    // ========== NOVA #005-B · M4 — nova:voice 接线 (第②笔, 追加式; NovaBootBridge/NovaSearchBridge 零改) ==========
+    // 命名空间 nova:voice:* 与 nova:* 续段; 与 nova:renderer-ready / nova:boot-skip (M2) / nova:search (M3) 同命名空间分属。
+    // 红线: 不进 commandDecide / 安全确认链(稿 F3 §2); settings 持久化走既有 ConfigStore(不在本单新增 fs 通道)。
+    // 单例注册只发生一次(static 标志); 单测隔离由 vitest pool:forks 天然保证。
+    // settings 真值 key = 'nova.voice.settings'(ConfigStore 嵌套 key, 沿用 L137 路径解析);
+    // 读/写走 ConfigStore.getInstance() 直接封装。
+      type NovaVoiceSettingsPatch = Partial<{
+      enabled: boolean;
+      autoRead: boolean;
+      rate: number;
+      pitch: number;
+      volume: number;
+      }>;
+      ipcMain.handle('nova:voice:get-settings', async () => {
+      try {
+    if (!IpcServer.novaVoiceSeeded) {
+      // 首次访问: 确保 ConfigStore 拿到默认值兜底
+      const cs = ConfigStore.getInstance();
+      const cur = cs.get('nova.voice.settings');
+      if (cur === undefined) {
+        cs.set('nova.voice.settings', {
+          enabled: false,
+          autoRead: false,
+          rate: 1.0,
+          pitch: 1.0,
+          volume: 1.0,
+        });
+      }
+      IpcServer.novaVoiceSeeded = true;
+    }
+    const settings = ConfigStore.getInstance().get('nova.voice.settings');
+    return { success: true, data: settings };
+      } catch (error) {
+    return { success: false, error: String(error as Error) };
+      }
+      });
+
+      ipcMain.handle('nova:voice:set-settings', async (_: unknown, patch: NovaVoiceSettingsPatch) => {
+      try {
+    if (!patch || typeof patch !== 'object') {
+      return { success: false, error: 'patch 必填(可空对象), 非法入参' };
+    }
+    const cs = ConfigStore.getInstance();
+    const cur = cs.get('nova.voice.settings') ?? {};
+    // 字段级白名单 + 类型兜底(防 renderer 注入异常值)
+    const next: Record<string, unknown> = { ...cur };
+    if (typeof patch.enabled === 'boolean') next.enabled = patch.enabled;
+    if (typeof patch.autoRead === 'boolean') next.autoRead = patch.autoRead;
+    if (typeof patch.rate === 'number' && Number.isFinite(patch.rate)) next.rate = patch.rate;
+    if (typeof patch.pitch === 'number' && Number.isFinite(patch.pitch)) next.pitch = patch.pitch;
+    if (typeof patch.volume === 'number' && Number.isFinite(patch.volume)) next.volume = patch.volume;
+    cs.set('nova.voice.settings', next);
+    return { success: true, data: next };
+      } catch (error) {
+    return { success: false, error: String(error as Error) };
+      }
+      });
+
+  ipcMain.handle('skills:importFile', async (_, filePath: string) => {
       try {
         const skillLoader = SkillLoader.getInstance();
         const result = await skillLoader.importSkillFromFile(filePath);

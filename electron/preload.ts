@@ -9,6 +9,9 @@
 
 import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron';
 
+// NOVA #005-B · M4 — 语音设置类型(第②笔, IPC 接线配套 import; 不新增模块)
+import type { VoiceSettings } from '../core/voice';
+
 // Sentry 渲染↔主进程桥接:必须在 preload 顶部引入,使渲染端事件能转发到主进程上报。
 import '@sentry/electron/preload';
 
@@ -23,6 +26,8 @@ const IpcChannels = {
   NOVA_BOOT_SKIP: 'nova:boot-skip',
   NOVA_BOOT_EVENT: 'nova:boot-event',
   NOVA_SEARCH: 'nova:search',
+  NOVA_VOICE_GET_SETTINGS: 'nova:voice:get-settings',
+  NOVA_VOICE_SET_SETTINGS: 'nova:voice:set-settings',
 
   // 文件选择器
   DIALOG_OPEN_FILE: 'dialog:openFile',
@@ -1253,6 +1258,13 @@ const electronAPI = {
     // 出参: { success: boolean, data?: SearchResult[], error?: string, code?: string, elapsedMs?: number }
     search: (q: { query: string; count?: number; locale?: string }) =>
       ipcRenderer.invoke(IpcChannels.NOVA_SEARCH, q),
+    // ========== NOVA #005-B · M4 — 语音设置(第②笔, 纯追加) ==========
+    // 入参: getSettings 无; setSettings(patch) patch = Partial<{ enabled / autoRead / rate / pitch / volume }>
+    // 出参: { success: boolean, data?: VoiceSettings, error?: string }
+    getSettings: (): Promise<IpcResponse<VoiceSettings>> =>
+      ipcRenderer.invoke(IpcChannels.NOVA_VOICE_GET_SETTINGS),
+    setSettings: (patch: Partial<VoiceSettings>): Promise<IpcResponse<VoiceSettings>> =>
+      ipcRenderer.invoke(IpcChannels.NOVA_VOICE_SET_SETTINGS, patch),
   },
 
   // ========== Phase 4 Task 4: Auto-updater API ==========
