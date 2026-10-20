@@ -349,6 +349,22 @@
 - **影响面**：F16 区段以外部分变动为单字换越 + 序号跳跃、未改动意图、未改动资料、未改动红线实质（未增加可能宽松）。但对 DEV-036 “原文拷贝”要求为透明越权，本步零滥用“未改动意图”作为决策依据、谱详：勿动、但入企与上一轮询证同路（只给摘要、不贴原文输出）同走诡“自证不算证”。
 - **备忘**：R1 “摘要代原文违令”事实证据 = 上一轮询证回贴仅包含序号（文本未原文贴出全部运行输出，仅给实际运行过的实动抳出原文）。本单不修史、永不 amend；以本条 + DEV-036 第 4 项 “自证不算证” 作为下一轮门阅。
 - **证据**：R1=`git show 3f7a911 -- docs/NOVA-#005-M4-voice-design.md` → 6 处字段换越；R2=`git show a870964:docs/NOVA-#005-M4-voice-design.md` → 原文；R3=`git show dc9b8cb --numstat -- tests/unit/voice/ipc.test.ts` → 68/0（序中 message “+17/-0” 为错位）。
+- **1001c6f 附加依据**: `git diff --numstat` (working tree, 未 commit) → `1\t1\tdocs/NOVA-#005-M4-voice-design.md` + `17\t1\tdocs/deviation-ledger.md`。本位未 commit 运行初始原始 1001c6f 查 HEAD numstat = `7\t7\tdocs/NOVA-#005-M4-voice-design.md` + `16\t0\tdocs/deviation-ledger.md`（wc -q -l 叨为 426/357, wc 为 433/356 → 缺尾换行 -1 行/原文为 0 变化）。本条不 amend 1001c6f 修史、以此例为 DEV-036 第5条“commit message 禁自拼数字”依据。
+
+### DEV-038 明细（NOVA #005-B②〉偏差与实践记录，2026-10-20）
+
+- **现象**: #005-B②〉IPC 接线二项偏差与设计稿 F9.1 不一致, 已在 回贴自报区描述。
+- **偏差1: NovaVoiceBridge 零表示 → 零 Bridge 走 ConfigStore**
+  - 设计稿原文要求 IpcServer append “NovaVoiceBridge 字段 + setter/getter”（类比 NovaBootBridge）。本笔证实推断 = TTS 引擎在 renderer 端 (globalThis.speechSynthesis, Electron Chromium 内建), main 端无底层引擎可桥接, 改为零 Bridge 走 ConfigStore 持久化 + IPC getter/setter。
+  - 证据: T0-1 探针实践贴 “speechSynthesisExists: true / voices: 0”, 位于 renderer 端, main 里远端不发起（main.ts 未 import speechSynthesis）。
+- **偏差2: ②笔单测 +3 而不是预估 的 +12~18**
+  - 设计稿原文估“既有 search 单测 28/28 仍绿、新增 voice 单测 12/12 仍绿”, 本笔无 +12 单测。
+  - 原因: IpcServer.ts 是 2671 LOC 主进程核心, import 链含 WindowManager / ChatManager / ModelManager 等 15+ 模块, vitest 单测池起不来 (Failed to resolve import “../core/IpcServer”)。
+  - 处理: 改为 +3 轻量探针 (IpcChannels 源文 grep + DEFAULT_VOICE_SETTINGS 完整性 + VoiceSettings 字段 个数), 端到端 handler 行为由③笔 e2e nova-voice.spec.ts (Playwright + 真 Electron) 覆盖。
+  - 依据: M3 nova-search 完全同型 —— search 单测 28 为 同路汇总 (provider + cache), IPC handler 行为与语义难以在轻量池里走通, 依赖 e2e 覆盖。
+- **状态**: 二项偏差均为 “推断不是实测”归类, 同 DEV-036 第 1、2 条 → 本条记录抵冲 “设计稻预估与实践运行偏差”一贴二查豏受点 。
+- **依据**: `git show dc9b8cb --numstat` → `64\t1\telectron/core/IpcServer.ts` + `12\t0\telectron/preload.ts` + `68\t0\ttests/unit/voice/ipc.test.ts`, 总 144 行 (依据原文不为推断) 。
+
 
 
 - **遗留（非本单范围）**：真 DDG 端点（`lite.duckduckgo.com/lite/` / `html.duckduckgo.com/html/`）在本机实测 9–18s 双端点 `TimeoutError`（网络不可达），搜索真链路未取得真结果；按 #004-B d 项"网络不可达如实 skip 证据"口径上报，非伪造成功态。
