@@ -302,6 +302,8 @@
 | — | DEV-031 | 已修·既有债 (NOVA #004-C: AutoUpdater dev-path 重复注册 — #004-B d 项冒烟发现, 非 #004 引入, dev/prod 均触发: 同一进程内 registerIpcHandlers() 被调两次(main.ts:133 P1-T1.3 早期注册 + main.ts:229 initialize 内 AutoUpdater.ts:73), 第二次 ipcMain.handle('autoUpdater:check') 同名崩 → try/catch 吞错, autoUpdater.on+checkForUpdates 半初始化态; 修复 = AutoUpdater.ts registerIpcHandlers() 入口 +5 行 removeHandler 覆盖语义(不改生产语义/不删handler/typeof 检查保 mock 兼容), 本单已修 #004-C commit d24fd0e, 见下方 DEV-031 明细) |
 | — | DEV-036 | 已加·纪律 (NOVA #005-B①-R 取证后登记: 数字命令-输出成对 禁推断数字 / 质疑回复只贴命令原文 禁“...”省略与叙事性修正 —— 本条三项自 2026-10-20 #005-B① 领取后生牧; 背景 = #005-B① 回贴中 458/475 两个数字无命令源头 “推断不是实测” + “记忆错抄”; 质疑回复要求 → 只贴命令与输出成对原文 禁转述 禁“...”省略。) |
 | — | DEV-037 | 已修·越权 (NOVA #005-B①〉步零越权改动设计稿 6 处：L74/关停/全体低顺序跳跃【按“零新依赖”】/L233/L399 “Chat.vue” escape 重写/L407 “allowed append-only” 中 L407 触及 locales 红线句; R1 以摘要代原文违令（上一轮询证仅给 5 行摘要 未贴原文）「粘贴」被判令为不认可、以原文为准、dc9b8cb message “ipc.test +17/-0” 系数字错位（权威值 numstat 68/0，本单不 amend 修史、以本条 + DEV-036 归档双备案）。) |
+| — | DEV-038 | 已修·偏差 (NOVA #005-B②〉二项偏差与实践记录: ① NovaVoiceBridge 字段+依据 NovaBootBridge 模式 → 零 Bridge 走 ConfigStore (F0 实证 TTS 引擎为 renderer 内建, main 端无底层实体); ② 设计稿估 voice 单测 +12~18 → 实际 +3 (IpcServer.ts 2671 LOC 主进程核心 难起轻量池; e2e 覆盖; 粉阶式拆分). 原始 #005-B②〉步零 commit message 引用 "新登记 DEV-038" 但未插表行, 本捌补. |
+| — | DEV-039 | 已修·偷窊 (NOVA #005-B③〉M3 SideNav 缺 /search 项上报: #004-B③笔 侧栏 append 一行未实际落地——报告中记"侧栏 append 一行"仅为纸面说明、未走代码。#005-B③笔偷窊补机上报不限于本单 — append /search 偷窊补回 + /voice 本单增项, 同为 +3 行。关单核验单从此含"UI 入口可达"检查项. |
 
 ### DEV-030 明细（NOVA #003-D 复审登记，2026-10-19）
 
@@ -366,6 +368,17 @@
 - **依据**: `git show dc9b8cb --numstat` → `64\t1\telectron/core/IpcServer.ts` + `12\t0\telectron/preload.ts` + `68\t0\ttests/unit/voice/ipc.test.ts`, 总 144 行 (依据原文不为推断) 。
 
 
+
+- **80aa78f 追加依据 (C2 结案)**: #005-B③〉步零 80aa78f commit message 报 “补前 356 → 补后 357”，实际 wc -l 採为 373 (本提交后、依据原文不为推断）。依据本单（#005-B③〉-R）重抣、C2 错位结案；本条记录为 DEV-036 第5条 “commit message 禁自拼数字” 又一例证，不修史。
+
+### DEV-039 明细（NOVA #005-B③〉SideNav /search 缺项上报，2026-10-20）
+
+- **现象**: #005-B③笔以 #004-B③笔 “侧栏 append 一行” 为默认意图，实抣脚本查到 src/components/layout/SideNav.vue 仅 5 项 (Chat/Models/Skills/IM/Schedule)，无 /search 项。
+- **定性**: #004-B③笔“侧栏”接线未实际落地 —— 报告中记“侧栏 append 一行”仅为纸面说明、未走代码。
+- **作用面**: /search 路由虽可用但无侧栏入口可达，用户需手输路由。交付默认 “路由是否可达” 但入口不豹。
+- **修法**: #005-B③笔以同补机上报不限于本单 —— append /search 偷富补回、append /voice 本单增项，同为 +3 行。本拿上报后，侧栏列表为 7 项。
+- **证据**: `grep titleKey src/components/layout/SideNav.vue` 输出 5 行 (chat/models/skills/imManagement/schedule)、未含 search/voice; #004-B③笔 commit 52a3f39 numstat 仅 +391 行全在文件内、侧栏件代码为 0；“侧栏 append 一行”以义未出现。
+- **记录**: 关单核验单从此含 “UI 入口可达”检查项 → 默认路由实现后，侧栏映射 + 点击可进入早是默认 OK。本单不修史、以记录为准。
 
 - **遗留（非本单范围）**：真 DDG 端点（`lite.duckduckgo.com/lite/` / `html.duckduckgo.com/html/`）在本机实测 9–18s 双端点 `TimeoutError`（网络不可达），搜索真链路未取得真结果；按 #004-B d 项"网络不可达如实 skip 证据"口径上报，非伪造成功态。
 
