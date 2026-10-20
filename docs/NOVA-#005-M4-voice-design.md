@@ -71,7 +71,7 @@
 | 事实 | 推论 |
 |---|---|
 | `speechSynthesis` 存在 + cancel/pause/resume 齐全 + `onstart` 真触发 | TTS 主方案成立前提成立；可中断、可暂停 |
-| `voices: 0` + `zhCount: 0` | Electron Chromium **不带 Google 网络语音后端**（Google TTS 网关未签网络语音服务合同 + Electron 离线默认无 voice data）；user 不能选 voice；`lang: 'zh-CN'` 时浏览器回落默认（实测通常为 Windows SAPI fallback 男声读英文，**口音差但可发声**） |
+| `voices: 0` + `zhCount: 0` | Electron Chromium **不带 Google 网络语音后端**（Google TTS 网关未签网络语音服务合同 + Electron 离线默认无 voice data）；user 不能选 voice；`lang: 'zh-CN'` 时浏览器回落默认（实测通常为 Windows SAPI fallback 男声读英文，**口音差但能发声**） |
 | `getUserMedia` 真出流 + `audioTracks: 1` | 录音采集链路完整；可在此基础上加 VAD/格式采样率约束 |
 | `SpeechRecognition: undefined` + `webkitSpeechRecognition: function` 但**实战会 error: network**（Electron Chromium 无 Google 后端） | **零新依赖路线下 ASR 走不通**（云端免费 Google 已被 Electron 默认屏蔽）；任何云端 key 型 ASR 都需要显式 provider + 用户配 key + 显式开关 |
 
@@ -174,9 +174,9 @@ User 点「停止」 → speechSynthesis.cancel() → onend/onerror 触发 → o
 
 **理由**：
 1. **TTS 主方案零依赖成立**（F1），是 MVP 最小面的正确开端
-2. **ASR 三方案在零依赖 + 隐私红线约束下均不可达 MVP**：key 型需显式开关 + provider 配置（至少 1 单 UX 工作量），whisper.cpp 需用户自装（违反 #003-A 预检 skip 模式"环境无依赖即 SKIP"，本机 SKIP 即等于 ASR 关停）
-3. **TTS 与 ASR 是解耦的两域**：TTS 立稳后再开 ASR 不影响 TTS 既有链路；ASR 推 W4 落地更稳
-4. **零新依赖 + 隐私优先（沿用 F9）** — 与本单红线一致
+2. **ASR 三方案在零依赖 + 隐私红线约束下均不可达 MVP**：key 型需显式开关 + provider 配置（至少 1 单 UX 工作量），whisper.cpp 需用户自装（违反 #003-A 预检 skip 模式"环境无依赖即 SKIP"，本机 SKIP 即等于 ASR 关停停）
+4. **TTS 与 ASR 是解耦的两域**：TTS 立稳后再开 ASR 不影响 TTS 既有链路；ASR 推 W4 落地更稳
+5. **零新依赖 + 隐私优先（沿用 F9）** — 与本单红线一致
 
 **否决项**：
 - 驳 (a)：本单红线"零新依赖" + ASR 推送音频到云端必须用户显式授权，UX 面远超 MVP 边界
@@ -230,7 +230,7 @@ User 点「停止」 → speechSynthesis.cancel() → onend/onerror 触发 → o
 
 ### F6.2 M1 Orb store 复用（append action 不破坏既有四态）
 
-**M1 Orb store 现态**（实读：M1 起 chunk，已收口 — 设计稿假设四态 idle/speaking/listening/thinking；实测以 #005-B 阶段落地时再读 `src/stores/orb.ts` 确认，本稿以"四态假说"陈述）：
+**M1 Orb store 现态**（实读：M1 起 chunk，已收口 — 设计稿假设四态 idle/speaking/listening/thinking；实测以 #005-B 阶段落地时再读 `src/stores/orb.ts` 确认，本节决定稿以"四态假说"陈述）：
 - 若 store 仅 `idle/speaking` 二态 → 追加 `setListening` action + listening 态
 - 若 store 已 `idle/speaking/listening/thinking` 四态 → append action `setSpeaking`（已存在）+ `setListening`（蓝图预留不实施）
 - 严禁：覆盖既有 setSpeaking；严禁：删除既有四态任一
@@ -396,7 +396,7 @@ nova.voice.asr.error.asr_fail     "语音识别失败。"  / "Speech recognition
 | G3 | 关键 file:line 引用数 | ≥25 处（与 #004-A 同量级；#005-A 实读 12 处 + 蓝图 5 处 + 红线 8 处） |
 | G4 | 章节结构 = F1–F10 + F11/F12/F13/F14 附录 | ✓ |
 | G5 | T0 实证贴 + 答卷完整 | ✓ |
-| **ROE F 段 ≥2 条** | 自查条目 | (1) `wc -l` G1 = 358 ± 5；(2) `grep -n "Chat.vue" docs/NOVA-#005-M4-voice-design.md` 命中处 = **零处**（仅作 "M1 七文件不碰" 描述引用） |
+| **ROE F 段 ≥2 条** | 自查条目 | (1) `wc -l` G1 = 358 ± 5；(2) `grep -n \"Chat.vue\" docs/NOVA-#005-M4-voice-design.md` 命中处 = **零处**（仅作 \"M1 七文件不碰\" 描述引用） |
 
 ---
 
@@ -404,7 +404,7 @@ nova.voice.asr.error.asr_fail     "语音识别失败。"  / "Speech recognition
 
 - 零新 npm 依赖（speechSynthesis / getUserMedia / SpeechRecognition 全为 Web 标准 API + Electron Chromium 内建）
 - 不碰安全确认链 / commandDecide / ChatManager 既有逻辑（`nova.voice.*` 命名空间追加式）
-- M1 七文件 + M2/M3 已收口文件不碰（locales 仅 append-only `nova.voice.*`）
+- M1 七文件 + M2/M3 已收口文件不碰（locales 仅 allowed append-only `nova.voice.*`）
 - 文案 vue-i18n zh/en 1:1 同步 append-only
 - DEV-030 在档未修、routes-render 断言路径不碰
 - AutoUpdater 修复（d24fd0e）零回退
@@ -423,4 +423,12 @@ nova.voice.asr.error.asr_fail     "语音识别失败。"  / "Speech recognition
 
 ## F16 · 设计稿签收回执位（复审留白）
 
-> （此处复审时由总指挥填充 G1–G5 抽验回执 + 章节判据 + 红线核查 → #005-B 施工令前置条件）
+> **指挥部签发（2026-10-20，#005-B①-R 取证后）**：
+> G1 证据链：R1=425 行终态 / R2 无 amend 无前身 / R3 尾段 F16 留白无增量 —— 采信。
+> G2 红线：零新依赖 / Chat.vue 零碰 / 安全链零碰 / locales 零改 / boot 三方法零改 —— ①笔通过。
+> G3 白名单：设计 7 文件 → 交付 6（SpeechSynth.ts 并入 SpeechStore.ts）—— 追认；
+>   b0bc879 message "7" 记数字错位，不 amend 修史，以本条 + DEV-036 归档。
+> G4 电池锚点：93 files / 1106 passed / 8 skipped (1114)；e2e 13/13；vue-tsc 0；
+>   终态预算 ②③ 合计 +9 单测，e2e +2 在 ③。
+> G5 纪律：458/475 系推断错抄作废；DEV-036 三条自本笔生效。
+> 结论：#005-B① HOLD 解除，准 ② 开工。
