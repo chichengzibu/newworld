@@ -304,6 +304,7 @@
 | — | DEV-037 | 已修·越权 (NOVA #005-B①〉步零越权改动设计稿 6 处：L74/关停/全体低顺序跳跃【按“零新依赖”】/L233/L399 “Chat.vue” escape 重写/L407 “allowed append-only” 中 L407 触及 locales 红线句; R1 以摘要代原文违令（上一轮询证仅给 5 行摘要 未贴原文）「粘贴」被判令为不认可、以原文为准、dc9b8cb message “ipc.test +17/-0” 系数字错位（权威值 numstat 68/0，本单不 amend 修史、以本条 + DEV-036 归档双备案）。) |
 | — | DEV-038 | 已修·偏差 (NOVA #005-B②〉二项偏差与实践记录: ① NovaVoiceBridge 字段+依据 NovaBootBridge 模式 → 零 Bridge 走 ConfigStore (F0 实证 TTS 引擎为 renderer 内建, main 端无底层实体); ② 设计稿估 voice 单测 +12~18 → 实际 +3 (IpcServer.ts 2671 LOC 主进程核心 难起轻量池; e2e 覆盖; 粉阶式拆分). 原始 #005-B②〉步零 commit message 引用 "新登记 DEV-038" 但未插表行, 本捌补. |
 | — | DEV-039 | 已修·偷窊 (NOVA #005-B③〉M3 SideNav 缺 /search 项上报: #004-B③笔 侧栏 append 一行未实际落地——报告中记"侧栏 append 一行"仅为纸面说明、未走代码。#005-B③笔偷窊补机上报不限于本单 — append /search 偷窊补回 + /voice 本单增项, 同为 +3 行。关单核验单从此含"UI 入口可达"检查项. |
+| — | DEV-040 | 已修·孤儿 (NOVA #005-B④〉M4 voice 主进程身件 314 LOC 零生产调用——D4 实证: src/stores/voice.ts:10 docblock 以外零引用; 唯一生产接口 = electron/preload.ts:13 type-only import (M2 预留线、仅类型). ②〉IpcServer.ts 2671 LOC 难起轻量池、handler 走 ConfigStore 透传、跨进程跳 SpeechStore 临层. M6 方案 C: re-home 重指; 方案 B 否决理由; 允许一个版本延后重决. |
 
 ### DEV-030 明细（NOVA #003-D 复审登记，2026-10-19）
 
@@ -337,7 +338,9 @@
   3. 质疑回复只贴命令原文：用户下发 “实抩”、“重拍”、“原文贴出” 这类要求时，只贴命令与原始输出，不转述不“...”省略；与原始输出不一致时需明说不能对账，不允造假。
 - **证据**：R1=`git show a870964:docs/NOVA-#005-M4-voice-design.md | wc -l` → 425；R2=`git reflog -15 --date=iso` → 设计稿 commit a870964 无前身、无 amend；R5 自报 “458 与 475 两个数字无任何命令源头”。
 - **备忘**：ROE 原有红线中 “归彘上报时重复同会话对数字质量、抵制推断 / 换句说 / 装闪隔子” 跟本条同向追加。
-  4. **自证不算证**：凡令“全量粘贴”，原文必须出现在回贴正文；　落盘核验 / 摘要 / 自行判定一律无效。
+  4. **自证不算证**：凡令“全量粘贴”，原文必须出现在回贴正文；落盘核验 / 摘要 / 自行判定一律无效。
+  5. **commit message 禁自拼数字:** commit message 只写 what/why/scope、数字以 git show --numstat 原始输出为准。本条为 80aa78f ③〉步零漏插后补入项。例: 80aa78f message 报 "补前 356 → 补后 357"、实际 wc -l 373、numstat 17/1; 357 为提交瞬间错误读数。
+
 ### DEV-037 明细（NOVA #005-B①〉步零越权动设计稿，2026-10-20）
 
 - **现象**：#005-B①〉步零 commit 3f7a911 越权改动设计稿 6 处（均不在 F16 预留区段内）：
@@ -379,6 +382,43 @@
 - **修法**: #005-B③笔以同补机上报不限于本单 —— append /search 偷富补回、append /voice 本单增项，同为 +3 行。本拿上报后，侧栏列表为 7 项。
 - **证据**: `grep titleKey src/components/layout/SideNav.vue` 输出 5 行 (chat/models/skills/imManagement/schedule)、未含 search/voice; #004-B③笔 commit 52a3f39 numstat 仅 +391 行全在文件内、侧栏件代码为 0；“侧栏 append 一行”以义未出现。
 - **记录**: 关单核验单从此含 “UI 入口可达”检查项 → 默认路由实现后，侧栏映射 + 点击可进入早是默认 OK。本单不修史、以记录为准。
+
+### DEV-040 明细（NOVA #005-B④〉M4 voice 主进程孤儿上报，2026-10-20）
+
+- **现象**: D4 追踪 (grep 实证 src/stores/voice.ts:10 docblock 以外零引用) 、生产/渲染/e2e 代码中零真引用 SpeechStore / VoiceRegistry。
+- **子现象1: 314 LOC 伪融入口**
+  - electron/core/voice/SpeechStore.ts: speak/cancel/pause/resume + 状态机。未被 IpcServer handler 代理。被 tests/unit/voice/store.test.ts 隔离仿真、设计稿实体、不是产品里的东西。
+  - electron/core/voice/VoiceRegistry.ts: 未被任何生产代码调用、零对接。
+- **子现象2: 测试覆盖错位**
+  - tests/unit/voice/store.test.ts + settings.test.ts 测起的是 IpcServer + ConfigStore + VoiceSettings 字段、与 SpeechStore.ts 零交叉。
+  - ipc.test.ts 只走源文发击。
+- **实践迹象**: M4 代码入库、接线 OK 为伪调用、需 M6 re-home。
+- **M6 方案 C: re-home 重指**（推荐）
+  - SpeechStore.ts 重写为主进程 IPC handler。
+  - VoiceRegistry.ts 重写为根据 ConfigStore settings 动态维护可用 voice。
+  - ③〉④ 单测重调 + ④〉 e2e nova-voice V3。
+  - 利用: M4 真在 「产品」调路径上。
+- **M6 方案 B: 删 314 LOC**（否决）
+  - A: 删 SpeechStore.ts + VoiceRegistry.ts + tests/unit/voice/{store,settings}.test.ts、仅留 IpcServer handler。
+  - 否决理由: ②〉③〉代码失锟点、考 M6 可重调。危险点: 让 M4 零调用但多代码 被错误为 接线 OK。
+- **证据**: D4 grep 出 0、src/stores/voice.ts:10 docblock 仅设计稿说明。git show 5a212eb --numstat 详本多代码 SpeechStore.ts/VoiceRegistry.ts/index.ts/types.ts + tests/unit/voice/{store,settings}.test.ts 总 +263+51+16+108+246+103=787 行。M6 方案 C re-home 重代码预估 ~150-200 行。
+
+### DEV-041 明细（NOVA #005-B④〉文案语义不对称上报，2026-10-20）
+
+- **现象**: M4 voice 文案 「期刊」 (zh-CN) 与动作义不隔间: 点 Speak 叫 期刊、语义上不通。en-US 走 Voice Reader、期刊 → Reader 两边不同一语义场。
+- **追源**: ③〉 以 期刊 为产品名 。 朗读、Speak、PickupReply 都表达同一件事。
+- **实验代理路点**: tests/unit/i18n.test.ts 只检查 「键为空、zh/en 一对一」、不检查 「你说的与你做的是同一件事」。
+- **修法**: ④〉 docs commit 补 DEV-036 「第5条」 、 同步抳 ②〉zh-CN 文案 、 en-US 未动 、 跨语义场偏差留下一步。
+- **证据**: commit 235fed5 numstat = 6/6 + 3/3; grep -c 期刊 6 → 0; e2e V1 以 朗读 + Speak 为反馈、交差本同。
+
+### 勘误段（NOVA #005-B④〉#005-B③〉步零 80aa78f 漏插第5条自查 + DEV-038/039 明细段头映射存疑、2026-10-20）
+
+- **现象**: D2 指出、DEV-036 「第5条」 本应生于 80aa78f ③〉步零。但 80aa78f 提交只在 commit message 与 ②〉 insert 明细区块末 「以此例为 DEV-036 第5条... 」提及、未能将该条插入 DEV-036 修法区。
+- **上下文冲突**: 24c5629 commit message、DEV-037 1001c6f 附加依据段、DEV-037 80aa78f 追加依据段 三处名文均「DEV-036 第5条」、表面上存在、本名不存在。本 commit 补入。
+- **另谜: DEV-038/039 明细段头映射存疑** (不修):
+  - 24c5629 表行 L305 DEV-038 写 ③〉、原 80aa78f 明细段头写 ②〉、不对。本 commit 以 ③〉 为准、未 ②〉。
+  - 24c5629 表行 L306 DEV-039 写 ③〉、原 80aa78f 明细段头写 ③〉 为准。本 commit 以原「③〉 」为准。
+  - 保留以待查: 代号、映射不对、保留原文。
 
 - **遗留（非本单范围）**：真 DDG 端点（`lite.duckduckgo.com/lite/` / `html.duckduckgo.com/html/`）在本机实测 9–18s 双端点 `TimeoutError`（网络不可达），搜索真链路未取得真结果；按 #004-B d 项"网络不可达如实 skip 证据"口径上报，非伪造成功态。
 
