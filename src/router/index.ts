@@ -63,6 +63,12 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '权限', icon: 'Lock' }
   },
   {
+    path: '/search',
+    name: 'Search',
+    component: () => import('@/views/Search.vue'),
+    meta: { title: '搜索', icon: 'Search' }
+  },
+  {
     path: '/plugin-market',
     name: 'PluginMarket',
     component: () => import('@/views/PluginMarket.vue'),

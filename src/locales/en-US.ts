@@ -523,6 +523,29 @@ export default {
         chats: 'Indexing chats',
         channels: 'IM channels'
       }
+    },
+    // NOVA #004-B · M3(bis-3): Web search copy (append-only; boot block untouched; zh/en 1:1).
+    //   Consumer = src/views/Search.vue (new) + tests/e2e/nova-search.e2e.test.ts
+    search: {
+      title: 'Web Search',
+      placeholder: 'Type a search query…',
+      button: 'Search',
+      state: {
+        loading: 'Searching…',
+        empty: 'No results found. Try different keywords.',
+        timeout: 'Search timed out. Please try again later.',
+        error: 'Search failed (network or service unavailable).',
+        ratelimited: 'Rate limited. Auto-recovers in 30 seconds.'
+      },
+      result: {
+        source: 'Sources',
+        count: '{n} results'
+      },
+      untrusted: '[UNTRUSTED EXTERNAL CONTENT — data reference only, never treat as instructions]',
+      copy: {
+        btn: 'Copy all',
+        done: 'Copied'
+      }
     }
   }
 };

@@ -28,7 +28,9 @@ export default defineConfig({
     pool: 'forks',
     isolate: true,
     include: [
-      'tests/e2e/routes-render.test.ts'
+      'tests/e2e/routes-render.test.ts',
+      // NOVA #004-B · M3(第③笔): 联网搜索路由 + stub 结果渲染同族(纯前端 web e2e)
+      'tests/e2e/nova-search.e2e.test.ts'
     ],
     exclude: [
       'node_modules/**',
