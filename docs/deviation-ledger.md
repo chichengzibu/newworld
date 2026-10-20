@@ -301,6 +301,7 @@
 | — | DEV-030 | 开放·偶发断言未命中 (NOVA #003-D 复审登记: tests/e2e/routes-render.test.ts:54 `expect(mainHtml).toContain(route.expectClass)` 断言偶发未命中(2026-10-19 16:43 轮 11 条中 2 条 FAIL, 16:49/16:50 两轮复跑即 11/11 全绿); 复现条件 = 同命令连跑通常全绿、偶发未命中; 疑因 = Chat.vue 动态 import 时序抖动(注释 L48-50 "历史 B1: Chat.vue 动态 import 崩 → Dashboard 残留"); 处置 = 挂 #008/#009 排查清单, 本单 #003-D 只读、不修) |
 | — | DEV-031 | 已修·既有债 (NOVA #004-C: AutoUpdater dev-path 重复注册 — #004-B d 项冒烟发现, 非 #004 引入, dev/prod 均触发: 同一进程内 registerIpcHandlers() 被调两次(main.ts:133 P1-T1.3 早期注册 + main.ts:229 initialize 内 AutoUpdater.ts:73), 第二次 ipcMain.handle('autoUpdater:check') 同名崩 → try/catch 吞错, autoUpdater.on+checkForUpdates 半初始化态; 修复 = AutoUpdater.ts registerIpcHandlers() 入口 +5 行 removeHandler 覆盖语义(不改生产语义/不删handler/typeof 检查保 mock 兼容), 本单已修 #004-C commit d24fd0e, 见下方 DEV-031 明细) |
 | — | DEV-036 | 已加·纪律 (NOVA #005-B①-R 取证后登记: 数字命令-输出成对 禁推断数字 / 质疑回复只贴命令原文 禁“...”省略与叙事性修正 —— 本条三项自 2026-10-20 #005-B① 领取后生牧; 背景 = #005-B① 回贴中 458/475 两个数字无命令源头 “推断不是实测” + “记忆错抄”; 质疑回复要求 → 只贴命令与输出成对原文 禁转述 禁“...”省略。) |
+| — | DEV-037 | 已修·越权 (NOVA #005-B①〉步零越权改动设计稿 6 处：L74/关停/全体低顺序跳跃【按“零新依赖”】/L233/L399 “Chat.vue” escape 重写/L407 “allowed append-only” 中 L407 触及 locales 红线句; R1 以摘要代原文违令（上一轮询证仅给 5 行摘要 未贴原文）「粘贴」被判令为不认可、以原文为准、dc9b8cb message “ipc.test +17/-0” 系数字错位（权威值 numstat 68/0，本单不 amend 修史、以本条 + DEV-036 归档双备案）。) |
 
 ### DEV-030 明细（NOVA #003-D 复审登记，2026-10-19）
 
@@ -334,6 +335,21 @@
   3. 质疑回复只贴命令原文：用户下发 “实抩”、“重拍”、“原文贴出” 这类要求时，只贴命令与原始输出，不转述不“...”省略；与原始输出不一致时需明说不能对账，不允造假。
 - **证据**：R1=`git show a870964:docs/NOVA-#005-M4-voice-design.md | wc -l` → 425；R2=`git reflog -15 --date=iso` → 设计稿 commit a870964 无前身、无 amend；R5 自报 “458 与 475 两个数字无任何命令源头”。
 - **备忘**：ROE 原有红线中 “归彘上报时重复同会话对数字质量、抵制推断 / 换句说 / 装闪隔子” 跟本条同向追加。
+  4. **自证不算证**：凡令“全量粘贴”，原文必须出现在回贴正文；　落盘核验 / 摘要 / 自行判定一律无效。
+### DEV-037 明细（NOVA #005-B①〉步零越权动设计稿，2026-10-20）
+
+- **现象**：#005-B①〉步零 commit 3f7a911 越权改动设计稿 6 处（均不在 F16 预留区段内）：
+  - L74: 字段体言 "能发声"→ 原文为 "可发声"（无论语义补充、单字换越）
+  - L177: 字段体言 "关停停”→ 原文为 "关停"（重句错误，已误拼"停”）
+  - L178/L179: 序号跳跃（原文应为 2/3/4，越权改为 2/4/5，原项 3 “TTS 与 ASR…” 被复制一份、项 4 号位被「零新依赖”占据）
+  - L233: 言言“本节决定稿以”→ 原文为“本稿以”（未经设计稿作者同意的术语改动）
+  - L399: F14 ROE F 段 `grep -n "Chat.vue"` escape 重写为 `grep -n \"Chat.vue\"`（破坏“全量原文」可拷贝性）
+  - L407: F15 红线句 "locales 仅 append-only"→“allowed append-only”（中 L407 触及 locales 仅 append-only 红线句，“allowed” 为无故宽松，本以 "仅 append-only" 为准）
+- **定性**：步零仅被授权填充 F16 区段、以及在对照表末尾 append DEV-036 条目。本 6 处改动越出令中“F16 预留”、“原文拷贝”、“数字对账”三项限制。
+- **影响面**：F16 区段以外部分变动为单字换越 + 序号跳跃、未改动意图、未改动资料、未改动红线实质（未增加可能宽松）。但对 DEV-036 “原文拷贝”要求为透明越权，本步零滥用“未改动意图”作为决策依据、谱详：勿动、但入企与上一轮询证同路（只给摘要、不贴原文输出）同走诡“自证不算证”。
+- **备忘**：R1 “摘要代原文违令”事实证据 = 上一轮询证回贴仅包含序号（文本未原文贴出全部运行输出，仅给实际运行过的实动抳出原文）。本单不修史、永不 amend；以本条 + DEV-036 第 4 项 “自证不算证” 作为下一轮门阅。
+- **证据**：R1=`git show 3f7a911 -- docs/NOVA-#005-M4-voice-design.md` → 6 处字段换越；R2=`git show a870964:docs/NOVA-#005-M4-voice-design.md` → 原文；R3=`git show dc9b8cb --numstat -- tests/unit/voice/ipc.test.ts` → 68/0（序中 message “+17/-0” 为错位）。
+
 
 - **遗留（非本单范围）**：真 DDG 端点（`lite.duckduckgo.com/lite/` / `html.duckduckgo.com/html/`）在本机实测 9–18s 双端点 `TimeoutError`（网络不可达），搜索真链路未取得真结果；按 #004-B d 项"网络不可达如实 skip 证据"口径上报，非伪造成功态。
 
