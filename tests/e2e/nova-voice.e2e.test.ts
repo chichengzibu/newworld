@@ -48,9 +48,9 @@ describe('NOVA #005-B M4 voice \u8def\u7531 + stub speak \u72b6\u6001\u673a', ()
     await page.waitForTimeout(2000)
     const pageText = await page.textContent('body')
     const hasFeedback = !!(pageText && (
-      pageText.includes('\u671f\u520a\u4e2d') || pageText.includes('Speaking') ||
-      pageText.includes('\u4e0d\u53ef\u7528') || pageText.includes('unavailable') ||
-      pageText.includes('Speak') || pageText.includes('\u671f\u520a')
+      pageText.includes('朗读中') || pageText.includes('Speaking') ||
+      pageText.includes('不可用') || pageText.includes('unavailable') ||
+      pageText.includes('Speak') || pageText.includes('朗读')
     ))
     expect(hasFeedback).toBe(true)
   }, 30000)

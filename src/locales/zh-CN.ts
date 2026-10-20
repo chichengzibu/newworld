@@ -566,24 +566,24 @@ export default {
       //   消费面 = src/views/Voice.vue + e2e nova-voice.e2e.test.ts
       //   TTS 10 键 + ASR 4 键 reserved (未实施, 保留为未来周期)
       tts: {
-        title: '语音期刊',
-        enabled: '启用语音期刊',
-        autoRead: '自动期刊助手回复',
+        title: '语音朗读',
+        enabled: '启用语音朗读',
+        autoRead: '自动朗读助手回复',
         rate: '语速',
         pitch: '音调',
         volume: '音量',
         placeholder: '粘贴文本或选最近回复',
         button: {
-          speak: '期刊',
+          speak: '朗读',
           stop: '停止'
         },
         state: {
-          speaking: '期刊中…',
+          speaking: '朗读中…',
         },
         error: {
           unavailable: '当前环境不支持语音合成。',
           noVoice: '未安装可用的语音包。',
-          canceled: '期刊已停止。'
+          canceled: '朗读已停止。'
         }
       },
       // ASR 4 键 —— 未实施, 仅占位 (延后 W4)
