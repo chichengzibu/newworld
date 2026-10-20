@@ -41,7 +41,7 @@
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
-  ChatDotRound, Box, Cpu, ChatLineRound, Calendar, Setting
+  ChatDotRound, Box, Cpu, ChatLineRound, Calendar, Setting, Microphone, Search
 } from '@element-plus/icons-vue'
 
 const { t } = useI18n()
@@ -62,6 +62,8 @@ const navItems: NavItem[] = [
   { path: '/skills',        titleKey: 'nav.skills',        icon: Box },
   { path: '/im-management', titleKey: 'nav.imManagement',  icon: ChatLineRound },
   { path: '/schedule',      titleKey: 'nav.schedule',      icon: Calendar },
+  { path: '/search',        titleKey: 'nav.search',        icon: Search },
+  { path: '/voice',         titleKey: 'nav.voice',         icon: Microphone },
 ]
 
 const settingsPath = '/settings'

@@ -69,6 +69,12 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '搜索', icon: 'Search' }
   },
   {
+    path: '/voice',
+    name: 'Voice',
+    component: () => import('@/views/Voice.vue'),
+    meta: { title: '语音', icon: 'Microphone' }
+  },
+  {
     path: '/plugin-market',
     name: 'PluginMarket',
     component: () => import('@/views/PluginMarket.vue'),

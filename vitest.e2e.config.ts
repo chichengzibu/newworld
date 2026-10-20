@@ -30,7 +30,9 @@ export default defineConfig({
     include: [
       'tests/e2e/routes-render.test.ts',
       // NOVA #004-B · M3(第③笔): 联网搜索路由 + stub 结果渲染同族(纯前端 web e2e)
-      'tests/e2e/nova-search.e2e.test.ts'
+      'tests/e2e/nova-search.e2e.test.ts',
+      // NOVA #005-B · M4(第③笔): 语音路由 + stub speak 状态机(纯前端 web e2e; 同型于 nova-search)
+      'tests/e2e/nova-voice.e2e.test.ts'
     ],
     exclude: [
       'node_modules/**',

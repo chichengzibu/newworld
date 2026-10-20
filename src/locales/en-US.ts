@@ -547,5 +547,43 @@ export default {
         done: 'Copied'
       }
     }
+,
+    voice: {
+      // NOVA #005-B · M4 (bis-3): Voice copy (append-only; boot+search blocks untouched; zh/en 1:1).
+      //   Consumer = src/views/Voice.vue + tests/e2e/nova-voice.e2e.test.ts
+      //   TTS 10 keys + ASR 4 keys reserved (not implemented, future cycle)
+      tts: {
+        title: 'Voice Reader',
+        enabled: 'Enable voice reader',
+        autoRead: 'Auto-read assistant replies',
+        rate: 'Rate',
+        pitch: 'Pitch',
+        volume: 'Volume',
+        placeholder: 'Paste text or pick a recent reply',
+        button: {
+          speak: 'Speak',
+          stop: 'Stop'
+        },
+        state: {
+          speaking: 'Speaking...',
+        },
+        error: {
+            unavailable: 'Speech synthesis is unavailable in this environment.',
+            noVoice: 'No voice is available.',
+            canceled: 'Playback stopped.'
+        }
+      },
+      // ASR 4 keys —— not implemented, placeholder only (deferred W4)
+      asr: {
+        title: 'Speech Recognition',
+        enabled: 'Enable ASR',
+        placeholder: 'Press the mic to start recording',
+        error: {
+            noMic: 'No microphone detected.',
+            denied: 'Microphone permission denied.',
+            asrFail: 'Speech recognition failed.'
+        }
+      }
+    }
   }
 };

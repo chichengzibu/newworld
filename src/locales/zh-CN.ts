@@ -560,5 +560,43 @@ export default {
         done: '已复制'
       }
     }
+,
+    voice: {
+      // NOVA #005-B · M4 (第③笔): 语音文案(append-only; boot+search 块零删零改; zh/en 1:1 同步)
+      //   消费面 = src/views/Voice.vue + e2e nova-voice.e2e.test.ts
+      //   TTS 10 键 + ASR 4 键 reserved (未实施, 保留为未来周期)
+      tts: {
+        title: '语音期刊',
+        enabled: '启用语音期刊',
+        autoRead: '自动期刊助手回复',
+        rate: '语速',
+        pitch: '音调',
+        volume: '音量',
+        placeholder: '粘贴文本或选最近回复',
+        button: {
+          speak: '期刊',
+          stop: '停止'
+        },
+        state: {
+          speaking: '期刊中…',
+        },
+        error: {
+          unavailable: '当前环境不支持语音合成。',
+          noVoice: '未安装可用的语音包。',
+          canceled: '期刊已停止。'
+        }
+      },
+      // ASR 4 键 —— 未实施, 仅占位 (延后 W4)
+      asr: {
+        title: '语音识别',
+        enabled: '启用语音识别',
+        placeholder: '按麦克风按钮开始录音',
+        error: {
+          noMic: '未检测到麦克风。',
+          denied: '麦克风权限被拒绝。',
+          asrFail: '语音识别失败。'
+        }
+      }
+    }
   }
 };
