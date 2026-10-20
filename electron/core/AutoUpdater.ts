@@ -89,6 +89,14 @@ export class AutoUpdater {
    * 现在 handler 在 main.ts 早期无条件注册,即使 initialize() 失败也安全。
    */
   registerIpcHandlers(): void {
+    // NOVA #004-C: main.ts:133 (P1-T1.3 早期注册) 与 main.ts:229 (initialize 内 :73) 同进程双调 →
+    //   第二次 ipcMain.handle('autoUpdater:check') 同名崩 "Attempted to register a second handler"。
+    //   改用 Electron 官方"覆盖"语义: 每次 handle 前先 removeHandler 清旧 handler 再挂新, 不抛错。
+    //   typeof 检查 = 测试 mock 兼容性(AutoUpdater.test.ts 的 vi.mock 未 stub ipcMain.removeHandler),
+    //   生产环境 Electron 真实 ipcMain 一定有 removeHandler, 调用等价 Electron 官方文档推荐写法。
+    for (const ch of ['autoUpdater:check', 'autoUpdater:download', 'autoUpdater:install', 'autoUpdater:getVersion']) {
+      if (typeof ipcMain.removeHandler === 'function') ipcMain.removeHandler(ch);
+    }
     ipcMain.handle('autoUpdater:check', async () => {
       try {
         const result = await autoUpdater.checkForUpdates();
