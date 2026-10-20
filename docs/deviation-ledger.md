@@ -299,6 +299,7 @@
 | — | DEV-028 | 已修·持久化 (#006 本单关闭, 首审原债补登即关闭) ★ |
 | — | DEV-029 | 已加·测试卫生 (NOVA #003-A: ollama-real-link 环境预检 — 指定模型 tag 不在本机 → S1-S6 六处 maybeSkipModel(ctx)→ctx.skip 显式 SKIP + [SKIP] 日志, 非放宽; 时序关键点: it.skipIf(condition) 声明只 1 参(实测 node_modules/@vitest/runner/dist/index.js:518-520), 多参会静默丢 name/timeout, 故改用官方 context.skip API + 顶层 ESM await probe) |
 | — | DEV-030 | 开放·偶发断言未命中 (NOVA #003-D 复审登记: tests/e2e/routes-render.test.ts:54 `expect(mainHtml).toContain(route.expectClass)` 断言偶发未命中(2026-10-19 16:43 轮 11 条中 2 条 FAIL, 16:49/16:50 两轮复跑即 11/11 全绿); 复现条件 = 同命令连跑通常全绿、偶发未命中; 疑因 = Chat.vue 动态 import 时序抖动(注释 L48-50 "历史 B1: Chat.vue 动态 import 崩 → Dashboard 残留"); 处置 = 挂 #008/#009 排查清单, 本单 #003-D 只读、不修) |
+| — | DEV-031 | 已修·既有债 (NOVA #004-C: AutoUpdater dev-path 重复注册 — #004-B d 项冒烟发现, 非 #004 引入, dev/prod 均触发: 同一进程内 registerIpcHandlers() 被调两次(main.ts:133 P1-T1.3 早期注册 + main.ts:229 initialize 内 AutoUpdater.ts:73), 第二次 ipcMain.handle('autoUpdater:check') 同名崩 → try/catch 吞错, autoUpdater.on+checkForUpdates 半初始化态; 修复 = AutoUpdater.ts registerIpcHandlers() 入口 +5 行 removeHandler 覆盖语义(不改生产语义/不删handler/typeof 检查保 mock 兼容), 本单已修 #004-C commit d24fd0e, 见下方 DEV-031 明细) |
 
 ### DEV-030 明细（NOVA #003-D 复审登记，2026-10-19）
 
@@ -308,5 +309,20 @@
 - **疑因**：L52-53 注释自述 "不是 fallback 内容(历史 B1: Chat.vue 动态 import 崩 → Dashboard 残留)"，指向 Chat.vue 动态 import 时序；与 #003-C 的 BootOrchestrator 收口调度主窗显示无直接关联（e2e 旁路路径 `gate=true` 下 `ready-to-show` 立即 show，行为等价既有）。
 - **处置**：挂 #008/#009 排查清单；#003-D 复审令仅做登记，不在本轮回修。
 
+### DEV-031 明细（NOVA #004-C，2026-10-20）
 
-> **注**：`DEV-015` 空缺，保留为未来批次预留（终身不复用规则：已分配的 ID 即使删除也不回收）。
+- **现象**：#004-B d 项 dev 冒烟（`npm run dev` 真 Electron 主进程）实测主进程 exit code 1，console 命中 "Attempted to register a second handler for 'autoUpdater:check'""（构建产物 `dist-electron/main.js:15942` 报错点，回溯源码见下）。
+- **根因（同进程内双注册）**：
+  - 第 1 注册：`electron/main.ts:133` `new AutoUpdater().registerIpcHandlers()`（P1-T1.3 hotfix 提前提到 `createMainWindow` 前，**无条件执行**），挂 `autoUpdater:check/download/install/getVersion` 4 个 `ipcMain.handle`。
+  - 第 2 注册：`electron/main.ts:229` `ready-to-show` 回调 `new AutoUpdater().initialize(mainWindow)` → `electron/core/AutoUpdater.ts:73` `initialize()` 内 **`this.registerIpcHandlers()`** → 同名 `ipcMain.handle('autoUpdater:check')` 二次注册 → 崩。
+  - `main.ts:227-230` 的 `try/catch` 吞错误（log.error + 继续），但 `initialize()` 后半 `autoUpdater.on` 事件监听 + 5s `checkForUpdates` 因崩在 `registerIpcHandlers` 未执行 → 半初始化态。
+- **定性**：既有 bug，dev/prod 均触发（`main.ts:229` 路径无条件、非 dev 门槛），非 #004 引入；#004-B d 项首次实测暴露（#003-A 预检/ #004-A 设计稿/ #004-B 三笔均未触碰 AutoUpdater）。
+- **修复（removeHandler 覆盖语义，≤15 行阈值内，不改变 autoUpdater 生产语义，不删既有 handler，不搬调用点）**：`electron/core/AutoUpdater.ts` `registerIpcHandlers()` 入口补 5 行 — `for (ch of 4 个 autoUpdater:* channel) if (typeof ipcMain.removeHandler === 'function') ipcMain.removeHandler(ch);` （Electron 官方覆盖语义: 每次 handle 前先 removeHandler 清旧 handler 再挂新, 重复注册不再崩 “second handler”；typeof 检查保测试 mock 兼容, 生产 Electron 真实 ipcMain 一定有 removeHandler 调用即生效）。首次注册行为等价原实现, 二次注册 = 覆盖（不阻止重挂, 保留测试隔离 + 允许 dispose/re-init 场景）；`initialize()` 后续 `autoUpdater.on` + `checkForUpdates` 正常执行 → 行为只增强不削弱。**自检过程备案**: 初稿曾试过 static handlersRegistered 幂等守卫, 跑全电池发现该方案会破坏 tests/unit/AutoUpdater.test.ts 的 5 个用例（beforeEach 清 ipcHandlers 后新实例重注被守卫 early-return 拦掉, handler 拿不到 → 断言挂）, 违反 “零回归” 红线; 即撤换为 removeHandler 方案, 单测回归 10/10 + 全电池 90/91 files, 仅 ollama-real-link 2-3 例超时（环境噪声, 用例随轮漂移, 非本单引入）→ 定稿。
+- **证据**：
+  1. `14:50:46` 裸跑 `dist-electron/main.js`（vite 未起，预期 `ERR_CONNECTION_REFUSED`）：日志完整 `注册IPC处理器 → IPC处理器注册完成 → 创建主窗口`，**无任何 "Attempted to register a second handler" 命中**（修前 d 项崩点已消失）。
+  2. Playwright 真 Electron + vite 5173 主窗渲染（14:4x）：`MAINWINDOW mounted = true` + `consoleErrors total = 0` + AutoUpdater/second-handler 命中扫描 `[]`。
+- **边界报备**：AutoUpdater 修复仅 `AutoUpdater.ts` 单文件 +6 行；`main.ts` 的两处调用点（:133 早期 / :229 ready-to-show）零触碰，生产调用路径不变。
+- **遗留（非本单范围）**：真 DDG 端点（`lite.duckduckgo.com/lite/` / `html.duckduckgo.com/html/`）在本机实测 9–18s 双端点 `TimeoutError`（网络不可达），搜索真链路未取得真结果；按 #004-B d 项"网络不可达如实 skip 证据"口径上报，非伪造成功态。
+
+
+> **注**：`DEV-015` 空隖，保留为未来批次预留（终身不复用规则：已分配的 ID 即使删除也不回收）。
