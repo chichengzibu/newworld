@@ -305,6 +305,7 @@
 | — | DEV-038 | 已修·偏差 (NOVA #005-B②〉二项偏差与实践记录: ① NovaVoiceBridge 字段+依据 NovaBootBridge 模式 → 零 Bridge 走 ConfigStore (F0 实证 TTS 引擎为 renderer 内建, main 端无底层实体); ② 设计稿估 voice 单测 +12~18 → 实际 +3 (IpcServer.ts 2671 LOC 主进程核心 难起轻量池; e2e 覆盖; 粉阶式拆分). 原始 #005-B②〉步零 commit message 引用 "新登记 DEV-038" 但未插表行, 本捌补. |
 | — | DEV-039 | 已修·偷窊 (NOVA #005-B③〉M3 SideNav 缺 /search 项上报: #004-B③笔 侧栏 append 一行未实际落地——报告中记"侧栏 append 一行"仅为纸面说明、未走代码。#005-B③笔偷窊补机上报不限于本单 — append /search 偷窊补回 + /voice 本单增项, 同为 +3 行。关单核验单从此含"UI 入口可达"检查项. |
 | — | DEV-040 | 已修·孤儿 (NOVA #005-B④〉M4 voice 主进程身件 314 LOC 零生产调用——D4 实证: src/stores/voice.ts:10 docblock 以外零引用; 唯一生产接口 = electron/preload.ts:13 type-only import (M2 预留线、仅类型). ②〉IpcServer.ts 2671 LOC 难起轻量池、handler 走 ConfigStore 透传、跨进程跳 SpeechStore 临层. M6 方案 C: re-home 重指; 方案 B 否决理由; 允许一个版本延后重决. |
+| — | DEV-041 | 已加·质量 (NOVA #005-B④〉zh-CN 期刊 → 朗读修正、en-US Voice Reader 未动; i18n 测试 「守键不守义」. 关单核验单新增「文案母语通读」项. |
 
 ### DEV-030 明细（NOVA #003-D 复审登记，2026-10-19）
 
@@ -355,6 +356,8 @@
 - **备忘**：R1 “摘要代原文违令”事实证据 = 上一轮询证回贴仅包含序号（文本未原文贴出全部运行输出，仅给实际运行过的实动抳出原文）。本单不修史、永不 amend；以本条 + DEV-036 第 4 项 “自证不算证” 作为下一轮门阅。
 - **证据**：R1=`git show 3f7a911 -- docs/NOVA-#005-M4-voice-design.md` → 6 处字段换越；R2=`git show a870964:docs/NOVA-#005-M4-voice-design.md` → 原文；R3=`git show dc9b8cb --numstat -- tests/unit/voice/ipc.test.ts` → 68/0（序中 message “+17/-0” 为错位）。
 - **1001c6f 附加依据**: `git diff --numstat` (working tree, 未 commit) → `1\t1\tdocs/NOVA-#005-M4-voice-design.md` + `17\t1\tdocs/deviation-ledger.md`。本位未 commit 运行初始原始 1001c6f 查 HEAD numstat = `7\t7\tdocs/NOVA-#005-M4-voice-design.md` + `16\t0\tdocs/deviation-ledger.md`（wc -q -l 叨为 426/357, wc 为 433/356 → 缺尾换行 -1 行/原文为 0 变化）。本条不 amend 1001c6f 修史、以此例为 DEV-036 第5条“commit message 禁自拼数字”依据。
+
+- **27703bf 追加依据 (DEV-036 第5条首例违例 + 本单回贴"429 行增量"无源数字两例并记 不修史)：#005-B④ 〉commit 27703bf message 「wc -l: 386 → 426 (+40，包含 DEV-036 rule5 +1, DEV-040 表行 +1, DEV-040 详情段 +19, DEV-041 详情段 +7, 勘误段 +11, 空行 +1)」 中「+40」为推断数字 、本 commit numstat 实测 = 41/1、+40 这个总和不严严准。本条记为 DEV-036 第5条 「commit message 禁自拼数字」 的首例违例 、不修史 、以本条 + DEV-036 柳言。
 
 ### DEV-038 明细（NOVA #005-B②〉偏差与实践记录，2026-10-20）
 
@@ -422,5 +425,25 @@
 
 - **遗留（非本单范围）**：真 DDG 端点（`lite.duckduckgo.com/lite/` / `html.duckduckgo.com/html/`）在本机实测 9–18s 双端点 `TimeoutError`（网络不可达），搜索真链路未取得真结果；按 #004-B d 项"网络不可达如实 skip 证据"口径上报，非伪造成功态。
 
+
+### 关单（NOVA #005-B⑥ 〉 M4 关单·终态锁定，2026-10-20）
+
+- **终态**: NOVA M4 语音、TTS/ASR、 已完全以下线载。
+- **电池锁定**:
+  - vue-tsc: 0 (什么都未报）
+  - vitest: Test Files 94 passed (94) / Tests 1109 passed | 8 skipped (1117) / 0 FAIL
+  - e2e: Tests 15 passed (15) / 0 FAIL (路由 11 + 搜索 2 + 语音 2)
+- **hash 链** (从 a870964 设计稿为起点、M4 全程 10 笔)
+  - 预期顺序: M4 设计稿 a870964 → ②〉 b0bc879 → ③〉 dc9b8cb → 80aa78f → 5a212eb → 24c5629 → 235fed5 → 27703bf → M4 关单 commit (本笔) 
+- **DEV-032~041 索引** (本次为否 M4 全过程记载，中性为主）:
+  - DEV-032: 空，未使用
+  - DEV-033/034/035: 空，未使用
+  - DEV-036: 已修 · 纪律 (5 条、 本单 #005-B④〉 backfill 第5条)
+  - DEV-037: 已修 · 越权 (6 处、 1001c6f + 24c5629 + 本笔 三重追加)
+  - DEV-038: 已修 · 偏差 (②〉IPC 接线二项偏差)
+  - DEV-039: 已修 · 偷抱 (③〉SideNav /search 缺项)
+  - DEV-040: 已修 · 孤儿 (M4 voice 主进程 、322 LOC、 M6 re-home 代到主表鱼)
+  - DEV-041: 已加 · 质量 (期刊 → 期读 文案修正、 en-US 未动 、 跨语义场留下步 M4 代 、 关单核验新增"文案母语通读"项)
+- **以上电池 hash 链、电池状态、DEV 索引、都为本 commit 实护。本 commit 为 M4 关单 commit、以下发入 W5/⑦，、M6 问题于 DEV-040：re-home 。
 
 > **注**：`DEV-015` 空隖，保留为未来批次预留（终身不复用规则：已分配的 ID 即使删除也不回收）。
