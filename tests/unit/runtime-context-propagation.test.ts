@@ -18,7 +18,7 @@
  *   tests/unit/gateway-source-injection.test.ts 5 用例 + tests/unit/chat-execution-ui.test.ts 3 用例
  *   (两文件零断言改动 — gateway 轨参数制 / chat 轨调用点已自带 contextKind, 对机制变更透明)
  */
-import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterAll, afterEach } from 'vitest'
 import {
   execCommand,
   setConfirmTransport,
@@ -28,6 +28,7 @@ import { BashTool } from '../../electron/agent/tools/BashTool'
 import { LlmAgentBrain } from '../../electron/agent/LlmAgentBrain'
 import type { LlmToolCall } from '../../electron/agent/LlmAgentBrain'
 import type { LlmStreamChunk } from '../../electron/llm/types'
+import { installToolConfirmation } from '../unit/auto-confirm'
 
 // ─── 替身面 ───
 vi.mock('electron', () => ({
@@ -57,6 +58,17 @@ vi.mock('../../electron/llm/LlmClient', () => ({
 type AuditRow = Record<string, unknown>
 let auditRows: AuditRow[]
 const execKinds: string[] = [] // execCommand 收到的 contextKind 顺序记录 (探针)
+
+/**
+ * 【M2-B】工具权限门测试桥 —— 本文件的验证主题不是权限,只是顺带调了
+ * Edit/Bash 写工具。装一个"总是同意"的桥,避免新加的 fail-safe 安全门
+ * 把这些无关测试拦下。
+ *
+ * 护栏:主题为权限的测试【不得】使用本桥(见 ToolGate.test.ts,
+ *       以及 harness-wiring 的 G3 用户拒绝用例)。
+ */
+/** 【M2-B】确认桥 —— 显式传入 run(),不写全局。护栏见 auto-confirm.ts。 */
+const CONFIRM_ALL = installToolConfirmation();
 
 beforeEach(() => {
   auditRows = []

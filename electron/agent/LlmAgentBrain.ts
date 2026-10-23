@@ -15,6 +15,7 @@ import { LogManager } from '../core/LogManager'
 import { LlmClient } from '../llm/LlmClient'
 import { BUILTIN_TOOLS, toolsToLlmSchema } from './tools'
 import { planContext, DEFAULT_BUDGET, type ContextBudget, type ContextMessage } from './ContextEngine'
+import { ToolGate, type ToolGateDecision } from './ToolGate'
 import type { PiPiTool, ToolExecResult } from './tools'
 import type { LlmMessage, LlmToolCall, LlmStreamChunk } from '../llm/types'
 import type { AgentBrain, AgentContext, Decision, ToolCall, ToolResult, SubTask, SubAgent } from '../contracts/types'
@@ -220,6 +221,22 @@ export class LlmAgentBrain implements AgentBrain {
      * 否则降级阈值形同虚设。缺省 = DEFAULT_BUDGET。
      */
     contextBudget?: ContextBudget
+    /**
+     * 【M2-B】工具权限确认桥 —— 由会话层(TUI/渲染层)注入。
+     * 传入后,权限门在 contextKind==='ui' 时可弹窗向用户确认写操作。
+     * 不传 = 无确认能力 → 权限门对 confirm 级工具一律拒绝(fail-safe)。
+     * 绝不因为"没人确认"就默认放行 —— 那等于没装这道门。
+     */
+    requestToolConfirmation?: (toolName: string, prompt: string) => Promise<boolean>
+    /**
+     * 【M2-B】调用方声明写操作已预先授权 —— 用于无人值守但上层已授权的场景
+     * (如用户为某个定时任务单独授权过)。
+     *
+     * 这是显式注入而非全局开关:生产调用方不传就是拒绝。
+     * 曾考虑过 globalThis 形式的测试后门,因"任何人加一行赋值即可绕过
+     * fail-safe"而废弃 —— 安全边界不能建立在约定上。
+     */
+    preApprovedToolConfirm?: boolean
   } = {}): Promise<{ runId: string; content: string; iterations: number; totalDurationMs: number; totalTokens: number; toolCalls: Array<{ name: string; ok: boolean; durationMs: number }> }> {
     const runId = opts.runId ?? `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     const controller = new AbortController()
@@ -380,10 +397,35 @@ export class LlmAgentBrain implements AgentBrain {
           LlmAgentBrainEvents.emit({ type: 'tool_call', runId, iter, name: tc.function.name, args })
           const tStart = Date.now()
           let exec: ToolExecResult
+          // #005 Step 0 (DEV-014 切除): contextKind 显式贯穿 — 禁脑读模块态 (全局态已删),
+          // 本 run 的 ctx 由入口派生后经 think→run 携带; 子实例 (spawnCtx) 继承出生 ctx; 均无 → 'headless' (fail-safe)
+          const toolCtx = { contextKind: opts.contextKind ?? this.spawnCtx?.contextKind ?? 'headless' }
+          /**
+           * 【M2-B】工具权限门 —— 修安全洞: EditTool 标注 requiresPermission:true
+           * 但此前 run loop 从不读取该字段,写文件零确认。本门作为兜底层,
+           * 确保任何新工具都不会"忘记检查"。
+           * BashTool 自己的 commandDecide 更细(命令级白名单),这里只做前置兜底。
+           */
+          let gate: ToolGateDecision
           try {
-            // #005 Step 0 (DEV-014 切除): contextKind 显式贯穿 — 禁脑读模块态 (全局态已删),
-            // 本 run 的 ctx 由入口派生后经 think→run 携带; 子实例 (spawnCtx) 继承出生 ctx; 均无 → 'headless' (fail-safe)
-            const toolCtx = { contextKind: opts.contextKind ?? this.spawnCtx?.contextKind ?? 'headless' }
+            gate = await ToolGate.check(tool, args, toolCtx, {
+              requestConfirmation: opts.requestToolConfirmation,
+              ...(opts.preApprovedToolConfirm ? { preApproved: true } : {}),
+            })
+          } catch (e) {
+            // 判定器本身异常 → 按拒绝处理(fail-safe)
+            this.log.warn(`LlmAgentBrain: ToolGate 异常(${(e as Error).message}),按拒绝处理`)
+            gate = { allowed: false, permission: 'deny', reason: '权限判定异常' }
+          }
+          if (!gate.allowed) {
+            exec = { ok: false, result: '', error: `权限拒绝:${gate.reason}` }
+            const gms = Date.now() - tStart
+            toolCallsLog.push({ name: tc.function.name, ok: false, durationMs: gms })
+            LlmAgentBrainEvents.emit({ type: 'tool_result', runId, iter, name: tc.function.name, ok: false, result: '', error: exec.error, durationMs: gms })
+            messages.push({ role: 'tool', content: `Error: ${exec.error}`, toolCallId: tc.id })
+            continue
+          }
+          try {
             exec = await tool.execute(args, toolCtx)
           } catch (e) {
             exec = { ok: false, result: '', error: `tool execution threw: ${(e as Error).message}` }
@@ -505,6 +547,13 @@ export class LlmAgentBrain implements AgentBrain {
       // #006.5 R-1: 会话层派生的相关记忆上下文 (已渲染字符串) 透传 think→run→systemPrompt 追加段。
       //   brain 不自存 / 零 HermesAdapter import (无状态红线 + 零新增依赖); 派生源归会话层 (与 contextKind 同模式)
       if (typeof ctx.memoryContext === 'string' && ctx.memoryContext.trim()) runOpts.memoryContext = ctx.memoryContext
+      // 【M2-B】权限确认桥透传:缺省 = 权限门对写操作一律拒绝(fail-safe)
+      const confirmBridge = (ctx as { requestToolConfirmation?: (tool: string, prompt: string) => Promise<boolean> }).requestToolConfirmation
+      if (typeof confirmBridge === 'function') runOpts.requestToolConfirmation = confirmBridge
+      // 【M2-B】预授权标记透传(与确认桥同模式,显式注入)
+      if ((ctx as { preApprovedToolConfirm?: boolean }).preApprovedToolConfirm === true) {
+        runOpts.preApprovedToolConfirm = true
+      }
       const r = await this.run(content, runOpts)
       return { action: 'reply', payload: { text: r.content, model: 'agent-v0.1', durationMs: r.totalDurationMs, iterations: r.iterations, totalTokens: r.totalTokens, runId: r.runId, toolCalls: r.toolCalls } }
     } catch (e) {

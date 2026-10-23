@@ -22,7 +22,7 @@
  *   - LlmClient.streamChat 脚本化: n=1,2 轮 → tool_call(Bash node)+usage(10); n≥3 轮 → final
  *   - 断言"子收到哪个 contextKind / 是否触发预算 / 快照 parentRunId" 全靠显式探针, 不依赖模块态 (不存在了)
  */
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, afterEach, beforeEach } from 'vitest'
 import { vi } from 'vitest'
 import type { LlmStreamChunk } from '../../electron/llm/types'
 
@@ -56,6 +56,19 @@ vi.mock('../../electron/llm/LlmClient', () => ({
 
 import { LlmAgentBrain, LlmAgentBrainEvents } from '../../electron/agent/LlmAgentBrain'
 import { BUILTIN_TOOLS } from '../../electron/agent/tools'
+import { installToolConfirmation } from '../unit/auto-confirm'
+
+/**
+ * 【M2-B】工具权限门测试桥 —— 本文件的验证主题不是权限,只是顺带调了
+ * Edit/Bash 写工具。装一个"总是同意"的桥,避免新加的 fail-safe 安全门
+ * 把这些无关测试拦下。
+ *
+ * 护栏:主题为权限的测试【不得】使用本桥(见 ToolGate.test.ts,
+ *       以及 harness-wiring 的 G3 用户拒绝用例)。
+ */
+/** 【M2-B】确认桥 —— 显式传入 run(),不写全局。护栏见 auto-confirm.ts。 */
+const CONFIRM_ALL = installToolConfirmation();
+
 
 describe('#005 spawn 章 (R1 独立 + R2 深度 + 预算 + 快照溯源)', () => {
   it('SP-1 独立性: spawn 返回新实例 (非 brain:this); 子/父 tools 同源 BUILTIN_TOOLS; runs Map 各自独立', async () => {

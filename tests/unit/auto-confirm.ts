@@ -61,3 +61,54 @@ export function uninstallAutoConfirm(): void {
   restore?.()
   restore = null
 }
+
+/**
+ * 【M2-B】工具级确认桥 —— 让"验证别的逻辑"的测试能跑过新加的权限门。
+ *
+ * ToolGate 对 Edit/Write 这类写操作默认要求用户确认;未提供确认桥时按
+ * fail-safe 拒绝。老测试(runtime-context-propagation 验证 contextKind
+ * 贯穿、spawn-independence 验证快照溯源)关心的是自己的主题,不是权限。
+ *
+ * 【设计约束:纯函数,不写全局】
+ * 早期版本用 globalThis.__pipiclawToolConfirm 让 run() 自动拾取 ——
+ * 那等于在生产代码里留了一个可被误用的旁路(与
+ * LlmAgentBrain 的 preApprovedToolConfirm 不同,那个是显式入参)。
+ * 已废弃。确认桥只能由调用方在 run({ requestToolConfirmation }) 显式传入,
+ * 生产代码路径上不存在任何全局读取点。
+ *
+ * 护栏:主题为安全/权限的测试【禁止】使用本桥 —— 那类测试必须自己传
+ * () => false 或不传,见 ToolGate.test.ts 与 harness-wiring 的 G3。
+ */
+export function installToolConfirmation(
+  answer: (toolName: string, prompt: string) => boolean = () => true,
+): (toolName: string, prompt: string) => Promise<boolean> {
+  return async (toolName: string, prompt: string): Promise<boolean> => answer(toolName, prompt)
+}
+
+/**
+ * 【M2-B】非 UI 上下文的预授权选项 —— 返回值直接传给 run()。
+ *
+ * 背景:ToolGate 有一条刻意的 fail-safe 规则 ——
+ * contextKind !== 'ui' 时无法弹窗询问用户,故 confirm 级工具一律拒绝。
+ * 这是对的:定时任务 / IM 入站 / headless 场景下没有人在旁边点确认,
+ * 不该默认放行写操作。
+ *
+ * 但有一类测试的主题恰恰是"非 UI 上下文里的行为"(如
+ * runtime-context-propagation 验证 contextKind=im_inbound 逐跳贯穿、
+ * spawn-independence 验证子代理快照溯源)。它们需要写工具真的跑起来,
+ * 否则验证不到目标逻辑。
+ *
+ * 【为什么是函数返回值而不是全局开关】
+ * 曾实现为 globalThis.__pipiclawHeadlessExempt —— 那是把安全边界
+ * 建立在"没人会写这行代码"的约定上,任何人加一行赋值就能绕过 fail-safe。
+ * 已废弃。改为显式注入,与 requestToolConfirmation 同构:
+ * 生产代码路径上不存在任何可被误用的全局旁路。
+ *
+ * 用法: run(prompt, { preApprovedToolConfirm: true })
+ *
+ * 护栏:主题为安全/权限的测试【禁止】使用本选项
+ * (见 ToolGate.test.ts 与 harness-wiring 的 G3 用户拒绝用例)。
+ */
+export function headlessPreApproval(): { preApprovedToolConfirm: true } {
+  return { preApprovedToolConfirm: true as const }
+}

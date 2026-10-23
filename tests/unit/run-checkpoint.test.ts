@@ -22,7 +22,7 @@
  *   本单【不】动 audit 行格式 / 【不】注入 run 关联 — 归 W5 入口注入修 (DEV-023)。
  *   C-3 只断言"恢复后 confirm 级仍被上下文门拦", 不断言审计行内容。
  */
-import { describe, it, expect, vi, beforeEach, afterAll } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterAll, afterEach } from 'vitest'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import * as os from 'node:os'
@@ -47,6 +47,7 @@ import {
 import { LlmAgentBrain } from '../../electron/agent/LlmAgentBrain'
 import type { RunCheckpointEvent, LlmToolCall } from '../../electron/agent/LlmAgentBrain'
 import type { LlmStreamChunk } from '../../electron/llm/types'
+import { installToolConfirmation } from '../../tests/unit/auto-confirm'
 
 // ─── 替身面 ───
 vi.mock('electron', () => ({
@@ -88,6 +89,21 @@ vi.mock('../../electron/llm/LlmClient', () => ({
 
 // ─── 环境: 临时目录 (沙盒) — 审计走 setAuditSink 内存探针, 不落盘 ───
 let tmpBase: string
+/**
+ * 【M2-B】工具权限门测试桥 —— 本文件的验证主题不是权限,只是顺带调了
+ * Edit/Bash 写工具。装一个"总是同意"的桥,避免新加的 fail-safe 安全门
+ * 把这些无关测试拦下。
+ *
+ * 护栏:主题为权限的测试【不得】使用本桥(见 ToolGate.test.ts,
+ *       以及 harness-wiring 的 G3 用户拒绝用例)。
+ */
+/**
+ * 【M2-B】确认桥 —— 显式传给 run(),不写任何全局。
+ * 本文件验证 checkpoint 快照/恢复,写工具只是手段不是主题。
+ * 护栏:主题为权限的测试禁止用它(见 ToolGate.test.ts)。
+ */
+const CONFIRM_ALL = installToolConfirmation();
+
 beforeEach(() => {
   setConfirmTransport(null)
   const rows: Record<string, unknown>[] = []

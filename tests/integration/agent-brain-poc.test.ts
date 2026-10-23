@@ -12,7 +12,7 @@
  *
  * 真链路 (Ollama 11434) 端到端留给 scripts/agent-tool-call-poc.mjs (在 dist-electron 跑)
  */
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
 import * as fsSync from 'node:fs'
 import * as path from 'node:path'
 
@@ -33,13 +33,27 @@ function seedSandboxFiles(): void {
   fsSync.writeFileSync(path.join(SANDBOX_DIR, 'readme.md'), '# Notes\nversion 1.0 draft\n', 'utf-8')
 }
 
-beforeEach(() => {
-  seedSandboxFiles()
-})
+/**
+ * 【M2-B】工具权限门测试桥 —— 本文件的验证主题不是权限,只是顺带调了
+ * Edit/Bash 写工具。装一个"总是同意"的桥,避免新加的 fail-safe 安全门
+ * 把这些无关测试拦下。
+ *
+ * 护栏:主题为权限的测试【不得】使用本桥(见 ToolGate.test.ts,
+ *       以及 harness-wiring 的 G3 用户拒绝用例)。
+ */
+
 
 import { LlmAgentBrain, LlmAgentBrainEvents, type LlmAgentEvent } from '../../electron/agent/LlmAgentBrain'
 import { LlmClient } from '../../electron/llm/LlmClient'
 import type { LlmStreamChunk, LlmToolCall } from '../../electron/llm/types'
+import { installToolConfirmation } from '../unit/auto-confirm'
+
+/** 【M2-B】确认桥 —— 显式传入 run(),不写全局。护栏见 auto-confirm.ts。 */
+const CONFIRM_ALL = installToolConfirmation();
+
+beforeEach(() => {
+  seedSandboxFiles()
+})
 
 describe('LlmAgentBrain v0.1 端到端 (mock LLM)', () => {
   it('run → mock LLM 返 Glob tool_call → 调 Glob tool → mock LLM 返 final', async () => {
@@ -191,6 +205,11 @@ describe('LlmAgentBrain v0.1 端到端 (mock LLM)', () => {
         model: 'qwen3.5:9b',
         tools: ['Edit'],
         maxIterations: 3,
+        // 【M2-B】EditTool 是写操作,权限门要求确认桥 + UI 上下文。
+        // 本用例主题是"EditTool 真的能改文件",不是权限 ——
+        // 故显式声明有人在旁边并已同意(护栏见 auto-confirm.ts)。
+        contextKind: 'ui',
+        requestToolConfirmation: CONFIRM_ALL,
       })
 
       expect(result.iterations).toBe(2)

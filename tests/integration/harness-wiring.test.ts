@@ -248,3 +248,100 @@ describe('M2-A 上下文降级接线', () => {
     expect(sentTokenEst).toBeLessThan(3000)
   })
 })
+
+/**
+ * M2-B 接线验证:权限门在真实 tool loop 中拦住写操作。
+ *
+ * 这是安全洞的端到端证明 —— EditTool 在修复前能静默改文件,
+ * 现在必须被门拦住,且不能靠"用户点了确认"就放行敏感路径。
+ */
+describe('M2-B 工具权限门接线', () => {
+  let origStream: typeof LlmClient.prototype.streamChat
+
+  beforeEach(() => { seedSandbox() })
+  afterEach(() => { LlmClient.prototype.streamChat = origStream })
+
+  const editCall = (): LlmToolCall => ({
+    id: 'edit_1', type: 'function',
+    function: { name: 'Edit', arguments: JSON.stringify({ file_path: 'notes.txt', old_string: 'a', new_string: 'b' }) },
+  })
+
+  it('G1: 无确认桥时 EditTool 被拒 —— 文件不被改动', async () => {
+    const target = path.join(SANDBOX_DIR, 'notes.txt')
+    fsSync.writeFileSync(target, 'original content', 'utf-8')
+    const before = fsSync.readFileSync(target, 'utf-8')
+
+    LlmClient.prototype.streamChat = (async function* () {
+      yield { type: 'tool_call', toolCall: editCall() } as LlmStreamChunk
+      const t = 'done'
+      yield { type: 'content', delta: t, accumulated: t } as LlmStreamChunk
+      yield { type: 'done' } as LlmStreamChunk
+    }) as never
+
+    // 不传 requestToolConfirmation → 权限门应拒绝
+    const r = await LlmAgentBrain.getInstance().run('改一下文件', {
+      maxIterations: 2, contextKind: 'headless',
+    })
+
+    expect(r.toolCalls.some(c => c.name === 'Edit' && c.ok === false)).toBe(true)
+    expect(fsSync.readFileSync(target, 'utf-8')).toBe(before)   // 关键:内容未变
+  })
+
+  it('G2: 提供确认桥且用户同意 → EditTool 放行', async () => {
+    const target = path.join(SANDBOX_DIR, 'notes.txt')
+    fsSync.writeFileSync(target, 'original content', 'utf-8')
+
+    LlmClient.prototype.streamChat = (async function* () {
+      yield { type: 'tool_call', toolCall: editCall() } as LlmStreamChunk
+      const t = 'done'
+      yield { type: 'content', delta: t, accumulated: t } as LlmStreamChunk
+      yield { type: 'done' } as LlmStreamChunk
+    }) as never
+
+    const confirm = vi.fn().mockResolvedValue(true)
+    await LlmAgentBrain.getInstance().run('改一下文件', {
+      maxIterations: 2, contextKind: 'ui',
+      requestToolConfirmation: confirm,
+    })
+
+    expect(confirm).toHaveBeenCalled()
+  })
+
+  it('G3: 用户拒绝 → 文件不被改动', async () => {
+    const target = path.join(SANDBOX_DIR, 'notes.txt')
+    fsSync.writeFileSync(target, 'original content', 'utf-8')
+    const before = fsSync.readFileSync(target, 'utf-8')
+
+    LlmClient.prototype.streamChat = (async function* () {
+      yield { type: 'tool_call', toolCall: editCall() } as LlmStreamChunk
+      const t = 'done'
+      yield { type: 'content', delta: t, accumulated: t } as LlmStreamChunk
+      yield { type: 'done' } as LlmStreamChunk
+    }) as never
+
+    await LlmAgentBrain.getInstance().run('改一下文件', {
+      maxIterations: 2, contextKind: 'ui',
+      requestToolConfirmation: async () => false,
+    })
+
+    expect(fsSync.readFileSync(target, 'utf-8')).toBe(before)
+  })
+
+  it('G4: 只读工具在无确认桥时仍正常执行 —— 权限门不能把 agent 变哑巴', async () => {
+    LlmClient.prototype.streamChat = (async function* () {
+      const tc: LlmToolCall = {
+        id: 'g1', type: 'function',
+        function: { name: 'Glob', arguments: JSON.stringify({ pattern: '**/*.txt' }) },
+      }
+      yield { type: 'tool_call', toolCall: tc } as LlmStreamChunk
+      const t = '找到文件'
+      yield { type: 'content', delta: t, accumulated: t } as LlmStreamChunk
+      yield { type: 'done' } as LlmStreamChunk
+    }) as never
+
+    const r = await LlmAgentBrain.getInstance().run('列出 txt', {
+      maxIterations: 2, contextKind: 'headless',
+    })
+    expect(r.toolCalls.some(c => c.name === 'Glob' && c.ok)).toBe(true)
+  })
+})
