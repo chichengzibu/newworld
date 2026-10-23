@@ -253,7 +253,11 @@ export class InstructionGenerator {
   ): Promise<GeneratedStep[] | null> {
     // 获取技能摘要和匹配的技能
     const skillSummaries = this.skillLoader.getAllSkillSummaries();
-    const matchedSkillContext = this.skillLoader.getSkillContext(userInstruction);
+    // 【M2-C 修复】此前缺 await: getSkillContext 是 async,返回 Promise。
+    //   漏 await → matchedSkillContext 恒为 Promise 对象(非空)→ L311 的
+    //   if 恒为真 → 字符串插值出字面量 "[object Promise]" 注入 systemPrompt。
+    //   用户的每一轮对话都在向 LLM 发送这段垃圾。
+    const matchedSkillContext = await this.skillLoader.getSkillContext(userInstruction);
     
     // 构建包含技能系统的系统提示词
     let systemPrompt = `你是专业的桌面自动化助手。根据用户指令生成结构化操作步骤。
