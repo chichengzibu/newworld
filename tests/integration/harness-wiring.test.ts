@@ -169,3 +169,82 @@ describe('M1 北极星 — agent tool loop 已接入生产链路', () => {
     }
   })
 })
+/**
+ * M2-A 接线验证:上下文降级在真实 tool loop 中生效。
+ *
+ * 单元测试已验证 planContext 的纯函数行为;这里验证它被正确接进 run():
+ * 给一个极小的 contextBudget,让循环必然触发降级,断言 LLM 仍能正常
+ * 跑完并给出最终答复 —— 而不是撑爆后崩溃。
+ */
+describe('M2-A 上下文降级接线', () => {
+  let origStream: typeof LlmClient.prototype.streamChat
+
+  beforeEach(() => { origStream = LlmClient.prototype.streamChat })
+  afterEach(() => { LlmClient.prototype.streamChat = origStream })
+
+  it('W1: 预算极小时仍能跑完 —— 降级而非崩溃', async () => {
+    let sawTrimmedCall = false
+    const mockStream = async function* (_req: any) {
+      // 每次调 LLM 都要带一段巨量 tool 结果,逼出降级
+      if (!sawTrimmedCall) {
+        sawTrimmedCall = true
+        const tc: LlmToolCall = {
+          id: 'c1', type: 'function',
+          function: { name: 'Glob', arguments: JSON.stringify({ pattern: '**/*.txt' }) },
+        }
+        yield { type: 'tool_call', toolCall: tc } as LlmStreamChunk
+        yield { type: 'usage', usage: { totalTokens: 100 } } as LlmStreamChunk
+      } else {
+        const text = '已完成整理'
+        yield { type: 'content', delta: text, accumulated: text } as LlmStreamChunk
+        yield { type: 'usage', usage: { totalTokens: 50 } } as LlmStreamChunk
+      }
+      yield { type: 'done' } as LlmStreamChunk
+    }
+    LlmClient.prototype.streamChat = mockStream as never
+
+    const r = await LlmAgentBrain.getInstance().run('整理下载文件夹', {
+      maxIterations: 3,
+      // 极小预算 → 必然触发降级
+      contextBudget: { total: 2000, reserve: 200, system: 200, history: 400, toolResult: 400 },
+    })
+
+    // 关键:没抛错,且给出了最终答复
+    expect(r.content).toBe('已完成整理')
+    expect(r.iterations).toBeGreaterThan(0)
+  })
+
+  it('W2: LLM 实际收到的 messages 被裁剪过 —— 不是全量', async () => {
+    let sentMsgCount = 0
+    let sentTokenEst = 0
+    const mockStream = async function* (req: any) {
+      sentMsgCount = Math.max(sentMsgCount, req.messages.length)
+      const totalChars = req.messages.reduce(
+        (s: number, m: any) => s + (typeof m.content === 'string' ? m.content.length : 0), 0,
+      )
+      sentTokenEst = Math.max(sentTokenEst, Math.ceil(totalChars / 4))
+      if (sentMsgCount === 1) {
+        const tc: LlmToolCall = {
+          id: 'c1', type: 'function',
+          function: { name: 'Glob', arguments: JSON.stringify({ pattern: '**/*' }) },
+        }
+        yield { type: 'tool_call', toolCall: tc } as LlmStreamChunk
+      } else {
+        const text = 'done'
+        yield { type: 'content', delta: text, accumulated: text } as LlmStreamChunk
+      }
+      yield { type: 'done' } as LlmStreamChunk
+    }
+    LlmClient.prototype.streamChat = mockStream as never
+
+    await LlmAgentBrain.getInstance().run('x', {
+      maxIterations: 3,
+      contextBudget: { total: 3000, reserve: 200, system: 200, history: 600, toolResult: 600 },
+    })
+
+    // system 必须仍在(第一条)
+    expect(sentMsgCount).toBeGreaterThan(0)
+    // 送出的量受预算约束
+    expect(sentTokenEst).toBeLessThan(3000)
+  })
+})

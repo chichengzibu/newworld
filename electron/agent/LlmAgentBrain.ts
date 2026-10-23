@@ -14,6 +14,7 @@
 import { LogManager } from '../core/LogManager'
 import { LlmClient } from '../llm/LlmClient'
 import { BUILTIN_TOOLS, toolsToLlmSchema } from './tools'
+import { planContext, DEFAULT_BUDGET, type ContextBudget, type ContextMessage } from './ContextEngine'
 import type { PiPiTool, ToolExecResult } from './tools'
 import type { LlmMessage, LlmToolCall, LlmStreamChunk } from '../llm/types'
 import type { AgentBrain, AgentContext, Decision, ToolCall, ToolResult, SubTask, SubAgent } from '../contracts/types'
@@ -213,6 +214,12 @@ export class LlmAgentBrain implements AgentBrain {
      *  本类零 HermesAdapter import / 零 embedText 调用 — 不新增外部依赖, 不引入模块态)。
      *  不传 = 不注入 (休眠态, 与 history 参数同一模式)。 */
     memoryContext?: string
+    /**
+     * 【M2-A】上下文预算 —— 覆盖默认的 DEFAULT_BUDGET(128k)。
+     * 不同模型上下文窗口不同,小模型(如 8B 本地)必须给更小的预算,
+     * 否则降级阈值形同虚设。缺省 = DEFAULT_BUDGET。
+     */
+    contextBudget?: ContextBudget
   } = {}): Promise<{ runId: string; content: string; iterations: number; totalDurationMs: number; totalTokens: number; toolCalls: Array<{ name: string; ok: boolean; durationMs: number }> }> {
     const runId = opts.runId ?? `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     const controller = new AbortController()
@@ -299,11 +306,43 @@ export class LlmAgentBrain implements AgentBrain {
         iterations = iter
         LlmAgentBrainEvents.emit({ type: 'iteration', runId, iter, message: `第 ${iter}/${maxIter} 轮` })
 
+        /**
+         * 【M2-A】上下文降级 —— 调 LLM 之前执行,而不是溢出之后补救。
+         * messages 在 run 内单调增长,10 轮 × Read 单文件 200KB 必然撑爆,
+         * 而部分 provider 遇到超限直接报错、整个 run 崩掉(且无可恢复路径)。
+         * 三级降级由 ContextEngine 决策:裁剪 → 摘要 → 中止。
+         */
+        const ctxPlan = planContext(
+          messages as unknown as ContextMessage[],
+          opts.contextBudget ?? DEFAULT_BUDGET,
+        );
+        if (ctxPlan.action === 'abort') {
+          this.log.warn(`LlmAgentBrain: run ${runId} 上下文超限无法降级 — ${ctxPlan.reason}`);
+          LlmAgentBrainEvents.emit({
+            type: 'run_error', runId, iterations,
+            totalDurationMs: Date.now() - startMs,
+            error: `上下文超出模型容量(${ctxPlan.reason})。请缩短单次输入,或分多步执行。`,
+          });
+          finalContent = finalContent
+            || '这次的内容太长,超出模型能一次读完的量了。建议拆成几步,或者只把关键部分发给我。';
+          pushCkpt(takeCkpt('finalized'));
+          this.runs.delete(runId);
+          return { runId, content: finalContent, iterations, totalDurationMs: Date.now() - startMs, totalTokens, toolCalls: toolCallsLog };
+        }
+        if (ctxPlan.action !== 'none') {
+          this.log.info(`LlmAgentBrain: run ${runId} 上下文降级 — ${ctxPlan.reason}`);
+          // 用裁剪后的副本喂 LLM,但【不回写 messages】:
+          // messages 保持完整,checkpoint 快照与恢复逻辑仍能拿到全量上下文。
+          // 每轮独立降级,不会累积丢失。
+        }
+
         // 调 LLM (流式), 聚合 tool_calls + final content
-        const result = await this.callLlmOnce(messages, llmSchema, iter, runId, controller.signal, {
-          provider: opts.provider,
-          model: opts.model ?? DEFAULT_MODEL,
-        })
+        const result = await this.callLlmOnce(
+          ctxPlan.messages as unknown as LlmMessage[],
+          llmSchema, iter, runId, controller.signal, {
+            provider: opts.provider,
+            model: opts.model ?? DEFAULT_MODEL,
+          })
         // #005 spawn 预算: 聚合本轮 usage → run 级 totalTokens (budgetCheck 下轮前判定)
         if (typeof result.totalTokens === 'number') totalTokens += result.totalTokens
 
