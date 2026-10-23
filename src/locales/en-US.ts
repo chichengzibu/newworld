@@ -490,6 +490,25 @@ export default {
     testFailedWithReason: 'Connection test failed: {reason}',
     unknownError: 'Unknown error'
   },
+  // [M1-E] Execution mode -- users must always know how much power the agent has
+  executionMode: {
+    safe: 'Safe',
+    plan: 'Plan',
+    craft: 'Full Access',
+    safeDesc: 'Chat only, blocks every execution request',
+    planDesc: 'AI drafts a plan, executes only after you confirm',
+    craftDesc: 'Auto-executes within permissions; high-risk actions still ask',
+    riskTag: 'High risk',
+    about: 'About execution modes',
+    aboutDetail: 'Safe: chat only, nothing is executed.\n\nPlan (default): the AI drafts a plan and only acts after you confirm. Best for daily use.\n\nFull Access: executes directly within its permissions; only high-risk actions ask again. Best for tasks you fully trust.',
+    tooltipPrefix: 'Execution mode',
+    switched: 'Execution mode switched',
+    switchFailed: 'Failed to switch execution mode',
+    craftConfirmTitle: 'Switch to Full Access?',
+    craftConfirm: 'In Full Access mode, PiPiClaw acts directly within its permission scope instead of asking at each step. Only high-risk actions will still ask you once.\n\nEnable it?',
+    craftConfirmOk: 'I understand, enable',
+  },
+
   orb: {
     status: {
       idle: 'Idle',

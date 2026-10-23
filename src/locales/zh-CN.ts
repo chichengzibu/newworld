@@ -504,6 +504,25 @@ export default {
     testFailedWithReason: '连接测试失败: {reason}',
     unknownError: '未知错误'
   },
+  // 【M1-E】执行模式 —— 用户必须随时知道给 agent 多大权限
+  executionMode: {
+    safe: '安全模式',
+    plan: '计划模式',
+    craft: '全量模式',
+    safeDesc: '纯对话,拦截所有执行类指令',
+    planDesc: 'AI 生成执行计划,你确认后才执行',
+    craftDesc: '权限范围内自动执行,高危操作二次确认',
+    riskTag: '高权限',
+    about: '关于执行模式',
+    aboutDetail: '安全模式:只聊天,不执行任何操作。\n\n计划模式(默认):AI 先给出执行计划,你确认后才动手。适合日常使用。\n\n全量模式:在权限范围内自动执行,只有高危操作才会再问你一次。适合你完全信任的任务。',
+    tooltipPrefix: '执行模式',
+    switched: '执行模式已切换',
+    switchFailed: '执行模式切换失败',
+    craftConfirmTitle: '切换到全量模式?',
+    craftConfirm: '全量模式下,PiPiClaw 会在权限范围内直接执行操作,不再逐步询问你。只有高危操作才会二次确认。\n\n确定要开启吗?',
+    craftConfirmOk: '我明白,开启全量',
+  },
+
   orb: {
     status: {
       idle: '待命',

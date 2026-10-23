@@ -74,6 +74,8 @@
         @keydown.enter.shift.exact="emit('shift-enter')"
       />
       <div class="input-actions">
+        <!-- 【M1-E】执行模式常驻可见 —— 用户必须随时知道给 agent 多大权限 -->
+        <ExecutionModeSwitch class="mode-switch-slot" />
         <el-button
           v-if="isGenerating"
           type="danger"
@@ -104,6 +106,7 @@
 import { computed } from 'vue';
 import { Promotion, VideoPause, Close } from '@element-plus/icons-vue';
 import FilePreview from './FilePreview.vue';
+import ExecutionModeSwitch from './ExecutionModeSwitch.vue';
 import type { ChatMessage } from '@/stores/chat';
 import type { ProviderConfig, ModelInfo } from '@/stores/models';
 
@@ -225,6 +228,8 @@ function handleSendClick(): void {
   display: flex;
   align-items: flex-end;
   flex-shrink: 0;
+
+  .mode-switch-slot { margin-right: 8px; }
 
   .send-btn {
     height: auto;
