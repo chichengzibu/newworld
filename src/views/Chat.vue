@@ -144,6 +144,11 @@
                     :reasoning="row.message.thinking"
                     :streaming="row.message.status === 'streaming'"
                   />
+                  <!-- 【M1-C】agent 工具调用可视化 —— 让用户看到 agent 在调用什么 -->
+                  <ToolCallCard
+                    v-if="chatStore.agentTrace.length > 0"
+                    :entries="chatStore.agentTrace"
+                  />
                   <!-- 任务执行结果详情 -->
                   <TaskResultCard 
                     v-if="row.message.taskResult"
@@ -494,6 +499,7 @@ import TaskResultCard from '@/components/chat/TaskResultCard.vue';
 import HermesMemoryDrawer from '@/components/chat/HermesMemoryDrawer.vue';
 import QuickPrompts from '@/components/chat/QuickPrompts.vue';
 import ThinkingBlock from '@/components/chat/ThinkingBlock.vue';
+import ToolCallCard from '@/components/chat/ToolCallCard.vue';
 import ChatSidebar from '@/components/chat/ChatSidebar.vue';
 import ChatInput from '@/components/chat/ChatInput.vue';
 import NovaOrb from '@/components/nova/NovaOrb.vue';

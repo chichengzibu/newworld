@@ -215,8 +215,16 @@ export const useChatStore = defineStore('chat', () => {
   /**
    * 【M1-C】agent 工具调用轨迹 —— 让用户看到 agent 在干什么。
    * 此前 10 种 agent 事件零订阅者,用户在 Chat 里完全看不到工具调用过程。
+   * 按 conversationId 隔离:切换会话不能串数据。
    */
-  const agentTrace = ref<AgentTraceEntry[]>([]);
+  const agentTrace = ref<AgentTraceEntry[]>([])
+  const agentTraceConvId = ref<string | null>(null)
+
+  /** 切换会话时清空轨迹 —— 避免 A 会话的工具调用显示在 B 会话 */
+  function resetAgentTrace(conversationId: string | null): void {
+    agentTrace.value = []
+    agentTraceConvId.value = conversationId
+  }
 
   // ========== 计算属性 ==========
   
@@ -723,6 +731,9 @@ export const useChatStore = defineStore('chat', () => {
       return false;
     }
 
+    // 【M1-C】新一轮开始:清空上轮工具调用轨迹(否则新旧混在一起分不清)
+    resetAgentTrace(currentConversationId.value);
+
     console.log('[ChatStore] ========== [SEND] sendMessage 被调用 ==========');
     console.log('[ChatStore] [MSG] 消息内容:', content);
     console.log('[ChatStore] [PROV] Provider:', providerId, 'Model:', modelId);
@@ -1224,6 +1235,13 @@ export const useChatStore = defineStore('chat', () => {
       if (data?.conversationId !== currentConversationId.value) return;
       const ev = data.event;
       if (!ev) return;
+
+      // 会话切换后第一次收到事件时重置轨迹 —— 不把上个会话的工具调用带过来
+      if (agentTraceConvId.value !== data.conversationId) {
+        agentTraceConvId.value = data.conversationId;
+        agentTrace.value = [];
+      }
+
       if (ev.type === 'tool_call') {
         agentTrace.value.push({
           type: 'tool_call',
@@ -1323,6 +1341,7 @@ export const useChatStore = defineStore('chat', () => {
     showTaskConfirmDialog,
     pendingTaskPlan,
     agentTrace,
+    resetAgentTrace,
     rejectExecuteTask,
     cancelExecuteTask,
     confirmExecuteTask
