@@ -213,7 +213,7 @@ export class LlmAgentBrain implements AgentBrain {
      *  本类零 HermesAdapter import / 零 embedText 调用 — 不新增外部依赖, 不引入模块态)。
      *  不传 = 不注入 (休眠态, 与 history 参数同一模式)。 */
     memoryContext?: string
-  } = {}): Promise<{ runId: string; content: string; iterations: number; totalDurationMs: number; toolCalls: Array<{ name: string; ok: boolean; durationMs: number }> }> {
+  } = {}): Promise<{ runId: string; content: string; iterations: number; totalDurationMs: number; totalTokens: number; toolCalls: Array<{ name: string; ok: boolean; durationMs: number }> }> {
     const runId = opts.runId ?? `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     const controller = new AbortController()
     const state: RunState = { runId, aborted: false, controller }
@@ -291,7 +291,7 @@ export class LlmAgentBrain implements AgentBrain {
           pushCkpt(takeCkpt('interrupted', 'aborted')) // #004 接缝②: 中止前 flush 当前态 (A2 append-only)
           LlmAgentBrainEvents.emit({ type: 'run_aborted', runId, iterations: iter - 1 })
           this.runs.delete(runId)
-          return { runId, content: finalContent, iterations: iter - 1, totalDurationMs: Date.now() - startMs, toolCalls: toolCallsLog }
+          return { runId, content: finalContent, iterations: iter - 1, totalDurationMs: Date.now() - startMs, totalTokens, toolCalls: toolCallsLog }
         }
         // #005 spawn (预算刹车): 每轮 LLM 调用前判定 — 超限即停 tool 循环,
         // 下方 maxIter 收尾块取【最后 assistant】为 final (降级到 final, 不 throw 不中断会话)
@@ -373,7 +373,7 @@ export class LlmAgentBrain implements AgentBrain {
       LlmAgentBrainEvents.emit({ type: 'final_answer', runId, content: finalContent, iterations, totalDurationMs })
       pushCkpt(takeCkpt('finalized')) // #004 接缝④: 终态标记 (run 完整, 恢复时无需续跑)
       this.runs.delete(runId)
-      return { runId, content: finalContent, iterations, totalDurationMs, toolCalls: toolCallsLog }
+      return { runId, content: finalContent, iterations, totalDurationMs, totalTokens, toolCalls: toolCallsLog }
     } catch (e) {
       const totalDurationMs = Date.now() - startMs
       const errMsg = e instanceof Error ? e.message : String(e)
@@ -456,6 +456,10 @@ export class LlmAgentBrain implements AgentBrain {
       if (history) runOpts.history = history
       if (ckpt) runOpts.checkpoint = ckpt
       if (ctx.conversationId) runOpts.conversationId = String(ctx.conversationId)
+      // 【W5 接线 · M1-C】会话层预分配的 runId:必须在 run() 生成默认 runId 之前透传,
+      // 否则事件中继无法把 tool_call 关联回会话(brain 无状态,不持有 conversationId)。
+      const callerRunId = (ctx as { runId?: string }).runId
+      if (typeof callerRunId === 'string' && callerRunId.length > 0) runOpts.runId = callerRunId
       // #005 Step 0 (DEV-014 切除): contextKind 入口派生值透传 think→run→tool.execute(ctx)
       //   —— brain 不自存 (无状态红线); 会话层 (ChatManager) 是唯一派生源
       if (ctx.contextKind) runOpts.contextKind = ctx.contextKind as 'ui' | 'im_inbound' | 'scheduler' | 'headless'
@@ -463,7 +467,7 @@ export class LlmAgentBrain implements AgentBrain {
       //   brain 不自存 / 零 HermesAdapter import (无状态红线 + 零新增依赖); 派生源归会话层 (与 contextKind 同模式)
       if (typeof ctx.memoryContext === 'string' && ctx.memoryContext.trim()) runOpts.memoryContext = ctx.memoryContext
       const r = await this.run(content, runOpts)
-      return { action: 'reply', payload: { text: r.content, model: 'agent-v0.1', durationMs: r.totalDurationMs, iterations: r.iterations, toolCalls: r.toolCalls } }
+      return { action: 'reply', payload: { text: r.content, model: 'agent-v0.1', durationMs: r.totalDurationMs, iterations: r.iterations, totalTokens: r.totalTokens, runId: r.runId, toolCalls: r.toolCalls } }
     } catch (e) {
       this.log.warn('LlmAgentBrain.think: fallback stub', e)
       return { action: 'reply', payload: { text: `[LlmAgentBrain error] ${(e as Error).message}`, model: 'agent-v0.1-stub', durationMs: 0 } }

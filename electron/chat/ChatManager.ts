@@ -20,8 +20,24 @@ import { TaskExecutor } from '../task/TaskExecutor';
 import { InstructionGenerator } from '../task/InstructionGenerator';
 import { HistoryAssembler } from './HistoryAssembler';
 import { SelfLearner } from '../learning/SelfLearner';
+import { CostTracker } from '../insight/CostTracker';
+import { ConfigStore } from '../core/ConfigStore';
+import { AgentEventRelayBus, type AgentRunEvent } from '../agent/AgentEventRelay';
 import type { Conversation, ChatMessage, ChatSettings, MessageRole, StreamChunk } from './ChatTypes';
 import type { AgentBrain, Disposable } from '../contracts/types';
+
+/** agent 派发结果 —— handled=false 时调用方须回落旧管道 */
+export interface AgentDispatchResult {
+  handled: boolean
+  content?: string
+  totalTokens?: number
+  iterations?: number
+  toolCalls?: Array<{ name: string; ok: boolean; durationMs: number }>
+  /** 助手占位消息 id(渲染层据此回填最终内容) */
+  messageId?: string
+  runId?: string
+  reason?: string
+}
 
 export class ChatManager {
   private static instance: ChatManager;
@@ -29,6 +45,8 @@ export class ChatManager {
   private config!: ChatConfig;
   private modelManager!: ModelManager;
   private abortControllers: Map<string, AbortController> = new Map();
+  /** M1-C: agent 运行事件中继(把 brain 事件关联会话后广播到渲染层) */
+  private agentEventRelay = AgentEventRelayBus;
 
   private constructor() {
     this.log.info('[ChatManager] 初始化');
@@ -237,7 +255,27 @@ export class ChatManager {
     this.config.addMessage(conversationId, userMessage);
     this.broadcastMessage(conversationId, userMessage);
 
-    // 2. 尝试用大模型生成操作步骤并执行
+    // 2.5 【W5 接线 · M1-B】agent tool loop 优先
+    //   真 tool-call 循环此前零生产调用方(死代码),现接入主链路。
+    //   回落保证:未注册 agent / LLM 未配置 / 抛错 → handled:false,继续走下方旧管道,
+    //   可用性不回退。执行模式为 'safe' 时跳过 agent(纯对话)。
+    if (this.shouldUseAgentLoop()) {
+      try {
+        const agentResult = await this.dispatchToAgent(conversationId, content, 'ui');
+        if (agentResult.handled) {
+          this.broadcastConversationUpdate(conversationId);
+          const done = agentResult.messageId
+            ? this.config.getMessage(conversationId, agentResult.messageId)
+            : null;
+          return (done ?? userMessage) as ChatMessage;
+        }
+        this.log.info(`[ChatManager] [${traceId}] agent loop 未接管(${agentResult.reason}),回落旧管道`);
+      } catch (e) {
+        this.log.warn(`[ChatManager] [${traceId}] agent loop 异常,回落旧管道`, e);
+      }
+    }
+
+    // 3. 尝试用大模型生成操作步骤并执行
     try {
       const instructionGenerator = InstructionGenerator.getInstance();
       const taskExecutor = TaskExecutor.getInstance();
@@ -1018,8 +1056,16 @@ export class ChatManager {
   }
 
   /**
-   * 派发消息给已注册的 agent(由 IpcServer / TaskExecutor 调用)
-   * 如果没注册 agent,返回 void(noop),不抛错
+   * 派发消息给已注册的 agent(由 sendMessage / IpcServer / TaskExecutor 调用)
+   *
+   * 【W5 接线 · M1-B】此方法此前只 log decision 即丢弃(零调用方),现改为真正执行:
+   *   1. 组装 history(HistoryAssembler 拉会话真源,排除当前 user 消息)
+   *   2. 拉取 Hermes 记忆上下文(管线召回,缺省空串)
+   *   3. 经 think() 进入 tool loop,拿到 decision + token + toolCalls
+   *   4. token 记入 CostTracker(此前 run() 吐出的 token 被丢弃)
+   *   5. 以流式占位消息 + onAgentEvent 广播把执行过程送到渲染层
+   *
+   * 失败一律返回 handled:false(不抛错),调用方据此回落旧管道,保证可用性不回退。
    *
    * contextKind 参数 (v3 #4 + 5 裁决 #4):
    *   - 'ui'        : 来自渲染进程 chat IPC
@@ -1028,20 +1074,172 @@ export class ChatManager {
    *   - 未提供     : 按 'headless' 兜底 (fail-safe, 拒绝 confirm 级命令)
    * 绝不从 LLM 自报, 由入口硬编码。
    */
-  public async dispatchToAgent(msg: ChatMessage, contextKind?: 'ui' | 'headless' | 'im_inbound' | 'scheduler'): Promise<void> {
+  public async dispatchToAgent(
+    conversationId: string,
+    content: string,
+    contextKind: 'ui' | 'headless' | 'im_inbound' | 'scheduler' = 'ui',
+  ): Promise<AgentDispatchResult> {
     if (!this.registeredAgent) {
       this.log.debug('[ChatManager] dispatchToAgent: 未注册 agent,跳过');
-      return;
+      return { handled: false, reason: 'no-agent' };
     }
-    const effectiveKind = contextKind ?? 'headless'
+
+    const conv = this.config.getConversation(conversationId);
+    const history = HistoryAssembler.buildHistory(conv?.messages ?? [], '');
+
+    // 记忆上下文:管线召回(无 embedding 配置时 HermesAdapter 返空数组,此处不阻塞主链路)
+    let memoryContext = '';
     try {
-      // #005 Step 0 (DEV-014 切除): 派生逻辑留入口 (本处), 经 think(ctx.contextKind) 显式贯穿 —
-      // 模块态 setCommandContext 已删; 本处是唯一派生点 (gateway 轨走 source 参数, 不经此处)。
-      const decision = await this.registeredAgent.think({ conversationId: msg.id, content: msg.content, contextKind: effectiveKind });
-      this.log.debug('[ChatManager] dispatchToAgent: agent decision', { decision, contextKind: effectiveKind });
+      const recalled = await HermesAdapter.getInstance().recall(content, { minScore: RECALL_CHAT_MIN_SCORE });
+      if (Array.isArray(recalled) && recalled.length > 0) {
+        memoryContext = recalled
+          .slice(0, 5)
+          .map(m => `- ${typeof m?.content === 'string' ? m.content : JSON.stringify(m)}`)
+          .join('\n');
+      }
     } catch (e) {
-      this.log.error('[ChatManager] dispatchToAgent 失败', e);
+      this.log.warn('[ChatManager] dispatchToAgent: 记忆召回失败,降级为空上下文');
     }
+
+    // 执行过程占位消息 + 事件订阅(tool_call / tool_result 实时广播)
+    const placeholderId = `assistant_agent_${Date.now()}`;
+    const placeholder: ChatMessage = {
+      id: placeholderId,
+      role: 'assistant',
+      content: '',
+      timestamp: Date.now(),
+      status: 'streaming',
+    };
+    this.config.addMessage(conversationId, placeholder);
+    this.broadcastMessage(conversationId, placeholder);
+
+    const traceId = `agent_${Date.now()}`;
+    // 预先声明 runId 并绑定会话归属 —— brain 无状态(不持有 conversationId),
+    // 事件归属由会话层在中继表登记,这是让 tool_call 可被渲染层消费的前提。
+    const runId = `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    this.agentEventRelay.bindRun(runId, conversationId);
+    const unsubscribe = this.agentEventRelay.subscribe((ev) => {
+      if (ev.conversationId !== conversationId) return;
+      this.broadcastAgentEvent(conversationId, ev);
+    });
+
+    try {
+      const decision = await this.registeredAgent.think({
+        runId,
+        conversationId,
+        content,
+        contextKind,
+        history: history.map(m => ({ role: m.role, content: m.content })),
+        ...(memoryContext ? { memoryContext } : {}),
+      } as never);
+
+      const payload = (decision?.payload ?? {}) as {
+        text?: string
+        totalTokens?: number
+        iterations?: number
+        runId?: string
+        toolCalls?: Array<{ name: string; ok: boolean; durationMs: number }>
+      };
+      const text = payload.text ?? '';
+      const totalTokens = payload.totalTokens ?? 0;
+      const toolCalls = payload.toolCalls ?? [];
+
+      // token 记账 —— run() 已吐出,此前在此处断链丢失
+      if (totalTokens > 0) {
+        try {
+          CostTracker.getInstance().recordUsage({
+            model: 'agent-loop',
+            inputTokens: totalTokens,
+            outputTokens: 0,
+            conversationId,
+          });
+        } catch (e) {
+          this.log.warn('[ChatManager] dispatchToAgent: token 记账失败', e);
+        }
+      }
+
+      this.config.updateMessage(conversationId, placeholderId, { content: text, status: 'sent' });
+      this.broadcastMessage(conversationId, { ...placeholder, content: text, status: 'sent' });
+
+      this.log.info(
+        `[ChatManager] [${traceId}] agent loop 完成: ${payload.iterations ?? 0} 轮, ` +
+        `${toolCalls.length} 次工具调用, ${totalTokens} tokens`,
+      );
+
+      return {
+        handled: true,
+        content: text,
+        messageId: placeholderId,
+        runId: payload.runId,
+        totalTokens,
+        iterations: payload.iterations ?? 0,
+        toolCalls,
+      };
+    } catch (e) {
+      this.log.error('[ChatManager] dispatchToAgent 失败,交由调用方回落', e);
+      try {
+        this.config.updateMessage(conversationId, placeholderId, {
+          content: `agent 执行失败:${(e as Error).message}`,
+          status: 'error',
+        });
+      } catch { /* 回落消息失败不二次抛 */ }
+      return { handled: false, reason: (e as Error).message };
+    } finally {
+      unsubscribe();
+      this.agentEventRelay.releaseRun(runId);
+    }
+  }
+
+  /** 把 agent 运行事件广播到渲染层(供工具调用可视化消费) */
+  private broadcastAgentEvent(conversationId: string, event: AgentRunEvent): void {
+    const windows = BrowserWindow.getAllWindows();
+    windows.forEach(w => {
+      if (!w.isDestroyed()) {
+        w.webContents.send('agent:onEvent', { conversationId, event });
+      }
+    });
+  }
+
+  /**
+   * 【M1-E】是否走 agent tool loop。
+   * 判定链(任一为否即回落旧管道):
+   *   1. 已注册 agent
+   *   2. 存在任一已启用且带 apiKey 的 LLM provider(否则 LlmClient 无从调用)
+   *   3. 执行模式 ≠ 'safe'(safe = 纯对话,拦截所有执行类指令)
+   *
+   * 【M1-E 安全修正】原默认值是 'craft'(权限内自动执行),用户在 UI 上完全看不到,
+   *   等于"静默执行"。现默认改为 'plan' —— agent 仍会执行,但经确认门;
+   *   'safe' 才是纯对话。理由见 docs/deviation-ledger.md。
+   */
+  private shouldUseAgentLoop(): boolean {
+    if (!this.registeredAgent) return false;
+    try {
+      const mode = this.getExecutionMode();
+      if (mode === 'safe') return false;
+    } catch (e) {
+      this.log.warn('[ChatManager] shouldUseAgentLoop: 执行模式读取失败,按 plan 处理');
+    }
+    try {
+      const providers = this.modelManager.getAllProviders?.() ?? [];
+      const hasReady = providers.some((p: { enabled?: boolean; apiKey?: string }) => p.enabled !== false && !!p.apiKey);
+      if (!hasReady) {
+        this.log.debug('[ChatManager] shouldUseAgentLoop: 无可用 LLM provider,回落旧管道');
+        return false;
+      }
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /** 读取执行模式(渲染层 executionMode store 为真源,此处读同一份持久化配置) */
+  public getExecutionMode(): 'safe' | 'plan' | 'craft' {
+    try {
+      const store = ConfigStore.getInstance();
+      const raw = store.get('executionMode') as string | undefined;
+      if (raw === 'safe' || raw === 'plan' || raw === 'craft') return raw;
+    } catch { /* 配置不可用则用默认值 */ }
+    return 'plan'; // 【M1-E】默认由 craft 改为 plan
   }
 
   /**
