@@ -43,12 +43,6 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: sudo apt-get update && sudo apt-get install -y rpm
 
-      - name: Resolve tag (workflow_dispatch)
-        if: github.event_name == 'workflow_dispatch'
-        id: tag
-        run: |
-          echo "version=${GITHUB_REF##*/}" >> $GITHUB_OUTPUT
-
       - name: Build renderer + electron
         # 注意: 不要加 --publish,自己用 gh release upload 上传(避免 electron-builder 自动创建 draft release)
         env:
@@ -110,10 +104,14 @@ jobs:
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref_name }}
-          name: ${{ github.ref_name }}
+          # push tag 时 github.ref_name 即 tag;workflow_dispatch 时 ref_name 是分支名,
+          # 必须回落到 inputs.tag,否则会创建名为 "master" 的 Release。
+          tag_name: ${{ inputs.tag || github.ref_name }}
+          name: ${{ inputs.tag || github.ref_name }}
           draft: false
-          prerelease: false
+          # 含 -alpha/-beta/-rc 的版本号按 prerelease 处理,避免 auto-updater 把
+          # 预发布版推给正式版用户。
+          prerelease: ${{ contains(inputs.tag || github.ref_name, '-alpha') || contains(inputs.tag || github.ref_name, '-beta') || contains(inputs.tag || github.ref_name, '-rc') }}
           generate_release_notes: true
           fail_on_unmatched_files: true
           files: |

@@ -7,11 +7,13 @@
  *    拿到 index.json（技能清单）, 下载签名后的 .zip, 用 Ed25519 公钥验签, 再调 importSkillFromZip。
  *
  * 信任链:
- *  - 作者用 Ed25519 私钥 (scripts/clawhub-dev-ed25519.key, 生产请换自己的私钥) 对 zip 字节签名。
+ *  - 作者用 Ed25519 私钥对 zip 字节签名。私钥不入仓,开发私钥外置在
+ *    C:\Users\<user>\.pipiclaw-secrets\clawhub-dev-ed25519.key,通过环境变量
+ *    PIPICLAW_CLAWHUB_KEY 指向(见 scripts/build-registry.mjs 的查找链)。生产请换自己的私钥。
  *  - App 端用内置/配置的 Ed25519 公钥验签。公钥优先级:
  *      1. 环境变量 PIPICLAW_CLAWHUB_PUBKEY
  *      2. userData/clawhub-pubkey.txt
- *      3. 代码内置 DEFAULT_PUBLIC_KEY (开发用, 与 scripts/clawhub-dev-ed25519.key 配对)
+ *      3. 代码内置 DEFAULT_PUBLIC_KEY (开发用, 与上述外置开发私钥配对)
  *  - 若三处都没有公钥 -> 跳过验签并 warn（仅限内部/可信源场景, 不建议对外分发时这样）。
  *
  * registry 基址优先级:
@@ -33,7 +35,7 @@ import * as http from 'node:http'
 import { URL } from 'node:url'
 import { createHash, createPublicKey, verify as cryptoVerify } from 'node:crypto'
 
-/** 开发用内置公钥 (SPKI DER, hex) — 与 scripts/clawhub-dev-ed25519.key 配对。生产请替换并移除私钥文件。 */
+/** 开发用内置公钥 (SPKI DER, hex) — 与外置开发私钥 (~/.pipiclaw-secrets/clawhub-dev-ed25519.key) 配对。生产请替换为自有公钥。 */
 const DEFAULT_PUBLIC_KEY =
   '302a300506032b65700321001204d8cad802577773f194d0a1e6577496a81d1116e1f027136729a34a7b0c2c'
 

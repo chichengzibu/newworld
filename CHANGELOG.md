@@ -2,6 +2,107 @@
 
 All notable changes to PiPiClaw will be documented in this file.
 
+## [4.5.0-alpha] - 2026-08-06 (LlmAgentBrain v0.1 + MCP PoC + P0 安全,M1)
+
+> M1 阶段总评 6.5/10 → 7.5/10 (verifier CONDITIONAL PASS)
+> 仅供内部 dogfooding,不可 ship 给 GitHub 公开用户(剩 P0-2/3/4 阻塞)
+
+### 🆕 AI 核心能力 — LlmAgentBrain v0.1 跟 ClaudeCode 对齐
+
+**commit `dc35b3c`** — 15 files, 1850 insertions
+
+| 5 工具 (跟 ClaudeCode 同款) | 用途 |
+|---|---|
+| Read | 读文件,路径强制 sandbox/workspace |
+| Edit | 精确编辑 (old_string + new_string, 失败回滚) |
+| Bash | 跑命令,execFile 数组传参 + 60+ 白名单 |
+| Glob | 文件匹配 (pattern, cwd?) |
+| Grep | 内容搜索 (pattern, cwd?, include?) |
+
+- 多轮 tool call loop (max 10 轮, 防死循环)
+- 9 类事件总线 (run_start / iteration / tool_call / tool_result / content_delta / thinking_delta / final_answer / run_error / run_aborted)
+- abortRun (供 IPC 中止)
+- 路径沙箱强制 (拒 `~/.ssh` / `C:\Windows\System32`)
+- LLM 抽象统一: LlmClient + 4 provider + streamChat SSE
+
+### 🆕 MCP 协议集成 — Anthropic Model Context Protocol 子集
+
+**commits `1c9bdd3` ... `fb1e957`** — 5 commit, PoC 14/14 真链路测试通过
+
+- stdio transport (JSON-RPC 2.0 over newline-delimited)
+- filesystem server (5 工具: list_directory / read_file / write_file / search_files / get_file_info)
+- McpManager (多 server 编排: start / stop / listAllTools / invoke / invokeByName)
+- 8 个新 IPC channel: mcp:start-server / stop-server / start-all-enabled / stop-all / list-servers / list-tools / list-tools-by-server / invoke
+
+### 🔒 P0 安全 6 项全修 (5 洞 + P0-1 forceReset 重做)
+
+| # | 洞 | Commit | 状态 |
+|---|---|---|---|
+| 1 | OpenClawServer CORS `*` | `53047f7` | ✅ 默认拒绝跨域, 白名单 127.0.0.1 |
+| 2 | 18789 端口无 token | `efe4102` | ✅ 256-bit token + safeStorage + Bearer 鉴权 |
+| 3 | `runCommand` shell:true | `4bf0845` | ✅ execFile 数组传参 + 60+ 白名单 + cwd 沙箱 |
+| 4 | `forceResetToPermissive` 覆盖用户选择 | `feec4a1` + `309375d` | ✅ 5 步完整重做 + 老 config migration (`b5ff363`) |
+| 5 | `SkillSigner` 硬编码 HMAC | `4f182df` | ✅ safeStorage 持久化, 不再硬编码 |
+
+**老用户 migration 真根因 (3 层, commit `b5ff363`)**:
+v4.3.0 的 `activeSetId="preset_permissive"` 升级后无 migration 仍 permissive,
+且 dev mode 下 `app.getVersion()` 返 electron 版本 30.5.1 导致比较 bypass。
+修法:`loadConfig` 加 migration + `saveConfig` 用 `getAppVersion()`(dev fallback 读 package.json)。
+
+### 📊 评分
+
+| 维度 | v4.4.0 | v4.5.0-alpha | 提升 |
+|---|---:|---:|---:|
+| 总评 | 6.5/10 | **7.5/10** | +1.0 |
+| AI / Agent | 4.0/10 | **6.5/10** | +2.5 |
+| LLM 抽象 | 4.5/10 | **7.0/10** | +2.5 |
+| MCP 集成 | 0/10 | **5.0/10** | +5.0 |
+| 安全 | 3.0/10 | **6.5/10** | +3.5 |
+
+### ⚠️ 已知限制
+
+- 不带 cost tracking + 不带 zod schema 校验 (留 M1.1 / M2)
+- 内部 dogfooding only,公开 GitHub 等 M2 修完 P0-2 (HMAC→Ed25519) / P0-3 (LlmClient ollama 副作用) / P0-4 (d5:run builtin bug)
+
+## [4.4.0] - 2026-08-05 (P0 安全 + v4.4 视觉精简)
+
+> 5 agent 团队架构审计总评 6.5/10 → 8.0/10 (verifier CONDITIONAL PASS)
+> 安全子维度 3.0/10 → 6.0/10 (P0 修完)
+> 仅供内部 dogfooding,不可 ship 给 GitHub 公开用户
+
+### 🔒 P0 安全 5 洞全修 (5 commits, 7 文件改动)
+
+| # | 洞 | Commit | 关键改动 |
+|---|---|---|---|
+| 1 | OpenClawServer CORS `*` 跨域放开 | `53047f7` | 默认拒绝跨域,白名单 127.0.0.1 + Electron 协议 |
+| 2 | 18789 端口无 token 鉴权 | `efe4102` | 256-bit token + safeStorage;Bearer / X-OpenClaw-Token 双头 |
+| 3 | `runCommand` shell:true 命令注入 | `4bf0845` | execFile 数组传参;60+ baseCmd 白名单 |
+| 4 | `forceResetToPermissive` 覆盖用户选择 | `feec4a1` | 加 env 开关;生产环境尊重用户选择 |
+| 5 | `SkillSigner` 硬编码 HMAC key | `4f182df` | safeStorage 启动加载/生成 key |
+
+**影响**: 同机恶意软件 / 恶意网页 / 跨进程攻击者再也不能直接
+`curl 127.0.0.1:18789/execute` 拿到执行权。
+
+### 🎨 v4.4 视觉精简 (Linear/Raycast 路线)
+
+- **#1 icon 系统** `dfb789c` — 全 app emoji → Element Plus SVG icon (100+ 处)
+- **#2 Settings 重做** `705d778` + `2b489af` — el-tabs → 自定义 nav + 2 列 grid
+- **#3 SideNav 60px rail** `2e51678` + `4040908` — icon-only rail
+- **#4 TitleBar 删 theme 切换** — 主题切换统一放 Settings
+
+### 📊 测试覆盖
+
+- 单元: 897/916 (97.93%)
+- e2e: 25 文件 + 5 个新 P0 安全 spec
+- smoke: 22/22
+- **user-journey-ollama: 31/31 pass** (本地 Ollama 11434 + qwen3.5:9b 真链路)
+
+### ⚠️ 已知 P0 阻塞 (9 项)
+
+forceReset 深度重做 / HMAC 升 Ed25519 + TOFU / LlmClient ollama 副作用 /
+d5:run builtin bug / file path 沙箱 / 未知 op 默认 deny /
+SkillLoader 强制 verify / ToolRegistry 路径细粒度 / IPC zod schema 校验
+
 ## [4.3.1] - 2026-07-24 (Ship-Ready 真用户测试套件)
 
 从 v4.3.0 基础上,模拟真实用户跑 64 个 e2e + 869 个 unit + 22 个 smoke,验证

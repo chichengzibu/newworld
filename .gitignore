@@ -45,6 +45,9 @@ tmp/
 # playwright screenshots (不同于 e2e-report/)
 tests/e2e/**/screenshots/
 
+# nova 语音 debug 截图 (M4 dev 视觉验证产物,不入仓)
+.tmp-nova-shots/
+
 # sandbox runtime
 sandbox/base/.cache/
 sandbox/runtime/
