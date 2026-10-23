@@ -57,18 +57,22 @@ vi.mock('../../electron/core/LogManager', () => ({
 import { ChatManager } from '../../electron/chat/ChatManager'
 import { ChatConfig } from '../../electron/chat/ChatConfig'
 import { InstructionGenerator } from '../../electron/task/InstructionGenerator'
+import { installAutoConfirm, uninstallAutoConfirm } from './auto-confirm'
 
 describe('#007 L4: chat 任务流 → SelfLearner.observeExecution (G3 O1 三元组实证)', () => {
   let convId = ''
   let genSpy: any
 
   beforeEach(() => {
+    // 【M1-D】同上:本测试关注 SelfLearner 观察,不关注确认流程
+    installAutoConfirm()
     observeCalls.length = 0
     const cfg = ChatConfig.getInstance() as any
     convId = cfg.createConversation({ title: 'l4-observe' } as any).id
   })
 
   afterEach(() => {
+    uninstallAutoConfirm()
     if (genSpy) { genSpy.mockRestore(); genSpy = null }
   })
 

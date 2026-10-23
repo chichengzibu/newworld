@@ -47,6 +47,8 @@ export class ChatManager {
   private abortControllers: Map<string, AbortController> = new Map();
   /** M1-C: agent 运行事件中继(把 brain 事件关联会话后广播到渲染层) */
   private agentEventRelay = AgentEventRelayBus;
+  /** 【M1-D】等待用户确认的计划表 planId → resolve(true=确认,false=拒绝) */
+  private confirmHandlers: Map<string, (confirmed: boolean) => void> = new Map();
 
   private constructor() {
     this.log.info('[ChatManager] 初始化');
@@ -289,8 +291,8 @@ export class ChatManager {
       const steps = await instructionGenerator.generateTaskSteps(content, providerId, modelId, _history);
       
       if (steps && steps.length > 0) {
-        this.log.info(`[ChatManager] [${traceId}] 大模型生成了 ${steps.length} 个步骤，开始执行`);
-        
+        this.log.info(`[ChatManager] [${traceId}] 大模型生成了 ${steps.length} 个步骤，准备执行`);
+
         // 创建助手占位消息
         const placeholderId = `assistant_${Date.now()}`;
         const placeholder: ChatMessage = {
@@ -324,6 +326,44 @@ export class ChatManager {
           status: 'pending',
           createdAt: Date.now()
         };
+
+        /**
+         * 【M1-D】执行确认闸门。
+         *
+         * 修复前: 渲染层 Chat.vue 的"确认执行任务"弹窗是死代码
+         * (showTaskConfirmDialog 从未被置 true),LLM 生成步骤后【立即执行】,
+         * 用户全程黑盒。
+         *
+         * 现在: 除 'safe'(纯对话)外,plan 与 craft 两种执行模式都要先 emit
+         * 计划事件 → 等用户确认 → 才执行。用户已明确选择"所有任务都确认"。
+         * 无渲染窗口(定时任务/IM)或 60s 超时 → fail-safe 拒绝。
+         */
+        if (this.getExecutionMode() !== 'safe') {
+          const confirmed = await this.requestPlanConfirmation(
+            conversationId,
+            content,
+            steps.map((s, i) => ({
+              order: i + 1,
+              description: s.description || `执行 ${s.action}`,
+              status: 'pending' as const,
+              params: s.params ?? {},
+            })),
+          );
+          if (!confirmed) {
+            this.log.info(`[ChatManager] [${traceId}] 用户未确认执行,已取消`);
+            this.config.updateMessage(conversationId, placeholderId, {
+              content: '已取消执行。如果你不想这个计划,可以直接说明要调整的地方。',
+              status: 'sent',
+            });
+            this.broadcastMessage(conversationId, {
+              ...placeholder,
+              content: '已取消执行。如果你不想这个计划,可以直接说明要调整的地方。',
+              status: 'sent',
+            });
+            this.broadcastConversationUpdate(conversationId);
+            return this.config.getMessage(conversationId, placeholderId) as ChatMessage;
+          }
+        }
 
         const result = await taskExecutor.executeTask(task as any, 'ui');
 
@@ -1200,6 +1240,89 @@ export class ChatManager {
     });
   }
 
+  /** 广播任务单步状态(让执行过程实时可见) */
+  private broadcastTaskStep(conversationId: string, payload: { planId: string; order: number; status: string; description?: string; error?: string }): void {
+    const windows = BrowserWindow.getAllWindows();
+    windows.forEach(w => {
+      if (!w.isDestroyed()) {
+        w.webContents.send('chat:onTaskStep', { conversationId, ...payload });
+      }
+    });
+  }
+
+  /** 广播执行计划(渲染层据此弹确认框) */
+  private broadcastTaskPlan(conversationId: string, plan: unknown): void {
+    const windows = BrowserWindow.getAllWindows();
+    windows.forEach(w => {
+      if (!w.isDestroyed()) {
+        w.webContents.send('chat:onTaskPlan', plan);
+      }
+    });
+  }
+
+  /**
+   * 请求用户确认执行计划。
+   *
+   * fail-safe 设计:
+   *   - 无任何渲染窗口(定时任务/IM 入口) → 拒绝(不盲执行)
+   *   - 用户 60s 未响应 → 拒绝(不是默认同意)
+   *   - 执行模式非 plan → 立即放行(调用方已判定)
+   *
+   * 拒绝默认值必须是 false:安全边界上,"不知道"不等于"可以"。
+   */
+  private async requestPlanConfirmation(
+    conversationId: string,
+    instruction: string,
+    steps: Array<{ order: number; description: string; status: string; params: Record<string, unknown> }>,
+    timeoutMs = 60_000,
+  ): Promise<boolean> {
+    const windows = BrowserWindow.getAllWindows().filter(w => !w.isDestroyed());
+    if (windows.length === 0) {
+      this.log.warn('[ChatManager] 无渲染窗口,拒绝执行(plan 模式 fail-safe)');
+      return false;
+    }
+
+    const planId = `plan_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    this.broadcastTaskPlan(conversationId, {
+      conversationId,
+      planId,
+      instruction,
+      steps,
+      riskLevel: steps.length > 5 ? 'high' : steps.length > 2 ? 'medium' : 'low',
+      createdAt: Date.now(),
+    });
+
+    return new Promise<boolean>((resolve) => {
+      let settled = false;
+      const finish = (ok: boolean): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        this.confirmHandlers.delete(planId);
+        resolve(ok);
+      };
+      const timer = setTimeout(() => {
+        this.log.warn(`[ChatManager] 计划 ${planId} 等待确认超时,拒绝执行`);
+        finish(false);
+      }, timeoutMs);
+      this.confirmHandlers.set(planId, finish);
+    });
+  }
+
+  /**
+   * 渲染层确认回调入口(IpcServer 转发 chat:task:confirm)。
+   * 未知 planId 一律拒绝 —— 不给"误确认"留口子。
+   */
+  public resolveTaskConfirmation(planId: string, confirmed: boolean): boolean {
+    const handler = this.confirmHandlers.get(planId);
+    if (!handler) {
+      this.log.warn(`[ChatManager] resolveTaskConfirmation: 未知 planId ${planId},拒绝`);
+      return false;
+    }
+    handler(confirmed);
+    return true;
+  }
+
   /**
    * 【M1-E】是否走 agent tool loop。
    * 判定链(任一为否即回落旧管道):
@@ -1236,10 +1359,11 @@ export class ChatManager {
   public getExecutionMode(): 'safe' | 'plan' | 'craft' {
     try {
       const store = ConfigStore.getInstance();
-      const raw = store.get('executionMode') as string | undefined;
+      // 键名与 IpcServer.ts:1100 的 execution:mode:set 保持一致
+      const raw = store.get('execution.mode') as string | undefined;
       if (raw === 'safe' || raw === 'plan' || raw === 'craft') return raw;
     } catch { /* 配置不可用则用默认值 */ }
-    return 'plan'; // 【M1-E】默认由 craft 改为 plan
+    return 'craft'; // 【M1-E】默认保持 craft;UI 常驻可见,用户知情
   }
 
   /**

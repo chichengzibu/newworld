@@ -35,7 +35,13 @@ vi.mock('electron', () => {
       on: vi.fn(),
       removeHandler: vi.fn(),
     },
-    BrowserWindow: vi.fn(),
+    // 【M1-D】ChatManager 用 BrowserWindow.getAllWindows() 广播到渲染层。
+    // 此前 mock 里 BrowserWindow 是裸 vi.fn(),没有这个静态方法,
+    // 导致"执行确认闸门"无法在测试里模拟有无渲染窗口 —— fail-safe 分支
+    // (无窗口 → 拒绝执行)就永远测不到。默认返回空数组 = 无渲染窗口。
+    BrowserWindow: Object.assign(vi.fn(), {
+      getAllWindows: vi.fn(() => [] as unknown[]),
+    }),
     dialog: { showMessageBox: vi.fn() },
     contextBridge: { exposeInMainWorld: vi.fn() },
     ipcRenderer: { invoke: vi.fn(), on: vi.fn() },

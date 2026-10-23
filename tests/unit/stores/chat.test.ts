@@ -43,6 +43,12 @@ const { api } = vi.hoisted(() => {
     onMessage: vi.fn(() => () => {}),
     onConversationUpdate: vi.fn(() => () => {}),
     onStreamUpdate: vi.fn(() => () => {}),
+    // 【M1-D】任务计划确认回传(渲染层只回传决定,执行权在主进程)
+    confirmTaskPlan: vi.fn(),
+    // 【M1-D】主进程 → 渲染层事件通道
+    onTaskPlan: vi.fn(() => () => {}),
+    onTaskStep: vi.fn(() => () => {}),
+    onAgentEvent: vi.fn(() => () => {}),
   }
   api.task = {
     execute: vi.fn(),
@@ -536,7 +542,19 @@ describe('useChatStore', () => {
     expect(store.executingTask).toBe(false)
   })
 
-  it('confirmExecuteTask invokes electronAPI.task.execute with planToTask result', async () => {
+  /**
+   * 【M1-D 契约变更】confirmExecuteTask 不再自己执行任务。
+   *
+   * 修复前: 渲染层收到计划后【自己再调 task.execute】执行一遍,
+   *         而主进程 sendMessage 链路里 TaskExecutor 也在跑 —— 同一个任务
+   *         被执行两次(双重执行 bug)。
+   * 现在: 执行权归主进程(它在 requestPlanConfirmation 上等这个确认),
+   *       渲染层只回传"用户点了确认",主进程 promise 兑现后才真正执行。
+   *
+   * 因此断言从 "调用了 task.execute" 改为 "调用了 chat.confirmTaskPlan,
+   * 且【没有】调用 task.execute"。
+   */
+  it('confirmExecuteTask only relays confirmation — never executes itself (double-exec fix)', async () => {
     const store = useChatStore()
     store.conversations = [{ ...makeConv({ id: 'conv-1' }) }]
     store.currentConversationId = 'conv-1'
@@ -548,25 +566,20 @@ describe('useChatStore', () => {
       ],
       riskLevel: 'low',
     }
-    api.task.execute.mockResolvedValue({
-      success: true,
-      data: { success: true, summary: 'ok', result: { steps: [] }, duration: 10 },
-    })
+    api.chat.confirmTaskPlan.mockResolvedValue({ success: true, data: true })
+
     await store.confirmExecuteTask()
-    expect(api.task.execute).toHaveBeenCalledTimes(1)
-    const sentTask = api.task.execute.mock.calls[0][0]
-    expect(sentTask.id).toBe('plan-1')
-    expect(sentTask.conversationId).toBe('conv-1')
-    expect(sentTask.instruction).toBe('列出目录')
-    expect(sentTask.steps.length).toBe(1)
-    expect(sentTask.steps[0].id).toBe('plan-1-step-0')
-    expect(sentTask.steps[0].order).toBe(1)
-    expect(sentTask.steps[0].params).toEqual({ path: '/tmp' })
-    expect(store.currentTaskResult?.success).toBe(true)
-    expect(store.currentTaskResult?.status).toBe('completed')
+
+    // 只回传确认给主进程
+    expect(api.chat.confirmTaskPlan).toHaveBeenCalledTimes(1)
+    expect(api.chat.confirmTaskPlan).toHaveBeenCalledWith('plan-1', true)
+    // 关键回归护栏:渲染层【不得】自己执行
+    expect(api.task.execute).not.toHaveBeenCalled()
+    expect(store.pendingTaskPlan).toBeNull()
+    expect(store.showTaskConfirmDialog).toBe(false)
   })
 
-  it('confirmExecuteTask sets currentTaskResult error on failure', async () => {
+  it('confirmExecuteTask surfaces error when main process no longer awaits this plan', async () => {
     const store = useChatStore()
     store.pendingTaskPlan = {
       planId: 'plan-2',
@@ -574,12 +587,31 @@ describe('useChatStore', () => {
       steps: [],
       riskLevel: 'low',
     }
-    api.task.execute.mockResolvedValue({ success: false, error: 'boom' })
+    // 主进程已超时/已取消 → 确认过期
+    api.chat.confirmTaskPlan.mockResolvedValue({ success: false, error: '确认已过期,请重新发起' })
     await store.confirmExecuteTask()
     expect(store.currentTaskResult?.success).toBe(false)
     expect(store.currentTaskResult?.status).toBe('failed')
-    expect(store.currentTaskResult?.error).toBe('boom')
+    expect(store.currentTaskResult?.error).toBe('确认已过期,请重新发起')
     expect(store.pendingTaskPlan).toBeNull()
+  })
+
+  it('rejectExecuteTask relays refusal so main process does not wait for timeout', async () => {
+    const store = useChatStore()
+    store.pendingTaskPlan = {
+      planId: 'plan-3',
+      instruction: '要拒绝的任务',
+      steps: [],
+      riskLevel: 'low',
+    }
+    api.chat.confirmTaskPlan.mockResolvedValue({ success: true, data: false })
+
+    await store.rejectExecuteTask()
+
+    expect(api.chat.confirmTaskPlan).toHaveBeenCalledWith('plan-3', false)
+    expect(api.task.execute).not.toHaveBeenCalled()
+    expect(store.pendingTaskPlan).toBeNull()
+    expect(store.showTaskConfirmDialog).toBe(false)
   })
 
   it('confirmExecuteTask is a no-op when no pending plan', async () => {

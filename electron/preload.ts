@@ -122,6 +122,12 @@ const IpcChannels = {
   EXECUTION_MODE_CHECK: 'execution:mode:check',
   EXECUTION_MODE_CANCEL: 'execution:mode:cancel',
 
+  // 【M1-D】任务计划确认 —— 主进程生成计划后 emit,渲染层弹确认框
+  CHAT_ON_TASK_PLAN: 'chat:onTaskPlan',
+  CHAT_ON_TASK_STEP: 'chat:onTaskStep',
+  CHAT_ON_AGENT_EVENT: 'agent:onEvent',
+  CHAT_TASK_CONFIRM: 'chat:task:confirm',
+
   // 任务日志
   TASK_LOG_GET: 'task:log:get',
   TASK_LOG_QUERY: 'task:log:query',
@@ -816,6 +822,38 @@ const electronAPI = {
       ipcRenderer.on(IpcChannels.CHAT_ON_MESSAGE, handler);
       return () => ipcRenderer.removeListener(IpcChannels.CHAT_ON_MESSAGE, handler);
     },
+
+    /**
+     * 【M1-D】订阅任务执行计划 —— 主进程在执行前 emit,渲染层弹确认框。
+     * 这条通道此前完全不存在,导致 Chat.vue 的确认弹窗成为死代码:
+     * showTaskConfirmDialog 从未被置 true,用户永远看不到。
+     */
+    onTaskPlan: (callback: (plan: any) => void) => {
+      const handler: IpcCallback = (_, plan) => callback(plan);
+      ipcRenderer.on(IpcChannels.CHAT_ON_TASK_PLAN, handler);
+      return () => ipcRenderer.removeListener(IpcChannels.CHAT_ON_TASK_PLAN, handler);
+    },
+
+    /** 【M1-D】订阅单步状态流 —— 让执行过程实时可见(而非一行静态文字挂到结束) */
+    onTaskStep: (callback: (data: any) => void) => {
+      const handler: IpcCallback = (_, data) => callback(data);
+      ipcRenderer.on(IpcChannels.CHAT_ON_TASK_STEP, handler);
+      return () => ipcRenderer.removeListener(IpcChannels.CHAT_ON_TASK_STEP, handler);
+    },
+
+    /** 【M1-C】订阅 agent 运行事件(tool_call / tool_result)—— 工具调用可视化 */
+    onAgentEvent: (callback: (data: any) => void) => {
+      const handler: IpcCallback = (_, data) => callback(data);
+      ipcRenderer.on(IpcChannels.CHAT_ON_AGENT_EVENT, handler);
+      return () => ipcRenderer.removeListener(IpcChannels.CHAT_ON_AGENT_EVENT, handler);
+    },
+
+    /**
+     * 【M1-D】回传用户对执行计划的确认/拒绝。
+     * 执行权在主进程 —— 这里只是把用户的决定送回去,绝不自己执行。
+     */
+    confirmTaskPlan: (planId: string, confirmed: boolean): Promise<IpcResponse<boolean>> =>
+      ipcRenderer.invoke(IpcChannels.CHAT_TASK_CONFIRM, { planId, confirmed }),
 
     onConversationUpdate: (callback: (data: { conversation: Conversation }) => void) => {
       const handler: IpcCallback = (_, data) => callback(data);

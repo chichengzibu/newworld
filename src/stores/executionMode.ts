@@ -92,11 +92,10 @@ export interface ConfirmDialogState {
 const electronAPI = window.electronAPI as any;
 
 export const useExecutionModeStore = defineStore('executionMode', () => {
-  // 【M1-E 安全修正】默认值由 'craft'(权限内自动执行)改为 'plan'。
-  // 原默认是全量模式,而 UI 从不显示当前模式 —— 用户在整个产品里看不到
-  // "我现在处于自动执行"这个事实,等于静默执行。plan 模式下 agent 仍会执行,
-  // 但经用户确认;'safe' 才是纯对话。理由见 docs/deviation-ledger.md。
-  const currentMode = ref<ExecutionMode>('plan');
+  // 【M1-E】默认值保持 'craft'。UI 已改为常驻可见的模式切换器,
+  // 用户随时能看到自己处于什么模式 —— 可见性解决了"不知情"的问题,
+  // 因此不再强制改变默认行为(用户已明确选择保留 craft 默认)。
+  const currentMode = ref<ExecutionMode>('craft');
   const loading = ref(false);
 
   const currentModeConfig = computed(() =>

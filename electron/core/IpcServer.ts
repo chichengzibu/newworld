@@ -1086,6 +1086,7 @@ export class IpcServer {
     ipcMain.handle('execution:mode:get', () => {
       try {
         const configStore = ConfigStore.getInstance();
+        // 【M1-E】默认保持 craft;与 ChatManager.getExecutionMode 保持单一真源
         const mode = configStore.get('execution.mode') || 'craft';
         return { success: true, data: mode };
       } catch (error) {
@@ -1106,9 +1107,25 @@ export class IpcServer {
       }
     });
 
+    /**
+     * 【M1-D】用户确认执行计划 —— 渲染层确认框的确认/拒绝回传。
+     * 此前渲染层的确认弹窗是死代码(无此通道),LLM 生成步骤后立即执行。
+     * 未知 planId 一律返回失败(fail-safe)。
+     */
+    ipcMain.handle('chat:task:confirm', (_, payload: { planId: string; confirmed: boolean }) => {
+      try {
+        const ok = ChatManager.getInstance().resolveTaskConfirmation(payload?.planId, !!payload?.confirmed);
+        return { success: ok };
+      } catch (error) {
+        this.log.error('chat:task:confirm 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
     ipcMain.handle('execution:mode:check', (_, operation: string, _params: any) => {
       try {
         const configStore = ConfigStore.getInstance();
+        // 【M1-E】默认保持 craft;UI 已常驻显示当前模式,用户知情
         const mode = configStore.get('execution.mode') || 'craft';
         const permissionManager = PermissionManager.getInstance();
 
