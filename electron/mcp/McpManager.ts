@@ -196,11 +196,13 @@ export class McpManager {
     try {
       await transport.start();
       // initialize OK → 取 tools/list
-      const listResp = await transport.request<{ tools: McpTool[] }>('tools/list', {});
+      const listResp = await transport.request('tools/list', {});
       if ('error' in listResp) {
         throw new Error(`tools/list error: ${(listResp.error as { message: string }).message}`);
       }
-      instance.tools = listResp.result?.tools ?? [];
+      // JsonRpcSuccessResponse.result 是 unknown —— 显式收窄为 tools 数组
+      const listResult = listResp.result as { tools?: McpTool[] } | undefined;
+      instance.tools = Array.isArray(listResult?.tools) ? listResult.tools : [];
       instance.state = 'ready';
       log.info(
         `[McpManager] server "${config.name}" ready, ${instance.tools.length} tools: ${instance.tools.map((t) => t.name).join(', ')}`

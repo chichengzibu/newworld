@@ -292,7 +292,21 @@ app.whenReady().then(async () => {
         if (!cfg.enabled) continue;
         // 不 await, 让它们在后台启动; UI 可以通过 mcp:list-servers 看状态
         mgr.startServer(cfg).then(
-          (status) => log.info('[main] MCP server started', { name: cfg.name, state: status.state, tools: status.toolCount }),
+          async (status) => {
+            log.info('[main] MCP server started', { name: cfg.name, state: status.state, tools: status.toolCount });
+            // 【M3-A】server 就绪后把它的工具同步进 agent 工具表 ——
+            // 否则 MCP 能力只在 IPC 层,LLM 永远看不到(装了 server 也白装)。
+            if (status.state === 'ready') {
+              try {
+                const res = await LlmAgentBrain.getInstance().syncMcpTools();
+                if (res.added.length > 0) {
+                  log.info('[main] MCP 工具已接入 agent', { added: res.added.length, total: res.added.length + res.skipped.length });
+                }
+              } catch (e) {
+                log.warn('[main] MCP 工具同步失败(非致命)', e);
+              }
+            }
+          },
           (err) => log.warn('[main] MCP server start failed', { name: cfg.name, err: err?.message ?? String(err) })
         );
       }

@@ -22,6 +22,7 @@ import { ConversationExporter } from '../utils/ConversationExporter';
 import { OpenClawGateway } from '../openclaw/OpenClawGateway';
 import { OpenClawExecutor } from '../openclaw/OpenClawExecutor';
 import { McpManager } from '../mcp/McpManager';
+import { LlmAgentBrain } from '../agent/LlmAgentBrain';
 import type {
   McpServerConfig,
   McpServerStatus,
@@ -1622,6 +1623,12 @@ export class IpcServer {
           this.log.error('mcp:start-server server not ready', err);
           throw err;
         }
+        // 【M3-A】server 就绪 → 工具同步进 agent,LLM 才能用上
+        try {
+          await LlmAgentBrain.getInstance().syncMcpTools();
+        } catch (e) {
+          this.log.warn('mcp:start-server 工具同步失败(非致命)', e);
+        }
         return { success: true, data: status };
       } catch (error) {
         this.log.error('mcp:start-server 失败', error);
@@ -1634,6 +1641,14 @@ export class IpcServer {
       try {
         const mgr = McpManager.getInstance();
         await mgr.stopServer(name);
+        // 【M3-A】server 停了,它提供的工具也要从 agent 工具表移除 ——
+        // 否则 LLM 会一直尝试调用一个已经死掉的工具。
+        try {
+          const removed = LlmAgentBrain.getInstance().removeMcpToolsOfServer(name);
+          if (removed > 0) this.log.info('mcp:stop-server 已移除 agent 工具', { name, removed });
+        } catch (e) {
+          this.log.warn('mcp:stop-server 工具移除失败(非致命)', e);
+        }
         return { success: true };
       } catch (error) {
         this.log.error('mcp:stop-server 失败', error);

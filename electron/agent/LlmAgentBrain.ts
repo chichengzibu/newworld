@@ -16,6 +16,7 @@ import { LlmClient } from '../llm/LlmClient'
 import { BUILTIN_TOOLS, toolsToLlmSchema } from './tools'
 import { planContext, DEFAULT_BUDGET, type ContextBudget, type ContextMessage } from './ContextEngine'
 import { ToolGate, type ToolGateDecision } from './ToolGate'
+import { listMcpTools, syncMcpTools, MCP_NAME_SEPARATOR } from './McpToolAdapter'
 import type { PiPiTool, ToolExecResult } from './tools'
 import type { LlmMessage, LlmToolCall, LlmStreamChunk } from '../llm/types'
 import type { AgentBrain, AgentContext, Decision, ToolCall, ToolResult, SubTask, SubAgent } from '../contracts/types'
@@ -135,6 +136,40 @@ export class LlmAgentBrain implements AgentBrain {
     for (const t of BUILTIN_TOOLS) this.tools.set(t.metadata.name, t)
     this.spawnCtx = spawnCtx
     this.log.info(`LlmAgentBrain v0.1 初始化: ${this.tools.size} tools${spawnCtx ? ` (子代理 parent=${spawnCtx.parentRunId}, depth=${spawnCtx.depth})` : ' (单例)'}`)
+  }
+
+  /**
+   * 【M3-A】把 MCP server 的工具同步进 agent 工具表。
+   *
+   * 此前 MCP 能力只在 IPC 层,LLM 完全看不到 —— 用户装了 MCP server 也白装。
+   * 同步后 MCP 工具与内置工具走同一套 function calling / 权限门 / 可视化。
+   *
+   * 时机:由调用方(main 启动后 / MCP server 启停后)显式触发,
+   * 不在构造器里做 —— 构造器不能 await,且 MCP server 此时可能还没起。
+   *
+   * 内置工具优先:同名时跳过 MCP 版本,避免第三方 server 意外覆盖核心能力。
+   */
+  public async syncMcpTools(): Promise<{ added: string[]; skipped: string[] }> {
+    const mcpTools = await listMcpTools()
+    const res = syncMcpTools(this.tools, mcpTools)
+    if (res.added.length > 0) {
+      this.log.info(`LlmAgentBrain: 已接入 ${res.added.length} 个 MCP 工具 (当前共 ${this.tools.size} 个)`)
+    }
+    return res
+  }
+
+  /** 移除某个 server 的全部 MCP 工具(server 停用时调用) */
+  public removeMcpToolsOfServer(server: string): number {
+    const prefix = `${server}${MCP_NAME_SEPARATOR}`
+    let removed = 0
+    for (const name of Array.from(this.tools.keys())) {
+      if (name.startsWith(prefix)) {
+        this.tools.delete(name)
+        removed++
+      }
+    }
+    if (removed > 0) this.log.info(`LlmAgentBrain: 已移除 server ${server} 的 ${removed} 个 MCP 工具`)
+    return removed
   }
 
   public static getInstance(): LlmAgentBrain {
