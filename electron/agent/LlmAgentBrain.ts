@@ -18,6 +18,7 @@ import { planContext, DEFAULT_BUDGET, type ContextBudget, type ContextMessage } 
 import { ToolGate, type ToolGateDecision } from './ToolGate'
 import { listMcpTools, syncMcpTools, MCP_NAME_SEPARATOR } from './McpToolAdapter'
 import { RetryPolicy } from './RetryPolicy'
+import { SkillLoader } from '../skill/SkillLoader'
 import type { PiPiTool, ToolExecResult } from './tools'
 import type { LlmMessage, LlmToolCall, LlmStreamChunk } from '../llm/types'
 import type { AgentBrain, AgentContext, Decision, ToolCall, ToolResult, SubTask, SubAgent } from '../contracts/types'
@@ -27,12 +28,13 @@ const MAX_ITERATIONS = 10
 const MAX_SPAWN_DEPTH = 1
 const DEFAULT_MODEL = 'qwen3.5:9b' // M1 v0.1 default: 本地 ollama, tool-capable
 
-const SYSTEM_PROMPT = `你是 PiPiClaw 代码助手 (M1 v0.1), 跟 ClaudeCode 一样能用 5 个工具:
+const SYSTEM_PROMPT = `你是 PiPiClaw 代码助手, 跟 ClaudeCode 一样能用 6 个工具:
 - Read: 读文件 (file_path, encoding?)
 - Edit: 精确编辑文件 (file_path, old_string, new_string, replace_all?)
 - Bash: 跑命令 (command, args?, cwd?, timeout_ms?)
 - Glob: 文件匹配 (pattern, cwd?)
 - Grep: 内容搜索 (pattern, cwd?, include?)
+- load_skill: 加载某个技能的完整操作说明 (skill_id)
 
 工作准则:
 1. 优先用工具拿真实数据, 不要靠记忆编
@@ -40,7 +42,8 @@ const SYSTEM_PROMPT = `你是 PiPiClaw 代码助手 (M1 v0.1), 跟 ClaudeCode �
 3. Bash 走白名单, 不在白名单的命令会拒绝
 4. 任务完成直接给最终答复, 不要无谓地继续调工具
 5. 答复简洁, 中文, 1-3 句能说清就不啰嗦
-6. 路径默认是 sandbox 内 (用户数据隔离), 不要试图读 ~/.ssh 或 C:\\Windows`
+6. 路径默认是 sandbox 内 (用户数据隔离), 不要试图读 ~/.ssh 或 C:\\Windows
+7. 若系统提示里有"可用技能"清单, 且某技能与用户需求相关, 先调 load_skill 拿到它的步骤再动手, 不要凭猜测执行`
 
 /** 单次 think run 的事件回调 (供 IPC / ChatManager 订阅) */
 export type LlmAgentEvent =
@@ -290,9 +293,23 @@ export class LlmAgentBrain implements AgentBrain {
     // #006.5 R-1 (休眠 brain 链, W5 接线后生效): memoryContext 显式参数注入位 —
     //   与 history/checkpoint 同模式 (brain 无状态, 参数透传不自存);
     //   拼接为系统提示词的固定追加段 (非覆盖, 不改变 SYSTEM_PROMPT 本体)
-    const systemPrompt = (opts.memoryContext && opts.memoryContext.trim())
-      ? `${opts.systemPrompt ?? SYSTEM_PROMPT}\n\n相关记忆 (管线召回, stub 口径):\n${opts.memoryContext.trim()}`
-      : (opts.systemPrompt ?? SYSTEM_PROMPT)
+    const basePrompt = opts.systemPrompt ?? SYSTEM_PROMPT
+    // 【M4-A】L1 渐进披露:技能摘要常驻注入 system prompt。
+    // 依据 Anthropic Agent Skills 规范 —— description 本身就是路由规则,
+    // 模型看到摘要后自己决定是否调 load_skill 取正文(L2)。
+    // 旧实现是在代码里做匹配(技能>5 个时串行 N 次 LLM 调用),既慢又不准。
+    let systemPrompt = basePrompt
+    try {
+      const skillSummaries = SkillLoader.getInstance().getSkillSummaries()
+      if (skillSummaries) {
+        systemPrompt += `\n\n可用技能(相关时用 load_skill 加载完整说明):\n${skillSummaries}`
+      }
+    } catch (e) {
+      this.log.warn('LlmAgentBrain: 技能摘要注入失败(不阻断)')
+    }
+    if (opts.memoryContext && opts.memoryContext.trim()) {
+      systemPrompt += `\n\n相关记忆 (管线召回, stub 口径):\n${opts.memoryContext.trim()}`
+    }
     const selectedToolNames = opts.tools ?? Array.from(this.tools.keys())
     const selectedTools = selectedToolNames
       .map(n => this.tools.get(n))

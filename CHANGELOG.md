@@ -2,6 +2,71 @@
 
 All notable changes to PiPiClaw will be documented in this file.
 
+## [Unreleased] - 2026-10-25 (W5 接线批 — 能力已写就,从未接线)
+
+> 这一批不是新功能,是**把早已写好但从未接上生产路径的能力接通**。
+> 审计发现 `LlmAgentBrain` 的 tool-call 循环完整可用,却零生产调用方;
+> Hermes 学习系统有 4 处独立断点,闭环 0% 可达。
+> 详见 `docs/NOVA-#008-m4-skill-progressive-disclosure-design.md` 与 `docs/deviation-ledger.md` DEV-042~048。
+
+### 🔌 Agent 执行内核接线
+
+- **tool loop 接入生产链路** — `dispatchToAgent` 此前只 log decision 就丢弃,
+  且零调用方;现 `sendMessage` 优先路由到 agent loop,`handled: false` 一律回落旧管道
+- **token 记账** — `run()` 返回类型新增 `totalTokens`(此前拿到即丢,无出口)
+- **工具调用可视化** — 10 种 agent 事件此前零订阅者,现经中继关联会话后广播到渲染层,
+  Chat 里能看到「读了哪个文件 / 跑了什么命令 / 哪一步失败」
+- **执行确认闸门** — 渲染层的确认弹窗此前是死代码,LLM 生成步骤后【立即执行】;
+  现计划模式下先展示计划、用户确认后才执行
+- **执行模式可见** — safe / plan / craft 三档常驻输入区,切到全量模式需二次确认
+
+### 🔒 安全
+
+- **工具权限门 ToolGate** — `EditTool` 标注了 `requiresPermission` 但 run loop 从不读取,
+  写文件零确认;现统一调度,敏感路径硬拒,拿不准一律拒绝
+- **路径逃逸修复** — `rm -rf ~/.ssh` 的路径藏在 Bash 的 args 数组里,原检查只认字符串键
+  → 已改为扁平化扫描所有参数
+
+### ⚙️ 上下文管理
+
+- **ContextEngine 三级降级** — 此前 run 内 `messages` 只增不减,10 轮 × Read 200KB 必然溢出;
+  现按预算裁剪 / 摘要 / 中止,降级在调 LLM 之前而非溢出之后
+
+### 🔁 可靠性
+
+- **重试 + full-jitter 退避 + 熔断** — 单次 LLM 失败(429/5xx/网络抖动)此前整个多轮 run 直接崩;
+  现可重试错误走退避重试,不可重试错误立即失败,持续故障时熔断开闸
+- **错误分类修正** — 原实现用 `includes('rate')` 判定限流,会误匹配
+  generate / moderate / accurate;改为状态码优先
+
+### 🔌 MCP 生态
+
+- **MCP 工具接入 agent 工具集** — `McpManager` 此前只挂 IPC 层,LLM 调不到任何 MCP 工具
+  (装了 server 也白装);现 MCP 工具与内置工具走同一套 function calling / 权限门 / 可视化
+
+### 🧠 技能系统渐进披露
+
+依据 Anthropic Agent Skills 规范重做:
+
+- **L1 常驻** — 技能的 `name` + `description` + `when_to_use` 始终可见,它本身就是路由依据
+- **L2 按需** — 新增 `load_skill` 工具,模型自己决定何时加载正文
+- **L3 资源** — `references/` `scripts/` `assets/` 按需 Read / Bash
+- **匹配不再在代码里做** — 此前技能 >5 个时对每个串行发一次 LLM 调用(N 次往返);
+  现改为单次批量排序,匹配决策交给模型
+- **格式对齐规范** — `SKILL.md` + frontmatter(`name`/`description`/`when_to_use`),
+  修复「生成器与解析器互不兼容」导致的自学习技能从未被真正加载
+
+### 🐛 修复
+
+- `InstructionGenerator` 漏 `await` → 每轮 systemPrompt 注入字面量 `[object Promise]`
+- 技能保存目录双源(写 `appPath/../skills` 读 `userData/skills`)→ 自学习技能永远扫不到
+- 提案订阅用 `window.require`(`contextIsolation: true` 下恒 undefined)→ 横幅不可能出现
+- `stdio.ts` 缺 `kill()` → MCP server 初始化超时时子进程泄漏
+
+### 📊 验证
+
+vitest 106 files / 1253 passed / 0 FAIL · vue-tsc 0 error · 后端 tsc 30(= 存量基线)
+
 ## [4.5.0-alpha] - 2026-08-06 (LlmAgentBrain v0.1 + MCP PoC + P0 安全,M1)
 
 > M1 阶段总评 6.5/10 → 7.5/10 (verifier CONDITIONAL PASS)

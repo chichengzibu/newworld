@@ -9,6 +9,7 @@ export { EditTool, EditToolMetadata } from './EditTool'
 export { BashTool, BashToolMetadata } from './BashTool'
 export { GlobTool, GlobToolMetadata } from './GlobTool'
 export { GrepTool, GrepToolMetadata } from './GrepTool'
+export { LoadSkillTool, LoadSkillToolMetadata } from './LoadSkillTool'
 export type { PiPiTool, ToolExecResult } from './Tool'
 
 import { ReadTool } from './ReadTool'
@@ -16,15 +17,18 @@ import { EditTool } from './EditTool'
 import { BashTool } from './BashTool'
 import { GlobTool } from './GlobTool'
 import { GrepTool } from './GrepTool'
+import { LoadSkillTool } from './LoadSkillTool'
 import type { PiPiTool } from './Tool'
 
-/** 5 工具默认实例数组 — LlmAgentBrain / ToolRegistry 用 */
+/** 6 工具默认实例数组 — LlmAgentBrain / ToolRegistry 用
+ *  (M4-A 新增 load_skill:渐进披露的 L2 加载入口) */
 export const BUILTIN_TOOLS: PiPiTool[] = [
   new ReadTool(),
   new EditTool(),
   new BashTool(),
   new GlobTool(),
   new GrepTool(),
+  new LoadSkillTool(),
 ]
 
 /** 把 PiPiTool 列表转成 OpenAI-style LlmTool[] (LlmClient.chat.tools 字段用) */

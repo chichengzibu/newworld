@@ -28,6 +28,7 @@ import {BrowserWindow} from 'electron';
 import { LogManager } from '../core/LogManager';
 import { ConfigStore } from '../core/ConfigStore';
 import { SkillLoader } from '../skill/SkillLoader';
+import { SkillManager } from '../skill/SkillManager';
 import { ModelManager } from '../models/ModelManager';
 
 /**
@@ -584,14 +585,34 @@ export class SelfLearner {
   /**
    * 生成完整的技能文档
    */
+  /**
+   * 生成 skill.md 全文。
+   *
+   * 【M4-A 修正 —— 格式对齐 Anthropic Agent Skills 规范】
+   * 原实现用纯中文小节(`# 名称` / `## 描述` / `## 触发条件` / `## 关键词` /
+   * `## 操作步骤` / `## 示例`)。而本项目自己的解析器 parseSkillMd 有三个误判:
+   *   1. `## 触发条件` 与 `## 触发关键词` 落进同一分支 → 整句触发条件被当成一个"关键词"
+   *   2. `## 示例` 不匹配任何分支 → 示例指令被当成一条操作步骤
+   *   3. `## 关键词` 侥幸落在 keywords,但语义已错位
+   * 这意味着"生成 → 加载"链路从未被端到端跑通过 —— 生成器与解析器互不兼容。
+   *
+   * 现改为 frontmatter 格式(Anthropic 规范 + 本项目解析器都认):
+   *   frontmatter: name / description / when_to_use
+   *   body: 关键词、操作步骤、示例、陷阱
+   * 这样生成器与解析器用同一套语义,链路真正闭合。
+   */
   private generateFullSkillInstructions(
     analysisResult: SkillAnalysisResult,
     example: string,
     steps: string[]
   ): string {
-    let instructions = `# ${analysisResult.name}\n\n`;
-    instructions += `## 描述\n${analysisResult.description}\n\n`;
-    instructions += `## 触发条件\n${analysisResult.triggerCondition}\n\n`;
+    const escape = (v: string): string => String(v ?? '').replace(/\r?\n/g, ' ').trim();
+    let instructions = '---\n';
+    instructions += `name: ${escape(analysisResult.name)}\n`;
+    instructions += `description: ${escape(analysisResult.description)}\n`;
+    // when_to_use 是规范里的路由信号 —— 模型的匹配依据
+    instructions += `when_to_use: ${escape(analysisResult.triggerCondition)}\n`;
+    instructions += '---\n\n';
     instructions += `## 关键词\n`;
     analysisResult.keywords.forEach(keyword => {
       instructions += `- ${keyword}\n`;
@@ -601,7 +622,7 @@ export class SelfLearner {
       instructions += `${index + 1}. ${step}\n`;
     });
     instructions += `\n## 示例\n${example}\n`;
-    
+
     return instructions;
   }
 
@@ -664,6 +685,57 @@ export class SelfLearner {
   }
 
   /**
+   * 【M4-A】批量技能排序 —— 单次 LLM 调用返回相关技能 id 列表。
+   *
+   * 【为什么加这个】
+   * 旧的 checkSkillMatch 是"一个技能一次 LLM 调用"。N 个技能 = N 次往返,
+   * 技能一多(比如 20 个)每次规划都要等 20 个网络往返,而结果只是拿到
+   * 一堆 true/false。批量一次调用把成本降到 1/N,且能得到【排序】而非
+   * 二元判断 —— 旧实现取前 3 个时,顺序其实是遍历顺序,不是相关度顺序。
+   *
+   * 依据 Anthropic Agent Skills 的渐进披露:匹配决策本就该交给模型
+   * (它比关键词更懂用户意图),我们只需给它一张技能清单和用户输入。
+   *
+   * @param userInstruction 用户当前输入
+   * @param skillList 形如 "- id: 描述 (适用:...)" 的清单行
+   * @returns 按相关度降序的技能 id 数组(解析失败返回空数组)
+   */
+  public async rankSkillsByRelevance(
+    userInstruction: string,
+    skillList: string,
+  ): Promise<string[]> {
+    try {
+      const enabledProviders = this.modelManager.getEnabledProviders();
+      if (enabledProviders.length === 0) return [];
+
+      const provider = enabledProviders[0];
+      const modelId = provider.defaultModel || provider.models[0]?.id;
+      if (!modelId) return [];
+
+      const prompt = `用户当前指令：${userInstruction}
+
+可用技能清单：
+${skillList}
+
+请判断哪些技能与该指令相关,并按相关度从高到低排列。
+只输出技能 id,每行一个,最多 5 个,不要输出任何其他文字。
+若都不相关,输出 NONE。`;
+
+      const response = await this.makeChatCompletionRequest(provider, modelId, prompt);
+      if (!response) return [];
+
+      return response
+        .split('\n')
+        .map(l => l.trim().replace(/^[-*\d.\s]+/, '').replace(/^['"]|['"]$/g, '').trim())
+        .filter(l => l && l.toUpperCase() !== 'NONE')
+        .slice(0, 5)
+    } catch (error) {
+      this.log.warn('[SelfLearner] 批量技能排序失败', error);
+      return []
+    }
+  }
+
+  /**
    * 检查新提案是否与现有技能重复
    */
   private async checkDuplicateSkill(proposal: SkillProposal): Promise<boolean> {
@@ -714,7 +786,18 @@ export class SelfLearner {
     let needsRestart = false;
     
     try {
-      const skillsDir = path.join(getHost().getAppPath(), '..', 'skills');
+      /**
+       * 【M4-A 修复 —— 读写目录不一致】
+       * 此前写 `getHost().getAppPath() + '/../skills'`(app 安装目录的兄弟目录,
+       * Windows 打包后通常在 Program Files → 只读),而 SkillLoader 读
+       * `userData/skills`。两个完全不同的路径 —— 保存的技能【永远扫不到】,
+       * 且大概率直接 EACCES 抛错。
+       *
+       * 现统一走 SkillManager.getSkillsDir() —— 该方法注释里本就写明
+       * "路径单点 — 其它模块应使用这个而非自己 join(userData,'skills')"。
+       * 自学习保存的技能因此能被 SkillLoader 正常加载(热加载也才真正生效)。
+       */
+      const skillsDir = SkillManager.getSkillsDir();
       let skillDir = path.join(skillsDir, proposal.id);
       
       // 检查目录是否已存在，如果存在则添加时间戳后缀
@@ -729,8 +812,8 @@ export class SelfLearner {
       // 确保目录存在（递归创建）
       fs.mkdirSync(skillDir, { recursive: true });
       
-      // 写入 skill.md
-      const skillMdPath = path.join(skillDir, 'skill.md');
+      // 写入 SKILL.md(Anthropic 规范的文件名;SkillLoader 两者都认,优先大写)
+      const skillMdPath = path.join(skillDir, 'SKILL.md');
       fs.writeFileSync(skillMdPath, proposal.fullInstructions, 'utf-8');
       
       // 调用 SkillLoader 重新加载技能（热加载）

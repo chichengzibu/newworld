@@ -447,3 +447,67 @@
 - **以上电池 hash 链、电池状态、DEV 索引、都为本 commit 实护。本 commit 为 M4 关单 commit、以下发入 W5/⑦，、M6 问题于 DEV-040：re-home 。
 
 > **注**：`DEV-015` 空隖，保留为未来批次预留（终身不复用规则：已分配的 ID 即使删除也不回收）。
+
+---
+
+## W5 接线批偏差登记（2026-10-21 ~ 2026-10-25）
+
+> 本批为「能力已写就、从未接线」整改批。审计发现的三条断裂带（执行带 / 学习带 / 流程带）
+> 中，学习带（Hermes）的 4 处断点在本批一次性修复。
+> 编号自 DEV-042 起，按台账「终身唯一、一经分配永不复用」规则。
+
+| ID | 状态 | 摘要 |
+|---|---|---|
+| DEV-042 | 已修 | Hermes 学习带断点 · ①`triggerCondition` 恒 undefined（SkillState 接口无该字段、parseSkillMd 从不设置 → 语义匹配拿字符串「无」作对照）②skills 写 `appPath/../skills`（Program Files 只读）而读 `userData/skills`（两个不同路径 → 保存的技能永远扫不到）③`SkillsView.vue` 用 `window.require('electron').ipcRenderer` 订阅，而渲染窗口 `contextIsolation: true` → 订阅永远注册不上，提案横幅不可能出现 ④`InstructionGenerator.ts:256` 漏 `await` → systemPrompt 每轮注入字面量 `[object Promise]` |
+| DEV-043 | 已修 | 技能系统渐进披露改造 · 旧实现：技能 ≤5 个全量注入正文；>5 个则**对每个技能串行发一次 LLM 调用**（N 次网络往返）且传入的 triggerCondition 恒 undefined，匹配质量接近随机。现按 Anthropic Agent Skills 规范改为三层：L1 `name+description+when_to_use` 常驻（模型的路由依据）、L2 正文经 `load_skill` 工具按需加载、L3 `references/`/`scripts/` 按需 Read/Bash |
+| DEV-044 | 已修 | 技能生成器与解析器格式不兼容 · 生成器写 `## 触发条件`+`## 关键词`，解析器把两者落进同一分支（整句触发条件被当成一个「关键词」）、`## 示例` 不匹配任何分支（示例指令被当成一条操作步骤）→ 「生成 → 加载」链路从未端到端跑通过。现生成器改为 frontmatter（`name`/`description`/`when_to_use`），解析器按规范区分 触发条件/关键词/步骤/示例/陷阱 |
+| DEV-045 | 已修 | 技能正文丢弃实质内容 · `generateFullInstructions` 只重排 name+description+steps，**丢弃 SKILL.md 里的 Gotchas 段、约束条件与正文段落**。团队实践称 Gotchas 是「任何技能里信噪比最高的内容」。现改为有 steps 时给摘要+完整正文，无 steps 时给完整正文 |
+| DEV-046 | 已修 | 技能存储目录双源 · `SkillManager.getSkillsDir()` 注释明写「路径单点 — 其它模块应使用这个」，但 `SelfLearner.saveSkillFromProposal` 自行 `join(getAppPath(),'..','skills')`。现统一走单点，自学习保存的技能可被 SkillLoader 正常加载（热加载才真正生效） |
+| DEV-047 | 已修 | 技能文件名单写 · Anthropic 规范用 `SKILL.md`，本项目历史用 `skill.md`。现两者都认、优先大写（规范优先）；自学习保存改用 `SKILL.md` |
+| DEV-048 | 已修 | `load_skill` 工具缺失 · LLM 此前对 skills 零感知（5 个内置工具里没有任何技能入口），技能能力无法被模型调用。现新增为第 6 个内置工具（只读，`requiresPermission: false`） |
+
+### DEV-042 明细（Hermes 学习带 4 断点，2026-10-25）
+
+- **来源**：`docs/audit/05-final-report.md` 审计 + 本轮代码实读复核
+- **断点 ①**：`SkillLoader.ts` 的 `getSkillContext` 调 `checkSkillMatch(userMessage, skill.name, (skill as any).triggerCondition || '无')` —— `SkillState` 接口根本没有 `triggerCondition` 字段，`parseSkillMd` 也从不设置 → 永远是 `undefined` → 实际拿字符串 `'无'` 与用户输入做「语义匹配」
+- **断点 ②**：`SelfLearner.ts:768` 写 `path.join(getHost().getAppPath(), '..', 'skills')`（app 安装目录的兄弟目录，Windows 打包后在 Program Files → 只读）；`SkillManager.getSkillsDir()` 读 `userData/skills`。两个完全不同的路径 → 保存的技能 `reloadSkills()` 永远扫不到，且大概率 EACCES 抛错
+- **断点 ③**：`SkillsView.vue:389` 用 `(window as any).require?.('electron')?.ipcRenderer` 订阅 `skills:new-proposal`；渲染窗口 `contextIsolation: true` + `nodeIntegration: false` → `window.require` 是 `undefined` → 订阅永不注册 → 「我分析了你的操作，自动生成了技能 X」的横幅不可能出现。修法：preload 暴露 `learning.onNewProposal`，并补 `getPendingProposal` 拉取（覆盖「用户打开页面之前就已生成提案」的场景）
+- **断点 ④**：`InstructionGenerator.ts:256` 调用 `async` 的 `getSkillContext` 时漏 `await` → 返回 Promise 对象 → L311 的 `if` 恒为真 → 模板插值把 Promise 字符串化 → systemPrompt 出现字面量 `[object Promise]`。**用户的每一轮对话都在向 LLM 发送这段垃圾**
+- **状态**：已修（4 处全修 + 回归测试）
+
+### DEV-043 明细（渐进披露改造，2026-10-25）
+
+- **依据**：Anthropic《Equipping agents for the real world with Agent Skills》+ Claude Code 工程团队博客 + 多个社区实践指南的共识
+- **旧实现的两个结构性问题**：
+  1. 匹配在**代码里**做，且技能 >5 个时对每个技能**串行发一次 LLM 调用**（N 次网络往返）。技能一多（比如 20 个），每次规划都要等 20 个往返，而产出只是一堆 true/false
+  2. 取「前 3 个完整注入」时，顺序其实是**遍历顺序**而非相关度顺序
+- **新实现**：
+  - L1 常驻：`getSkillSummaries()` 输出 `name + description (+when_to_use)`，注入 agent 的 system prompt
+  - L2 按需：模型判断相关时调 `load_skill` 工具 → `getSkillBody(id)` 返回正文
+  - L3 资源：`references/`/`scripts/`/`assets/` 目录存在性探测，正文里附使用指引（脚本优先跑而非让模型重写逻辑）
+  - 旧管道（InstructionGenerator → TaskExecutor，无 tool loop）保留 `getSkillContext`，但改为**单次** LLM 调用批量排序（`SelfLearner.rankSkillsByRelevance`），降级路径为纯关键词匹配
+- **状态**：已修
+
+### DEV-044 明细（生成器/解析器格式对齐，2026-10-25）
+
+- **来源**：`docs/audit/05-final-report.md`「Evolution 进化能力」段的读码发现
+- **原状**：生成器输出 `## 触发条件` 与 `## 关键词` 两个小节；解析器的分支判定是 `lower.includes('触发')` → 两者落进同一 `keywords` 分支；而 `## 示例` 不匹配任何分支 → `currentSection` 保持上一步的值 → 示例指令被当成一条操作步骤
+- **修法**：
+  - 生成器改输出 frontmatter（`name` / `description` / `when_to_use`），正文含 `## 关键词` / `## 操作步骤` / `## 示例`
+  - 解析器按小节标题精确分流：触发条件 / 关键词 / 步骤 / 示例 / 陷阱 / 其它（其它不再归入已知 section，避免污染）
+- **状态**：已修
+
+### 关单（W5 接线批 · M4-A 学习带，2026-10-25）
+
+- **范围**：DEV-042 ~ DEV-048（7 条）
+- **验证**：
+  - vue-tsc: 0 error
+  - vitest: Test Files 106 passed (106) / Tests 1253 passed | 14 skipped (1267) / 0 FAIL
+  - 后端 tsc（tsconfig.node.json）: 30 error（= 存量基线，零新增）
+- **新增测试**：
+  - `tests/unit/SkillLoaderProgressive.test.ts`（11 例）frontmatter 解析 / 三个小节误判修正 / 三层渐进披露 / 存储目录单点
+  - `tests/unit/LoadSkillTool.test.ts`（7 例）加载成功 / 不存在时失败并列出可用 / 缺参 / 只读 / 已注册 / 描述含「不要凭猜测」
+- **行为变更同步**：
+  - `tests/integration/agent-brain-poc.test.ts` 工具数断言 5 → 6
+  - `tests/unit/skills-h1-ui.test.ts` mock 从 `window.require` 改为 `electronAPI.learning.onNewProposal`
+  - `tests/unit/self-learner-loop.test.ts` 摘要断言现含触发条件（摘要新增 `- 触发条件:` 行）

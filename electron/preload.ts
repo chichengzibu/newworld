@@ -128,6 +128,9 @@ const IpcChannels = {
   CHAT_ON_AGENT_EVENT: 'agent:onEvent',
   CHAT_TASK_CONFIRM: 'chat:task:confirm',
 
+  // 【M4-A】技能提案通知 —— 主进程 emit,渲染层 SkillsView 订阅
+  SKILLS_NEW_PROPOSAL: 'skills:new-proposal',
+
   // 任务日志
   TASK_LOG_GET: 'task:log:get',
   TASK_LOG_QUERY: 'task:log:query',
@@ -1130,7 +1133,21 @@ const electronAPI = {
       ipcRenderer.invoke(IpcChannels.LEARNING_GET_PENDING_PROPOSAL),
 
     clearPendingProposal: (): Promise<IpcResponse<void>> =>
-      ipcRenderer.invoke(IpcChannels.LEARNING_CLEAR_PENDING_PROPOSAL)
+      ipcRenderer.invoke(IpcChannels.LEARNING_CLEAR_PENDING_PROPOSAL),
+
+    /**
+     * 【M4-A 修复】订阅新技能提案。
+     *
+     * 此前 SkillsView 用 `window.require('electron').ipcRenderer` 订阅
+     * 'skills:new-proposal',但渲染窗口是 contextIsolation: true +
+     * nodeIntegration: false —— window.require 是 undefined,订阅永远注册不上,
+     * 提案横幅永远不会出现。必须经 preload 暴露。
+     */
+    onNewProposal: (callback: (proposal: any) => void) => {
+      const handler: IpcCallback = (_, proposal) => callback(proposal);
+      ipcRenderer.on(IpcChannels.SKILLS_NEW_PROPOSAL, handler);
+      return () => ipcRenderer.removeListener(IpcChannels.SKILLS_NEW_PROPOSAL, handler);
+    }
   },
 
   // ========== Agent 能力域 (W3 新增) ==========

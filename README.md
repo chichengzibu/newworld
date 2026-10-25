@@ -19,6 +19,14 @@
 - **语义触发** - 自然语言匹配技能触发条件
 - **热加载** - 新增技能无需重启
 
+> **渐进披露的技能机制**（依据 Anthropic Agent Skills 规范）
+> - **L1 常驻** — 技能的 `name` + `description` + `when_to_use` 始终可见（约 100 token/技能），
+>   它本身就是模型的路由依据（description 写得含糊，技能就不会被触发）
+> - **L2 按需** — 模型判断相关时调 `load_skill` 工具加载完整正文
+> - **L3 资源** — `references/` `scripts/` `assets/` 按需 Read / Bash（优先跑脚本而非让模型重写逻辑）
+> - 技能文件为 `SKILL.md` + frontmatter（`name` / `description` / `when_to_use`），
+>   兼容旧的 `skill.md` 中文小节格式
+
 ### 🛠️ 技能管理
 - **技能导入** - 从文件或 URL 导入技能
 - **技能市场** - 浏览和使用社区技能
@@ -183,14 +191,23 @@ npm run build:win
 ```
 piclaw/
 ├── electron/              # 主进程代码
+│   ├── agent/           # Agent 执行内核
+│   │   ├── LlmAgentBrain.ts   # tool-call 循环(生产链路)
+│   │   ├── ContextEngine.ts   # 上下文预算 + 三级降级
+│   │   ├── ToolGate.ts        # 工具权限门(fail-safe)
+│   │   ├── McpToolAdapter.ts  # MCP 工具适配
+│   │   ├── RetryPolicy.ts     # 重试 + full-jitter 退避 + 熔断
+│   │   └── AgentEventRelay.ts # 运行事件中继(接会话归属)
 │   ├── chat/            # 聊天管理器
 │   ├── core/            # 核心基础设施
 │   ├── hermes/          # Hermes 记忆系统
 │   ├── learning/        # 自我学习引擎
+│   ├── mcp/             # MCP 客户端(stdio transport)
 │   ├── models/          # 模型管理
 │   ├── openclaw/        # OpenClaw 集成
 │   ├── permissions/     # 权限管理
-│   ├── skill/           # 技能加载器
+│   ├── platform/        # 平台抽象(win/mac/linux/ohos)
+│   ├── skill/           # 技能加载器(渐进披露)
 │   ├── task/            # 任务执行引擎
 │   ├── types/           # 类型定义
 │   ├── utils/           # 工具函数
@@ -198,6 +215,7 @@ piclaw/
 │   └── preload.ts       # 预加载脚本
 ├── src/                 # 渲染进程代码
 │   ├── components/      # Vue 组件
+│   │   ├── chat/            # 输入区 / 工具调用轨迹 / 思考块
 │   ├── views/           # 页面视图
 │   ├── stores/          # Pinia 状态管理
 │   ├── styles/          # 样式

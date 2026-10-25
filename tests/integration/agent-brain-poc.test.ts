@@ -294,12 +294,13 @@ describe('LlmAgentBrain v0.1 端到端 (mock LLM)', () => {
 })
 
 describe('LlmAgentBrain v0.1 工具列表 (5 工具)', () => {
-  it('listTools 返 5 工具 metadata (Read/Edit/Bash/Glob/Grep)', () => {
+  it('listTools 返 6 工具 metadata (Read/Edit/Bash/Glob/Grep/load_skill)', () => {
     const brain = LlmAgentBrain.getInstance()
     const tools = brain.listTools()
-    expect(tools).toHaveLength(5)
+    // 【M4-A】新增 load_skill —— 渐进披露的 L2 加载入口
+    expect(tools).toHaveLength(6)
     const names = tools.map(t => t.name).sort()
-    expect(names).toEqual(['Bash', 'Edit', 'Glob', 'Grep', 'Read'])
+    expect(names).toEqual(['Bash', 'Edit', 'Glob', 'Grep', 'Read', 'load_skill'])
     // 验证每个有 description + parameters
     for (const t of tools) {
       expect(t.description).toBeTruthy()

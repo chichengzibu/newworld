@@ -36,22 +36,29 @@ function epStub(name: string) {
   return { name, template: '<div><slot /></div>' }
 }
 
-let onCallback: ((event: any, proposal: any) => void) | null = null
+let onCallback: ((proposal: any) => void) | null = null
 
+/**
+ * 【M4-A】订阅方式已变 —— mock 随之更新。
+ *
+ * 此前 SkillsView 用 `window.require('electron').ipcRenderer` 订阅,
+ * 但渲染窗口是 contextIsolation: true,window.require 是 undefined,
+ * 订阅永远注册不上,提案横幅不可能出现。
+ * 现经 preload 暴露的 learning.onNewProposal 订阅。
+ */
 function installRequireMock() {
   const clearPendingSpy = vi.fn()
-  Object.defineProperty(window, 'require', {
-    configurable: true,
-    writable: true,
-    value: () => ({
-      ipcRenderer: {
-        on: (event: string, cb: any) => { if (event === 'skills:new-proposal') onCallback = cb },
-        removeAllListeners: () => undefined,
-      },
-    }),
-  })
   ;(window as any).electronAPI = {
-    learning: { clearPendingProposal: clearPendingSpy, saveSkillProposal: vi.fn().mockResolvedValue({ success: true }) },
+    learning: {
+      clearPendingProposal: clearPendingSpy,
+      saveSkillProposal: vi.fn().mockResolvedValue({ success: true }),
+      // 【M4-A】新订阅入口
+      onNewProposal: (cb: (proposal: any) => void) => {
+        onCallback = cb
+        return () => { onCallback = null }
+      },
+      getPendingProposal: vi.fn().mockResolvedValue({ success: true, data: null }),
+    },
     skills: { list: vi.fn().mockResolvedValue({ success: true, data: [] }), mergeCandidates: vi.fn(), performMerge: vi.fn() },
   }
   return clearPendingSpy
@@ -87,7 +94,7 @@ describe('#007 L6b: SkillsView H1 超期拒绝 (收到时刻判定 + 诚实文�
       id: 'p-stale', name: 'stale', description: 'd', triggerCondition: 'c',
       keywords: [], operationSteps: [], fullInstructions: '', createdAt: Date.now() - 31 * 60 * 1000,
     }
-    onCallback!(null, stale)
+    onCallback!(stale)
     await new Promise(r => setTimeout(r, 30))
     await new Promise(r => setTimeout(r, 30))
 
@@ -101,7 +108,7 @@ describe('#007 L6b: SkillsView H1 超期拒绝 (收到时刻判定 + 诚实文�
       id: 'p-fresh', name: 'fresh', description: 'd', triggerCondition: 'c',
       keywords: [], operationSteps: [], fullInstructions: '', createdAt: Date.now() - 5 * 60 * 1000,
     }
-    onCallback!(null, fresh)
+    onCallback!(fresh)
     await new Promise(r => setTimeout(r, 30))
 
     expect(warningMock).not.toHaveBeenCalled()

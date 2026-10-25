@@ -382,26 +382,39 @@ const handleMerge = async (candidate: any) => {
   }
 };
 
+/**
+ * 【M4-A 修复】订阅新技能提案。
+ *
+ * 此前用 `window.require('electron').ipcRenderer` 订阅 —— 但渲染窗口是
+ * contextIsolation: true + nodeIntegration: false,window.require 是
+ * undefined,订阅永远注册不上,提案横幅永远不会出现。
+ * 现经 preload 暴露的 learning.onNewProposal 订阅,并在卸载时正确退订
+ * (旧代码用 removeAllListeners,会误杀其他模块对同通道的监听)。
+ */
+let unsubscribeProposal: (() => void) | null = null;
+
 onMounted(() => {
   loadSkills();
-  
-  if (typeof window !== 'undefined' && (window as any).electronAPI) {
-    const ipcRenderer = (window as any).require?.('electron')?.ipcRenderer;
-    if (ipcRenderer) {
-      ipcRenderer.on('skills:new-proposal', (_event: any, proposal: SkillProposal) => {
-        handleNewProposal(proposal);
-      });
-    }
+
+  const api = (window as any).electronAPI;
+  if (api?.learning?.onNewProposal) {
+    unsubscribeProposal = api.learning.onNewProposal((proposal: SkillProposal) => {
+      handleNewProposal(proposal);
+    });
   }
+
+  // 【M4-A】补上"应用启动时已有待处理提案"的场景 ——
+  // 提案可能在用户打开本页之前就生成了,只靠实时订阅会漏。
+  api?.learning?.getPendingProposal?.().then((resp: any) => {
+    if (resp?.success && resp.data) {
+      handleNewProposal(resp.data as SkillProposal);
+    }
+  }).catch(() => { /* 无待处理提案是正常情况 */ });
 });
 
 onUnmounted(() => {
-  if (typeof window !== 'undefined' && (window as any).electronAPI) {
-    const ipcRenderer = (window as any).require?.('electron')?.ipcRenderer;
-    if (ipcRenderer) {
-      ipcRenderer.removeAllListeners('skills:new-proposal');
-    }
-  }
+  unsubscribeProposal?.();
+  unsubscribeProposal = null;
 });
 </script>
 
