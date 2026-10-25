@@ -130,8 +130,19 @@ describe('P3-T3.4: RetryPolicy 重试', () => {
     expect(calls).toBe(3) // 试了 3 次
   })
 
-  it('重试间隔递增(指数 backoff)', async () => {
-    const policy = new RetryPolicy({ maxAttempts: 3, baseDelayMs: 10, backoffMultiplier: 3 })
+  it('重试间隔在指数窗口内(full jitter)', async () => {
+    // 【M3-B 语义变更】退避从"纯指数值"改为"full jitter":
+    //   delay = random(0, min(base * multiplier^attempt, cap))
+    // 理由(业界实测):200 agent 规模下,纯指数退避会让重试聚成固定时间桶,
+    // retry storm 原样保留;full jitter 在整个窗口内均匀散开,尾延迟最优。
+    // 因此断言从"间隔必须 ≥ 指数值"改为"间隔必须落在指数窗口内"。
+    const baseDelayMs = 10
+    const backoffMultiplier = 3
+    const policy = new RetryPolicy({
+      maxAttempts: 3, baseDelayMs, backoffMultiplier,
+      // 固定随机源 → 确定性:window 内的中点
+      random: () => 0.5,
+    })
     const delays: number[] = []
     let lastT = Date.now()
     let calls = 0
@@ -148,9 +159,14 @@ describe('P3-T3.4: RetryPolicy 重试', () => {
     }
     expect(calls).toBe(3)
     expect(delays.length).toBe(2)
-    // 第 2 次间隔 >= 10ms, 第 3 次 >= 30ms
-    // (允许 timing jitter,放低阈值)
-    expect(delays[0]).toBeGreaterThanOrEqual(8)
-    expect(delays[1]).toBeGreaterThanOrEqual(25)
+    // 第 1 次退避窗口 = 10*3^0 = 10ms,随机 0.5 → 期望 ~5ms
+    // 第 2 次退避窗口 = 10*3^1 = 30ms,随机 0.5 → 期望 ~15ms
+    // 计时精度有限,放宽到窗口的一半以下即可
+    expect(delays[0]).toBeGreaterThanOrEqual(1)
+    expect(delays[0]).toBeLessThanOrEqual(10)
+    expect(delays[1]).toBeGreaterThanOrEqual(1)
+    expect(delays[1]).toBeLessThanOrEqual(30)
+    // 关键:full jitter 下第二次仍可能大于第一次(窗口更大),
+    // 但两次都必须落在各自窗口内 —— 这正是与纯指数的本质区别
   })
 })

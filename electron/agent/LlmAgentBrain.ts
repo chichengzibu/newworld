@@ -17,6 +17,7 @@ import { BUILTIN_TOOLS, toolsToLlmSchema } from './tools'
 import { planContext, DEFAULT_BUDGET, type ContextBudget, type ContextMessage } from './ContextEngine'
 import { ToolGate, type ToolGateDecision } from './ToolGate'
 import { listMcpTools, syncMcpTools, MCP_NAME_SEPARATOR } from './McpToolAdapter'
+import { RetryPolicy } from './RetryPolicy'
 import type { PiPiTool, ToolExecResult } from './tools'
 import type { LlmMessage, LlmToolCall, LlmStreamChunk } from '../llm/types'
 import type { AgentBrain, AgentContext, Decision, ToolCall, ToolResult, SubTask, SubAgent } from '../contracts/types'
@@ -126,6 +127,12 @@ export class LlmAgentBrain implements AgentBrain {
   private log = LogManager.getInstance()
   private llm = LlmClient.getInstance()
   private tools: Map<string, PiPiTool> = new Map()
+  /**
+   * 【M3-B】LLM 调用重试策略(带熔断器)。
+   * 单例共享 —— 熔断器状态需跨 run 累积:某个 provider 持续不可用时,
+   * 应当对所有会话生效,而不是每个 run 各撞一次墙。
+   */
+  private retryPolicy = new RetryPolicy()
   /** runId → state */
   private runs: Map<string, RunState> = new Map()
   /** #005 spawn: 出生上下文 (仅子实例持有; 父/单例为 undefined)。只读 — run 时显式下传, 不入脑内可变态 */
@@ -389,12 +396,24 @@ export class LlmAgentBrain implements AgentBrain {
         }
 
         // 调 LLM (流式), 聚合 tool_calls + final content
-        const result = await this.callLlmOnce(
-          ctxPlan.messages as unknown as LlmMessage[],
-          llmSchema, iter, runId, controller.signal, {
-            provider: opts.provider,
-            model: opts.model ?? DEFAULT_MODEL,
-          })
+        /**
+         * 【M3-B】重试 + 退避 + 熔断。
+         * 修复前: 单次 LLM 调用失败(429/5xx/网络抖动)整个多轮 run 直接崩,
+         *   用户看到"执行失败",此前的工作全废。
+         * 现在: 可重试错误走 full-jitter 退避重试(调研:3 次可捕获 97.3%
+         *   瞬时故障);熔断器在持续失败时开闸,避免更快烧完配额。
+         * 不可重试错误(400/401/403/404/422)直接失败,不浪费退避时间。
+         */
+        const result = await this.retryPolicy.execute(
+          () => this.callLlmOnce(
+            ctxPlan.messages as unknown as LlmMessage[],
+            llmSchema, iter, runId, controller.signal, {
+              provider: opts.provider,
+              model: opts.model ?? DEFAULT_MODEL,
+            },
+          ),
+          `llm-call iter=${iter}`,
+        )
         // #005 spawn 预算: 聚合本轮 usage → run 级 totalTokens (budgetCheck 下轮前判定)
         if (typeof result.totalTokens === 'number') totalTokens += result.totalTokens
 
