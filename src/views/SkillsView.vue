@@ -186,9 +186,41 @@
             <div v-for="(step, index) in pendingProposal.operationSteps" :key="index" class="step-item">
               {{ index + 1 }}. {{ step }}
             </div>
+            <div v-if="!pendingProposal.operationSteps?.length" class="detail-empty">
+              （本次执行没有可归纳的步骤）
+            </div>
           </div>
         </div>
-        
+
+        <!--
+          【M4-C】证据链 —— 提案凭什么成立。
+          业界实测「自生成技能的平均收益接近零甚至为负」,瓶颈在生成与验证。
+          所以提案不能只给一个结论,必须把支撑它的真实执行记录摊开给用户看 ——
+          人工编辑这一环才是价值真正产生的地方。
+        -->
+        <div v-if="pendingProposal.evidence" class="detail-section">
+          <div class="detail-label">证据链</div>
+          <div class="detail-value">
+            <div class="evidence-row">
+              <el-tag size="small" type="info">观察到 {{ pendingProposal.evidence.supportCount }} 次</el-tag>
+              <el-tag size="small" type="success">成功 {{ pendingProposal.evidence.successfulAttempts }} 次</el-tag>
+              <el-tag v-if="pendingProposal.evidence.failedAttempts > 0" size="small" type="warning">
+                失败 {{ pendingProposal.evidence.failedAttempts }} 次
+              </el-tag>
+            </div>
+            <div v-if="pendingProposal.evidence.toolsUsed?.length" class="evidence-sub">
+              用到的工具：{{ pendingProposal.evidence.toolsUsed.join('、') }}
+            </div>
+            <div class="evidence-sub">
+              样例指令：{{ pendingProposal.evidence.sampleInstruction }}
+            </div>
+            <div class="evidence-note">
+              支持度与成功率只是「值得学」的必要条件，不是「这个技能有用」的结论 ——
+              真正的效用需要「带 / 不带该技能」的对照结果。
+            </div>
+          </div>
+        </div>
+
         <div class="detail-section">
           <div class="detail-label">完整技能文档</div>
           <div class="detail-value">
@@ -280,6 +312,16 @@ interface SkillProposal {
   operationSteps: string[];
   fullInstructions: string;
   createdAt: number;
+  /** 【M4-C】证据链 —— 提案凭什么成立 */
+  evidence?: {
+    supportCount: number;
+    trajectoryIds: string[];
+    successfulAttempts: number;
+    failedAttempts: number;
+    commonSteps: string[];
+    toolsUsed: string[];
+    sampleInstruction: string;
+  };
 }
 
 const skills = ref<Skill[]>([]);
@@ -700,6 +742,32 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: var(--space-sm);
+}
+
+/* 【M4-C】证据链 */
+.evidence-row {
+  display: flex;
+  gap: var(--space-sm);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-xs);
+}
+
+.evidence-sub {
+  font-size: var(--font-size-caption);
+  color: var(--text-secondary);
+  margin-bottom: var(--space-xs);
+}
+
+.evidence-note {
+  font-size: var(--font-size-caption);
+  color: var(--text-tertiary, var(--text-secondary));
+  line-height: 1.6;
+  margin-top: var(--space-xs);
+}
+
+.detail-empty {
+  font-size: var(--font-size-caption);
+  color: var(--text-secondary);
 }
 
 .detail-label {

@@ -75,27 +75,68 @@ describe('#007 L2/L3: 阈值与窗口 (W1=100, W2=10, G1 同参联动)', () => {
     analyzeSpy.mockRestore()
   })
 
-  it('L3: 分析输入 = 最近 10 条 (slice(-ANALYSIS_THRESHOLD) 联动, 非硬编码 3)', async () => {
+  it('L3: 分析输入池 = 最近 10 条 (slice(-ANALYSIS_THRESHOLD) 联动, 非硬编码 3)', async () => {
+    // 【M4-C 变更说明】
+    // 原断言:prompt 里应含最近 10 条观察的指令文本。
+    // 现架构:分析输入不再是"最近 10 条观察",而是"从最近 10 条里聚类出的、
+    //         证据达标的候选模式" —— 因为把互不相关的 10 条丢给模型
+    //         问"它们的共同模式"只能得到编造的答案(见设计文档 §M4-C)。
+    //
+    // 【G1 联动口径不变】"池子"仍是最近 ANALYSIS_THRESHOLD 条 ——
+    //   窗口外的模式不该被选中。下列用例锁死这一点。
     const learner = SelfLearner.getInstance() as any
-    // 注入 15 条 (绕过 observe 去重), 直接驱动 analyzeAndGenerateSkill
-    for (let i = 0; i < 15; i++) {
-      learner.observations.push({
-        id: `obs-${i}`, instruction: `观察指令编号 ${i}`, steps: [], timestamp: Date.now() + i,
-      })
-    }
     const promptSpy = vi
       .spyOn(SelfLearner.prototype as any, 'callModelForAnalysis')
       .mockResolvedValue(null) // 不真发 LLM — 只断言 prompt 输入面
 
+    // ① 窗口外(最早的 5 条)有一个重复模式 —— 不该被选中
+    for (let i = 0; i < 5; i++) {
+      learner.observations.push({
+        id: `old-${i}`, instruction: '窗口外的模式', steps: [], timestamp: Date.now() + i,
+        occurrences: 3, outcome: 'ok',
+      })
+    }
+    // ② 窗口内:5 条互不相关的一次性指令(支持度 1,会被门槛挡掉)+ 5 条重复模式
+    for (let i = 0; i < 5; i++) {
+      learner.observations.push({
+        id: `filler-${i}`, instruction: `一次性指令 ${i}`, steps: [], timestamp: Date.now() + 100 + i,
+        occurrences: 1, outcome: 'ok',
+      })
+    }
+    for (let i = 0; i < 5; i++) {
+      learner.observations.push({
+        id: `new-${i}`, instruction: '窗口内的模式', steps: [], timestamp: Date.now() + 200 + i,
+        occurrences: 3, outcome: 'ok',
+      })
+    }
+
     await learner.analyzeAndGenerateSkill()
     const prompt = promptSpy.mock.calls[0][0] as string
-    // 最近 10 条 (编号 5-14) 在场
-    expect(prompt).toContain('观察指令编号 5')
-    expect(prompt).toContain('观察指令编号 14')
-    // 最早 5 条 (编号 0-4) 不在场
-    expect(prompt).not.toContain('观察指令编号 0 ')
-    expect(prompt).not.toContain('观察指令编号 3 ')
-    expect(prompt).not.toContain('观察指令编号 4 ')
+    // 窗口内的模式在场,证据链写明支持度(5 条观察 × occurrences 3 = 15 次)
+    expect(prompt).toContain('窗口内的模式')
+    expect(prompt).toContain('15')
+    // 窗口外的模式不在场(G1 联动:池子 = 最近 10 条)
+    expect(prompt).not.toContain('窗口外的模式')
+    promptSpy.mockRestore()
+  })
+
+  it('L3b: 【M4-C】支持度不足 → 根本不提提案(不把偶然当模式)', async () => {
+    const learner = SelfLearner.getInstance() as any
+    const promptSpy = vi
+      .spyOn(SelfLearner.prototype as any, 'callModelForAnalysis')
+      .mockResolvedValue(null)
+
+    // 12 条互不相同的观察 —— 每条只出现 1 次,支持度 = 1 < MIN_SUPPORT(2)
+    for (let i = 0; i < 12; i++) {
+      learner.observations.push({
+        id: `u-${i}`, instruction: `一次性指令 ${i}`, steps: [], timestamp: Date.now() + i,
+        occurrences: 1, outcome: 'ok',
+      })
+    }
+
+    await learner.analyzeAndGenerateSkill()
+    // 不该调 LLM —— 没有够硬的证据就不该浪费一次模型调用
+    expect(promptSpy).not.toHaveBeenCalled()
     promptSpy.mockRestore()
   })
 
