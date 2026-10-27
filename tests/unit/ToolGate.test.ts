@@ -125,6 +125,45 @@ describe('ToolGate 权限门', () => {
     })
   })
 
+  /**
+   * 【M4-D】内置工具的档位必须与 ToolGate 的档位表一致。
+   *
+   * 【为什么需要这条用例】
+   * ToolGate 的兜底是「未登记 → confirm」。这对陌生工具是对的(保守),
+   * 但对**本项目的内置只读工具**是个陷阱:
+   *   新增一个只读工具 → metadata.requiresPermission=false →
+   *   但没在 DEFAULT_PERMISSIONS 登记 → 静默变成 confirm →
+   *   headless 场景直接被拒,UI 场景每次调用都弹确认框。
+   *
+   * 真实案例:load_skill(M4-A 新增)漏登记 → 「技能被应用」这件事在数据里
+   * 根本不存在 —— M4-D 的整个信号源是空的。
+   *
+   * 本用例把「漏登记」从静默陷阱变成红灯。
+   */
+  describe('5. 内置工具档位与声明一致', () => {
+    it('声明 requiresPermission=false 的内置工具,实际档位必须是 auto', async () => {
+      const { BUILTIN_TOOLS } = await import('../../electron/agent/tools')
+      const readOnly = BUILTIN_TOOLS.filter(t => t.metadata.requiresPermission === false)
+      expect(readOnly.length).toBeGreaterThan(0)
+      for (const tool of readOnly) {
+        const d = await ToolGate.check(tool, {}, UI)
+        expect(
+          d.permission,
+          `内置只读工具 ${tool.metadata.name} 未在 ToolGate 档位表登记 —— ` +
+          `实际档位 ${d.permission},会导致 headless 被拒 / UI 每次弹确认框`,
+        ).toBe('auto')
+      }
+    })
+
+    it('声明 requiresPermission=true 的内置工具,实际档位必须是 confirm', async () => {
+      const { BUILTIN_TOOLS } = await import('../../electron/agent/tools')
+      for (const tool of BUILTIN_TOOLS.filter(t => t.metadata.requiresPermission === true)) {
+        const d = await ToolGate.check(tool, {}, UI)
+        expect(d.permission, `内置工具 ${tool.metadata.name} 的档位应至少为 confirm`).not.toBe('auto')
+      }
+    })
+  })
+
   describe('4. 未知工具默认保守', () => {
     it('未在白名单内的工具默认按 confirm 处理', async () => {
       const d = await ToolGate.check(mkTool('SomeNewDangerousTool'), {}, UI)

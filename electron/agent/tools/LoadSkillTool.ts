@@ -65,7 +65,9 @@ export class LoadSkillTool implements PiPiTool {
         return { ok: false, result: '', error: body }
       }
       this.log.info(`LoadSkillTool: 已加载技能 ${skillId}`)
-      return { ok: true, result: body }
+      // 【M4-D】声明本次作用在哪个技能上 —— 学习闭环据此记录
+      // 「技能 S 被应用了」,这是技能级效用信号的前提。
+      return { ok: true, result: body, appliedEntity: { kind: 'skill', id: skillId } }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       this.log.warn(`LoadSkillTool: 加载失败 ${skillId} — ${msg}`)

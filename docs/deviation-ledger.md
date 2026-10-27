@@ -653,3 +653,86 @@
   - **G1 联动口径不变**（池子仍是最近 `ANALYSIS_THRESHOLD` 条）：改写后用例锁死「窗口内模式被选中、窗口外模式不被选中」
   - 新增 L3b：支持度不足 → 根本不调 LLM
 - **实现期捕获的分母缺陷**：成功率曾算成 `successfulAttempts / supportCount`（分母混用 —— 前者上限 5 次逐次证据，后者是总观察次数），会把成功率系统性低估到提案永远出不来。由新测试捕获并修正为「有逐次证据的运行数」
+
+---
+
+## W5 接线批偏差登记 · M4-D 技能效用验证（2026-10-27）
+
+> 本批回答学习闭环的最后一问：「这个技能到底有没有让事情做得更好？」
+> 编号自 DEV-060 起。调研依据与完整设计见 `docs/NOVA-#008-m4d-skill-utility-design.md`。
+
+| ID | 状态 | 摘要 |
+|---|---|---|
+| DEV-060 | 已修 | 数据里没有「哪些技能被应用了」 · 工具调用日志只有工具名（`load_skill` 是工具名，不是技能 id）→ 技能效用无从谈起，只有「某工具调了成没成」。现 `ToolExecResult.appliedEntity` 让工具自己声明「我动了什么」（LoadSkillTool 加载成功时返回 `{kind:'skill', id}`，失败不声明）→ brain 汇总 `appliedSkills` → ChatManager 记技能级运行 |
+| DEV-061 | 已修 | 绝对成功率说明不了效用 · 「带该技能的成功率 40%」既可能是技能没用，也可能是这批任务本身难（用户专挑难活儿时才启用技能）。业界判据是**差值**：同类别任务下带/不带的成功率差（阈值 −0.1）。现新增 `SkillEffectivenessTracker.getMarginalUtility()` + `TaskCategory.ts`（两侧共用同一归一实现，否则对比组漏记录）|
+| DEV-062 | 已修 | 技能卡上的统计是编造的 · `SkillCard.vue` 渲染 `usageCount`/`successRate`，但写它们的 `SkillLoader.recordSkillUsage()` **全仓零调用方** → 永远显示「0 次使用 / 100% 成功率」。那不是"还没数据"，那是编造的。现 `skills:list` 用 tracker 真实记录覆盖；无记录时 `successRate=null`，UI 显示 `—` 而非假的 100% |
+| DEV-063 | 已修 | `load_skill` 权限档位漏登记（M2-B 遗留，M4-D 暴露） · `ToolGate` 的兜底是 `DEFAULT_PERMISSIONS[name] ?? 'confirm'`，而 `load_skill`（M4-A 新增，声明 `requiresPermission:false` 只读）**未在表中登记** → 落到 `confirm` → headless 场景**直接被拒**，UI 场景**每加载一次技能弹一次确认框**。症状是 M4-A 设计的「模型自己决定加载哪个技能」实际从未跑通，且 M4-D 的技能应用信号源整个是空的 |
+| DEV-064 | 已修 | 边际效用口径未声明 · 「不带该技能」的运行是自然发生的，不是随机分配 → 存在混杂（用户可能在任务变难时才想起用技能 → 差值低估贡献）。现 `observational: true` 恒为标记；UI 明写「观察性对比而非受控实验」；**不做任何自动禁用/回滚**（自动处置需受控对照）|
+| DEV-065 | 已修 | 内置工具档位与声明可能不一致且静默 · 兜底保守对陌生工具是对的，但对**本项目的内置只读工具**是陷阱：新增只读工具未登记 → 静默变 confirm。现新增用例「内置工具档位与声明一致」——任一内置工具声明 `requiresPermission:false` 但实际档位不是 `auto` → 测试红，把静默陷阱变成红灯 |
+
+### DEV-060 明细（技能应用信号，2026-10-27）
+
+- **旧状态**：`toolCallsLog` 条目只有 `{name, ok, durationMs}` —— `load_skill` 是工具名，技能 id 在 args 里但没人读。数据里**不存在**「技能 S 被应用」这件事
+- **新链路**：
+  - `ToolExecResult.appliedEntity?: {kind, id}` —— 工具自己声明「我动了什么」
+  - `LoadSkillTool` 加载成功返回 `{kind:'skill', id: skillId}`；**加载失败不声明**（没真应用不该被记成应用）
+  - `LlmAgentBrain`：工具调用日志条目加 `entity?`；`run()` 返回值加 `appliedSkills: string[]`（去重）；`think()` 载荷上抛
+  - `ChatManager.dispatchToAgent` → `AgentDispatchResult.appliedSkills` → `recordAgentOutcome` 记 `{unitType:'skill', skillName, success, category}`
+- **设计取舍**：为什么由工具自己报而不是让 brain 读 `args.skill_id` —— 后者把工具内部知识泄到编排层，每加一个作用于实体的工具就得改编排一次；由工具声明、编排层只记录是零特殊-case 的通用机制
+
+### DEV-061 明细（边际效用，2026-10-27）
+
+- **新增** `TaskCategory.ts`：任务类别归一的**单一实现**（`SelfLearner` 观察去重与 `ChatManager` 记账共用）—— 两侧规则稍有出入，对比组就会漏记录
+- **新增** `SkillEffectivenessTracker.getMarginalUtility()` / `listAllUtilities()`
+- **对比规则**：
+  - 「不带该技能」= **同类别**任务下、未应用该技能的运行
+  - 工具级记录**不参与**技能对比（工具名不是技能名）
+  - 无类别的记录**不参与**对比（宁可样本少，不混口径）
+  - 两侧任一 < 5 次 → `delta` 留空（3 次运行得出的差值噪声太大，一次翻转就是 ±33%）
+
+### DEV-062 明细（技能卡假统计，2026-10-27）
+
+- **旧**：`SkillLoader.recordSkillUsage()` 零调用方 → 技能卡恒显「0 次使用 / 100% 成功率」
+- **新**：`skills:list` 用 `tracker.getSkillUsage(skillId)` 的真实记录覆盖 `usageCount`/`successRate`；无记录时 `successRate = null`，`SkillCard.vue` 显示 `—`
+- **口径**：宁可显示"没有数据"，也不拿假的 100% 冒充
+
+### DEV-063 明细（load_skill 权限档位，2026-10-27）
+
+- **根因**：`ToolGate.check` 的档位推导 `declared ? 'confirm' : (DEFAULT_PERMISSIONS[name] ?? 'confirm')` —— `requiresPermission:false` 只在"为真"时被读取；`load_skill` 不在 `DEFAULT_PERMISSIONS` → 落到兜底 `confirm`
+- **症状**：headless 场景「权限拒绝:load_skill 需要用户确认,但当前上下文(headless)无法弹窗,已拒绝」；UI 场景每加载一次技能弹一次确认框
+- **修法**：`DEFAULT_PERMISSIONS` 补登 `load_skill: 'auto'`（只读，读技能正文文件）
+- **刻意没做的**：没改成「工具声明 false 就一律 auto」——
+  - 兜底保守是**故意的**（`ToolGate.test.ts`「未知工具默认保守」是安全属性）
+  - 声明 false 的工具未必真的无副作用（`D1ScreenshotQA` 声明 false，但截图本身是可见的隐私面）
+- **代价与对策**：新增只读工具必须在本表登记，否则静默变 confirm → 见 DEV-065
+
+### DEV-064 明细（观察性口径，2026-10-27）
+
+- 「不带该技能」的运行自然发生 → 混杂存在（任务变难时才想起用技能 → 差值低估贡献；反之可高估）
+- `SkillUtility.observational: true` 恒为标记；UI 面板下方明写「观察性对比而非受控实验」
+- **不做自动禁用/回滚** —— 自动处置需要受控对照（归 M4-E）
+
+### DEV-065 明细（档位一致性护栏，2026-10-27）
+
+- 新增用例「内置工具档位与声明一致」：遍历 `BUILTIN_TOOLS`，
+  任一声明 `requiresPermission:false` 的工具实际档位不是 `auto` → 测试红（附失败消息指明工具名与后果）
+- 另有反向用例：声明 `true` 的工具实际档位不得为 `auto`
+
+### 关单（W5 接线批 · M4-D 技能效用验证，2026-10-27）
+
+- **范围**：DEV-060 ~ DEV-065（6 条）
+- **验证**：
+  - vue-tsc: 0 error
+  - vitest: Test Files 111 passed (111) / Tests 1331 passed | 14 skipped (1345) / 0 FAIL
+  - 后端 tsc（tsconfig.node.json）: 30 error（= 存量基线，零新增）
+- **新增测试**：
+  - `tests/unit/skill-utility-m4d.test.ts`（14 例）任务类别归一 / 边际效用 8 例 / 真实使用统计 3 例
+  - `tests/integration/skill-applied-tracking.test.ts`（4 例）brain 汇总 appliedSkills（调了有 / 没调为空 / 加载失败为空 / 重复去重）+ 工具日志带 entity
+  - `tests/unit/LoadSkillTool.test.ts`（+2 例）加载成功声明 entity / 加载失败不声明
+  - `tests/unit/chat-m4b-learning-wiring.test.ts`（+3 例）技能级运行记账（带 category）/ 工具级与技能级分开 / 失败的应用也留
+  - `tests/unit/ToolGate.test.ts`（+2 例）内置工具档位与声明一致
+- **行为变更同步**：
+  - `electron/preload.ts` 新增 `skills.getUtility()` + `IpcChannels.SKILLS_GET_UTILITY`
+  - `electron/core/IpcServer.ts` 新增 `skills:getUtility` handler；`skills:list` 改为用 tracker 真实数据覆盖 usageCount/successRate
+  - `src/views/SkillsView.vue` 新增「边际效用」折叠面板（带该技能 / 同类别不带 / 差值，样本不足显示标签）
+  - `src/components/skills/SkillCard.vue` 成功率无数据显示 `—` 而非假的 100%

@@ -182,6 +182,7 @@ const IpcChannels = {
   SKILLS_LIST: 'skills:list',
   SKILLS_TOGGLE: 'skills:toggle',
   SKILLS_GET_EFFECTIVENESS: 'skills:getEffectiveness',
+  SKILLS_GET_UTILITY: 'skills:getUtility',
   SKILLS_RELOAD: 'skills:reload',
   SKILLS_IMPORT_FILE: 'skills:importFile',
   SKILLS_IMPORT_URL: 'skills:importUrl',
@@ -1026,6 +1027,10 @@ const electronAPI = {
       /** 【M4-B】效果判定列表(工具/技能的调用成败结论) */
       getEffectiveness: (): Promise<IpcResponse<any[]>> =>
         ipcRenderer.invoke(IpcChannels.SKILLS_GET_EFFECTIVENESS),
+
+      /** 【M4-D】技能的边际效用(同类别任务下,带它 vs 不带它的成功率差) */
+      getUtility: (): Promise<IpcResponse<any[]>> =>
+        ipcRenderer.invoke(IpcChannels.SKILLS_GET_UTILITY),
 
       reload: (): Promise<IpcResponse<void>> =>
         ipcRenderer.invoke(IpcChannels.SKILLS_RELOAD),

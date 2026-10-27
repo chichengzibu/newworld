@@ -87,6 +87,39 @@ description: 存在的技能
     expect(BUILTIN_TOOLS.map(t => t.metadata.name)).toContain('load_skill')
   })
 
+  /**
+   * 【M4-D】加载成功时声明"我作用在哪个技能上" ——
+   * 这是"技能被应用后有没有用"能被回答的前提:
+   * 工具调用日志里只有工具名(load_skill),不是技能 id,
+   * 没有这个声明,学习闭环就不知道哪些技能被应用过。
+   */
+  it('加载成功 → 声明 appliedEntity(技能 id)', async () => {
+    writeSkill('demo', `---
+name: demo
+description: 演示技能
+---
+## 操作步骤
+1. 第一步做什么
+`)
+    const { LoadSkillTool } = await import('../../electron/agent/tools/LoadSkillTool')
+    const { SkillLoader } = await import('../../electron/skill/SkillLoader')
+    ;(SkillLoader as any).instance = null
+    SkillLoader.getInstance().loadAllSkills()
+
+    const tool = new LoadSkillTool()
+    const r = await tool.execute({ skill_id: 'demo' })
+    expect(r.ok).toBe(true)
+    expect(r.appliedEntity).toEqual({ kind: 'skill', id: 'demo' })
+  })
+
+  it('加载失败 → 不声明 appliedEntity(没真应用就不该被记成"用了这个技能")', async () => {
+    const { LoadSkillTool } = await import('../../electron/agent/tools/LoadSkillTool')
+    const tool = new LoadSkillTool()
+    const r = await tool.execute({ skill_id: '不存在的技能' })
+    expect(r.ok).toBe(false)
+    expect(r.appliedEntity).toBeUndefined()
+  })
+
   it('工具描述说明"先加载再执行" —— 引导模型正确使用', async () => {
     const { LoadSkillToolMetadata } = await import('../../electron/agent/tools/LoadSkillTool')
     // 依据 Anthropic 规范:description 是路由规则,必须写清"何时用"

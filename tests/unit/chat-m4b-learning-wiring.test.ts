@@ -201,8 +201,73 @@ describe('M4-B 接线:agent loop 路径产生学习数据', () => {
     expect(observeCalls[0][2]).toBe('fail')
   })
 
-  it('旁路红线:学习侧抛错不得影响用户拿到的回复', async () => {
-    // 这是 chat-execution-ui B-3 踩过的坑:学习块裸调 → 一个 TypeError
+  /**
+   * 【M4-D】技能级效用信号 —— 「技能 S 被应用了,这次运行成功没」。
+   *
+   * 这是"这个技能到底有没有用"能被回答的前提:
+   * 没有"哪些技能被应用"的记录,就只剩工具调用的成败,无从谈技能的效用。
+   * category(任务类别)是后续做「带/不带」对比的分组依据。
+   */
+  it('应用了技能 → 记一条技能级运行(带 category)', async () => {
+    const cm = ChatManager.getInstance() as any
+    cm.registerAgent(makeAgent({
+      text: '任务完成',
+      totalTokens: 0,
+      iterations: 2,
+      runId: 'run_skill',
+      appliedSkills: ['pdf-extract'],
+      toolCalls: [{ name: 'load_skill', ok: true, durationMs: 4 }],
+    }))
+
+    await cm.sendMessage(convId, '把 PDF 里的表格抽出来', 'mock-prov', 'mock-model')
+
+    const skillRecords = trackerRecords.filter((r: any) => r.unitType === 'skill')
+    expect(skillRecords.length).toBe(1)
+    expect(skillRecords[0].skillName).toBe('pdf-extract')
+    expect(skillRecords[0].success).toBe(true)
+    // 任务类别 —— 用于「同类别带/不带」的对比分组
+    expect(skillRecords[0].category).toBe('把 pdf 里的表格抽出来')
+  })
+
+  it('工具级与技能级记录分开(工具名不是技能名)', async () => {
+    const cm = ChatManager.getInstance() as any
+    cm.registerAgent(makeAgent({
+      text: 'ok',
+      totalTokens: 0,
+      iterations: 2,
+      runId: 'run_both',
+      appliedSkills: ['pdf-extract'],
+      toolCalls: [
+        { name: 'load_skill', ok: true, durationMs: 4 },
+        { name: 'Read', ok: true, durationMs: 9 },
+      ],
+    }))
+
+    await cm.sendMessage(convId, '抽表格', 'mock-prov', 'mock-model')
+
+    expect(trackerRecords.filter((r: any) => r.unitType === 'tool').length).toBe(2)
+    expect(trackerRecords.filter((r: any) => r.unitType === 'skill').length).toBe(1)
+    expect(trackerRecords.find((r: any) => r.unitType === 'skill').skillName).toBe('pdf-extract')
+  })
+
+  it('运行失败 → 技能级记录 success=false(失败的应用也要留)', async () => {
+    const cm = ChatManager.getInstance() as any
+    cm.registerAgent(makeAgent({
+      text: '失败',
+      totalTokens: 0,
+      iterations: 1,
+      runId: 'run_fail_skill',
+      appliedSkills: ['pdf-extract'],
+      toolCalls: [{ name: 'Edit', ok: false, durationMs: 3 }],
+    }))
+
+    await cm.sendMessage(convId, '抽表格', 'mock-prov', 'mock-model')
+
+    const skillRecord = trackerRecords.find((r: any) => r.unitType === 'skill')
+    expect(skillRecord.success).toBe(false)
+  })
+
+  it('旁路红线:学习侧抛错不得影响用户拿到的回复', async () => {    // 这是 chat-execution-ui B-3 踩过的坑:学习块裸调 → 一个 TypeError
     // 让整个任务流抛 → 回退普通对话 → 用户看到的是"LLM 连不上",
     // 真实失败原因被吞掉。现在学习块整体兜住。
     const cm = ChatManager.getInstance() as any

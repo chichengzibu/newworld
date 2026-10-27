@@ -32,9 +32,14 @@
           <el-icon><View /></el-icon>
           {{ skill.usageCount }} 次使用
         </span>
-        <span class="stat-item">
+        <!--
+          【M4-D】无数据时显示 "—" 而非 100%。
+          此前写这两个字段的 recordSkillUsage() 零调用方 → 永远显示
+          「0 次使用 / 100% 成功率」—— 那不是"还没数据",那是编造的。
+        -->
+        <span class="stat-item" :title="skill.successRate === null ? '暂无使用记录' : ''">
           <el-icon><CircleCheck /></el-icon>
-          {{ skill.successRate }}% 成功率
+          {{ skill.successRate === null || skill.successRate === undefined ? '—' : `${skill.successRate}%` }} 成功率
         </span>
         <span class="stat-item" v-if="skill.fileSize !== undefined">
           <el-icon><Document /></el-icon>
@@ -58,7 +63,8 @@ interface SkillProps {
     triggerKeywords: string[];
     enabled: boolean;
     usageCount: number;
-    successRate: number;
+    /** 【M4-D】null = 暂无使用记录(此前恒为 100,是编造的) */
+    successRate: number | null;
     fileSize?: number;
   };
 }

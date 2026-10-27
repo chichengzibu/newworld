@@ -28,6 +28,7 @@ import {BrowserWindow} from 'electron';
 import { LogManager } from '../core/LogManager';
 import { ConfigStore } from '../core/ConfigStore';
 import { SkillLoader } from '../skill/SkillLoader';
+import { normalizeTaskCategory } from './TaskCategory';
 import { SkillManager } from '../skill/SkillManager';
 import { ModelManager } from '../models/ModelManager';
 
@@ -420,15 +421,14 @@ export class SelfLearner {
   /**
    * 标准化指令（忽略大小写和标点符号，保留语义差异）
    */
+  /**
+   * 归一化指令(忽略大小写与标点)。
+   *
+   * 【M4-D】实现已抽到 `electron/learning/TaskCategory.ts` ——
+   * 任务类别归一必须与"记录侧"完全一致,否则对比组会漏记录。
+   */
   private normalizeInstruction(instruction: string): string {
-    // 去除标点符号，但保留一些语义相关的
-    return instruction.toLowerCase()
-      // 去除句号、感叹号、问号、逗号等
-      .replace(/[.!,?;:'"()]/g, '')
-      // 统一空白字符
-      .replace(/\s+/g, ' ')
-      // 去除首尾空格
-      .trim();
+    return normalizeTaskCategory(instruction);
   }
 
   /**

@@ -282,7 +282,7 @@ export class LlmAgentBrain implements AgentBrain {
      * fail-safe"而废弃 —— 安全边界不能建立在约定上。
      */
     preApprovedToolConfirm?: boolean
-  } = {}): Promise<{ runId: string; content: string; iterations: number; totalDurationMs: number; totalTokens: number; toolCalls: Array<{ name: string; ok: boolean; durationMs: number }> }> {
+  } = {}): Promise<{ runId: string; content: string; iterations: number; totalDurationMs: number; totalTokens: number; toolCalls: Array<{ name: string; ok: boolean; durationMs: number; entity?: { kind: string; id: string } }>; appliedSkills: string[] }> {
     const runId = opts.runId ?? `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     const controller = new AbortController()
     const state: RunState = { runId, aborted: false, controller }
@@ -314,7 +314,13 @@ export class LlmAgentBrain implements AgentBrain {
     const selectedTools = selectedToolNames
       .map(n => this.tools.get(n))
       .filter((t): t is PiPiTool => !!t)
-    const toolCallsLog: Array<{ name: string; ok: boolean; durationMs: number }> = []
+    /**
+     * 【M4-D】工具调用日志条目 —— 加 entity 字段承载"这次动了什么实体"。
+     * 由工具自己声明(ToolExecResult.appliedEntity),编排层只记录,零特殊-case。
+     */
+    const toolCallsLog: Array<{ name: string; ok: boolean; durationMs: number; entity?: { kind: string; id: string } }> = []
+    /** 【M4-D】本次 run 实际应用过的技能 id(去重) —— 技能级效用信号的前提 */
+    const appliedSkills: string[] = []
 
     LlmAgentBrainEvents.emit({ type: 'run_start', runId, prompt, tools: selectedToolNames })
 
@@ -374,7 +380,7 @@ export class LlmAgentBrain implements AgentBrain {
           pushCkpt(takeCkpt('interrupted', 'aborted')) // #004 接缝②: 中止前 flush 当前态 (A2 append-only)
           LlmAgentBrainEvents.emit({ type: 'run_aborted', runId, iterations: iter - 1 })
           this.runs.delete(runId)
-          return { runId, content: finalContent, iterations: iter - 1, totalDurationMs: Date.now() - startMs, totalTokens, toolCalls: toolCallsLog }
+          return { runId, content: finalContent, iterations: iter - 1, totalDurationMs: Date.now() - startMs, totalTokens, toolCalls: toolCallsLog, appliedSkills: [...appliedSkills] }
         }
         // #005 spawn (预算刹车): 每轮 LLM 调用前判定 — 超限即停 tool 循环,
         // 下方 maxIter 收尾块取【最后 assistant】为 final (降级到 final, 不 throw 不中断会话)
@@ -403,7 +409,7 @@ export class LlmAgentBrain implements AgentBrain {
             || '这次的内容太长,超出模型能一次读完的量了。建议拆成几步,或者只把关键部分发给我。';
           pushCkpt(takeCkpt('finalized'));
           this.runs.delete(runId);
-          return { runId, content: finalContent, iterations, totalDurationMs: Date.now() - startMs, totalTokens, toolCalls: toolCallsLog };
+          return { runId, content: finalContent, iterations, totalDurationMs: Date.now() - startMs, totalTokens, toolCalls: toolCallsLog, appliedSkills: [...appliedSkills] };
         }
         if (ctxPlan.action !== 'none') {
           this.log.info(`LlmAgentBrain: run ${runId} 上下文降级 — ${ctxPlan.reason}`);
@@ -502,7 +508,15 @@ export class LlmAgentBrain implements AgentBrain {
             exec = { ok: false, result: '', error: `tool execution threw: ${(e as Error).message}` }
           }
           const durationMs = Date.now() - tStart
-          toolCallsLog.push({ name: tc.function.name, ok: exec.ok, durationMs })
+          // 【M4-D】记录工具作用的实体(如有) —— 供上层判定"哪些技能被应用了"
+          if (exec.appliedEntity) {
+            toolCallsLog.push({ name: tc.function.name, ok: exec.ok, durationMs, entity: exec.appliedEntity })
+            if (exec.appliedEntity.kind === 'skill' && !appliedSkills.includes(exec.appliedEntity.id)) {
+              appliedSkills.push(exec.appliedEntity.id)
+            }
+          } else {
+            toolCallsLog.push({ name: tc.function.name, ok: exec.ok, durationMs })
+          }
           LlmAgentBrainEvents.emit({ type: 'tool_result', runId, iter, name: tc.function.name, ok: exec.ok, result: exec.result, error: exec.error, durationMs })
           // tool 消息: OpenAI 格式用 content 字段, 部分 provider 也会读 name
           const toolContent = exec.ok ? exec.result : `Error: ${exec.error ?? 'unknown'}`
@@ -525,7 +539,7 @@ export class LlmAgentBrain implements AgentBrain {
       LlmAgentBrainEvents.emit({ type: 'final_answer', runId, content: finalContent, iterations, totalDurationMs })
       pushCkpt(takeCkpt('finalized')) // #004 接缝④: 终态标记 (run 完整, 恢复时无需续跑)
       this.runs.delete(runId)
-      return { runId, content: finalContent, iterations, totalDurationMs, totalTokens, toolCalls: toolCallsLog }
+      return { runId, content: finalContent, iterations, totalDurationMs, totalTokens, toolCalls: toolCallsLog, appliedSkills: [...appliedSkills] }
     } catch (e) {
       const totalDurationMs = Date.now() - startMs
       const errMsg = e instanceof Error ? e.message : String(e)
@@ -626,7 +640,9 @@ export class LlmAgentBrain implements AgentBrain {
         runOpts.preApprovedToolConfirm = true
       }
       const r = await this.run(content, runOpts)
-      return { action: 'reply', payload: { text: r.content, model: 'agent-v0.1', durationMs: r.totalDurationMs, iterations: r.iterations, totalTokens: r.totalTokens, runId: r.runId, toolCalls: r.toolCalls } }
+      // 【M4-D】appliedSkills 随载荷上抛 —— 上层据此记录
+      // 「技能 S 被应用 + 这次运行成功没」的技能级效用信号。
+      return { action: 'reply', payload: { text: r.content, model: 'agent-v0.1', durationMs: r.totalDurationMs, iterations: r.iterations, totalTokens: r.totalTokens, runId: r.runId, toolCalls: r.toolCalls, appliedSkills: r.appliedSkills } }
     } catch (e) {
       this.log.warn('LlmAgentBrain.think: fallback stub', e)
       return { action: 'reply', payload: { text: `[LlmAgentBrain error] ${(e as Error).message}`, model: 'agent-v0.1-stub', durationMs: 0 } }

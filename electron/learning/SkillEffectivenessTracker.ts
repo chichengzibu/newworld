@@ -54,23 +54,37 @@ export interface SkillVerdictInfo {
   lastCalledAt: number
 }
 
+/**
+ * 【M4-D】技能的边际效用 —— 同类别任务下,带它 vs 不带它的成功率差。
+ *
+ * 【口径】观察性对比,非受控实验(见 getMarginalUtility 的说明)。
+ * delta 为 undefined = 样本不足,不给结论。
+ */
+export interface SkillUtility {
+  skillName: string;
+  /** 带该技能的运行 */
+  withSkill: { runs: number; successes: number; rate?: number };
+  /** 同类别任务下、未应用该技能的运行 */
+  withoutSkill: { runs: number; successes: number; rate?: number };
+  /** 带 − 不带;undefined = 样本不足 */
+  delta?: number;
+  /** 样本不足标记 */
+  insufficientData: boolean;
+  /** 口径标记:恒为 true —— 这是观察性对比,不是因果结论 */
+  observational: true;
+}
+
 export interface SkillCallRecord {
   /**
    * 被观测单元的名字。
    *
    * 【M4-B 口径澄清 — 重要】
    * 本字段名叫 skillName(历史名),但【实际记录的是"可复用的工作单元"】,
-   * 目前有���类:
+   * 目前有两类:
    *   - 'tool' —— 一次工具调用(Read/Edit/run_command…)
    *   - 'skill' —— 一次技能应用
    * 两者都用 unitType 标注,避免"工具名被当成技能名"这种语义污染:
    * 一个叫 Read 的东西不是技能,把它记进技能库会污染技能的效用统计。
-   *
-   * 【为什么技能级信号还没接上】
-   * 真正的技能级效用 = "应用了技能 S 之后,这次任务成功了没有"。
-   * 这需要 run 携带【本次实际应用的技能列表】,当前 agent 载荷里没有这个信息
-   * (toolCalls 只有 {name, ok, durationMs},没有参数),故技能级判定属 M4-C。
-   * 本批先把能观测到的工具级信号记准,并为技能级留好接口。
    */
   skillName: string
   /** 被观测单元的类型 —— 见上。缺省视为 'skill'(保持历史数据语义) */
@@ -80,6 +94,16 @@ export interface SkillCallRecord {
   success: boolean
   conversationId?: string
   overridden?: boolean
+  /**
+   * 【M4-D】任务类别 —— 归一化后的用户指令。
+   *
+   * 【为什么需要】
+   * 「这个技能有没有用」不能只看「带它时成功率多少」——
+   * 用户可能专挑难活儿时才启用它。真正的判据是【同类别任务下】:
+   *   带该技能的成功率  vs  不带该技能的成功率
+   * 要做这个对比,就必须能把「带/不带」的运行归到同一类别里 —— 即本字段。
+   */
+  category?: string
 }
 
 /**
@@ -98,6 +122,13 @@ export class SkillEffectivenessTracker {
   private persistTimer: ReturnType<typeof setTimeout> | null = null
   /** 判定所需的最少样本量 —— 少于此不结论 */
   private static readonly MIN_SAMPLES = 3
+  /**
+   * 【M4-D】边际效用对比所需的最少样本量(每侧)。
+   *
+   * 3 次运行得出的成功率差值噪声太大 —— 一次翻转就是 ±33%。
+   * 5 次是「差值还能被看见」的最低门槛。
+   */
+  private static readonly MIN_CONTRAST_SAMPLES = 5
 
   private constructor() {
     this.storePath = path.join(getHost().getPath('userData'), 'skill-stats.json')
@@ -208,6 +239,86 @@ export class SkillEffectivenessTracker {
     return this.listAllStats()
       .map((s) => this.getVerdict(s.skillName))
       .sort((a, b) => order[a.verdict] - order[b.verdict])
+  }
+
+  /**
+   * 【M4-D】某个技能的真实使用统计 —— 供技能卡展示。
+   *
+   * 【为什么不用 SkillLoader 的 usageCount/successRate】
+   * 那两个字段写它们的 `recordSkillUsage()` **全仓零调用方** ——
+   * 技能卡上显示的「0 次使用 / 100% 成功率」是编造的,不是"还没数据"。
+   * 现从真实的应用记录统计,无数据时返回 undefined(UI 显示 "—"),
+   * 不用假的 100% 冒充。
+   */
+  public getSkillUsage(skillName: string): { runs: number; successes: number; successRate?: number } | undefined {
+    const records = this.records.filter(r => r.skillName === skillName && r.unitType === 'skill');
+    if (records.length === 0) return undefined;
+    const successes = records.filter(r => r.success).length;
+    return { runs: records.length, successes, successRate: successes / records.length };
+  }
+
+  /**
+   * 【M4-D】技能的【边际效用】—— 同类别任务下,带它 vs 不带它的成功率差。
+   *
+   * 【为什么绝对成功率不够】
+   * 「带该技能的成功率 40%」说明不了它有没有用 —— 用户可能专挑难活儿时启用它。
+   * 业界对照实验的判据是【差值】:同任务类别下,
+   *   带技能的成功率 − 不带技能的成功率
+   * 差值为负 → 该技能在这类任务上是负贡献。
+   *
+   * 【口径声明 — 这是观察性对比,不是受控实验】
+   * 「不带该技能」的运行是自然发生的,不是随机分配的 —— 存在混杂:
+   * 用户可能在任务变难时才想起用技能,那样带技能的组天然更难,
+   * 差值会【低估】技能的贡献;反之也可能高估。
+   * 所以本方法只产出【信号】,不作因果结论,更不做自动处置。
+   * 真要因果结论,需要同一批任务上随机带/不带各跑一遍(对照 rollout)。
+   *
+   * 【样本量】
+   * 任一侧样本不足 MIN_CONTRAST_SAMPLES → 判为数据不足,不给差值。
+   */
+  public getMarginalUtility(skillName: string): SkillUtility {
+    const skillRecords = this.records.filter(r => r.skillName === skillName && r.unitType === 'skill')
+    const withRuns = skillRecords.length
+
+    // 「不带该技能」= 同类别任务下、且没有应用该技能的运行
+    // 没有类别信息的老记录无法归类 → 只能排除(宁可样本少,不混口径)
+    const categories = new Set(skillRecords.map(r => r.category).filter((c): c is string => !!c))
+    const withoutRecords = this.records.filter(
+      r => r.unitType === 'skill'
+        && r.skillName !== skillName
+        && !!r.category
+        && categories.has(r.category),
+    )
+    const withoutRuns = withoutRecords.length
+
+    const withSuccess = skillRecords.filter(r => r.success).length
+    const withoutSuccess = withoutRecords.filter(r => r.success).length
+
+    const withRate = withRuns > 0 ? withSuccess / withRuns : undefined
+    const withoutRate = withoutRuns > 0 ? withoutSuccess / withoutRuns : undefined
+    const enough = withRuns >= SkillEffectivenessTracker.MIN_CONTRAST_SAMPLES
+      && withoutRuns >= SkillEffectivenessTracker.MIN_CONTRAST_SAMPLES
+
+    return {
+      skillName,
+      withSkill: { runs: withRuns, successes: withSuccess, rate: withRate },
+      withoutSkill: { runs: withoutRuns, successes: withoutSuccess, rate: withoutRate },
+      // 样本不足 → delta 留空(不猜)
+      delta: enough && withRate !== undefined && withoutRate !== undefined ? withRate - withoutRate : undefined,
+      insufficientData: !enough,
+      /** 口径标记 —— 提醒消费方这是观察性对比 */
+      observational: true,
+    }
+  }
+
+  /** 全部技能的边际效用(按差值升序 —— 最负的排最前) */
+  public listAllUtilities(): SkillUtility[] {
+    const names = new Set(
+      this.records.filter(r => r.unitType === 'skill').map(r => r.skillName),
+    )
+    return [...names]
+      .map(n => this.getMarginalUtility(n))
+      .sort((a, b) => (a.delta ?? 0) - (b.delta ?? 0))
   }
 
   private loadFromDisk(): void {

@@ -22,6 +22,7 @@ import { HistoryAssembler } from './HistoryAssembler';
 import { SelfLearner } from '../learning/SelfLearner';
 import { SkillEffectivenessTracker } from '../learning/SkillEffectivenessTracker';
 import { classifyFailure } from '../learning/FailureClassifier';
+import { normalizeTaskCategory } from '../learning/TaskCategory';
 import { CostTracker } from '../insight/CostTracker';
 import { ConfigStore } from '../core/ConfigStore';
 import { AgentEventRelayBus, type AgentRunEvent } from '../agent/AgentEventRelay';
@@ -34,7 +35,13 @@ export interface AgentDispatchResult {
   content?: string
   totalTokens?: number
   iterations?: number
-  toolCalls?: Array<{ name: string; ok: boolean; durationMs: number }>
+  toolCalls?: Array<{ name: string; ok: boolean; durationMs: number; entity?: { kind: string; id: string } }>
+  /**
+   * 【M4-D】本次 run 实际应用过的技能 id。
+   * 「技能被应用后有没有用」这个问题,前提是能说出哪些技能被应用了 ——
+   * 由工具自己声明(LoadSkillTool 返回 appliedEntity),brain 汇总上抛。
+   */
+  appliedSkills?: string[]
   /** 助手占位消息 id(渲染层据此回填最终内容) */
   messageId?: string
   runId?: string
@@ -1240,7 +1247,9 @@ export class ChatManager {
         totalTokens?: number
         iterations?: number
         runId?: string
-        toolCalls?: Array<{ name: string; ok: boolean; durationMs: number }>
+        toolCalls?: Array<{ name: string; ok: boolean; durationMs: number; entity?: { kind: string; id: string } }>
+        /** 【M4-D】本次 run 实际应用过的技能 id */
+        appliedSkills?: string[]
       };
       const text = payload.text ?? '';
       const totalTokens = payload.totalTokens ?? 0;
@@ -1276,6 +1285,7 @@ export class ChatManager {
         totalTokens,
         iterations: payload.iterations ?? 0,
         toolCalls,
+        appliedSkills: payload.appliedSkills ?? [],
       };
     } catch (e) {
       this.log.error('[ChatManager] dispatchToAgent 失败,交由调用方回落', e);
@@ -1314,6 +1324,14 @@ export class ChatManager {
    * 并把每次工具调用写进 SkillEffectivenessTracker —— 它此前零调用方,
    * 意味着"技能被调用后效果如何"这个闭环信号从未被采集。
    */
+  /**
+   * 【M4-D】任务类别归一 —— 与 SelfLearner 共用同一实现(TaskCategory.ts)。
+   * 两边规则必须一致,否则对比组会漏记录。
+   */
+  private normalizeTaskCategory(instruction: string): string {
+    return normalizeTaskCategory(instruction);
+  }
+
   private recordAgentOutcome(
     conversationId: string,
     instruction: string,
@@ -1348,8 +1366,6 @@ export class ChatManager {
 
       // ② 效果反馈:每个工具调用一条记录 → tracker 才有数据可统计
       //    unitType='tool' —— 这是【工具级】信号,不是技能级效用。
-      //    技能级效用(应用了技能 S 之后任务是否成功)需要 run 携带
-      //    【本次实际应用的技能列表】,当前 agent 载荷没有这个信息 → 属 M4-C。
       const tracker = SkillEffectivenessTracker.getInstance();
       for (const c of toolCalls) {
         tracker.record({
@@ -1360,6 +1376,32 @@ export class ChatManager {
           success: c.ok,
           conversationId,
         });
+      }
+
+      /**
+       * 【M4-D】③ 技能级效用信号 —— 「技能 S 被应用了,这次运行成功没」。
+       *
+       * 这是"这个技能到底有没有用"这个问题能被回答的**前提**:
+       * 没有"哪些技能被应用"的记录,就只剩"工具调用的成败",无从谈技能的效用。
+       *
+       * 【category 是关键】记下归一化后的任务类别,才能做
+       * 「同类别任务下:带该技能 vs 不带该技能」的对比 ——
+       * 只看绝对成功率会把"任务本身难"误判成"技能没用"。
+       */
+      const appliedSkills = result.appliedSkills ?? [];
+      if (appliedSkills.length > 0) {
+        const category = this.normalizeTaskCategory(instruction);
+        for (const skillId of appliedSkills) {
+          tracker.record({
+            skillName: skillId,
+            unitType: 'skill',
+            ts: Date.now(),
+            durationMs: 0,
+            success: outcome === 'ok',
+            conversationId,
+            category,
+          });
+        }
       }
     } catch (e) {
       // 记录失败不得影响主流程

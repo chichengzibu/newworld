@@ -139,6 +139,56 @@
       </el-collapse-item>
     </el-collapse>
     
+    <!--
+      【M4-D】边际效用 —— 「这个技能到底有没有用」
+      效果统计面板给的是【绝对成功率】,而绝对成功率说明不了效用:
+      用户可能专挑难活儿时才启用技能,那时绝对成功率低是任务难,不是技能没用。
+      真正的判据是【同类别任务下】带它 vs 不带它的成功率差。
+
+      【口径】这是【观察性对比】,不是受控实验 —— 「不带技能」的运行是自然发生的,
+      存在混杂。因此只作提示,不做自动禁用/回滚。
+    -->
+    <el-collapse v-if="utilityRows.length > 0" class="effectiveness-panel">
+      <el-collapse-item name="utility">
+        <template #title>
+          <span class="effectiveness-title">
+            边际效用
+            <el-tag v-if="negativeUtilityCount > 0" type="danger" size="small" style="margin-left: 8px;">
+              {{ negativeUtilityCount }} 个负贡献
+            </el-tag>
+          </span>
+        </template>
+        <el-table :data="utilityRows" size="small" style="width: 100%">
+          <el-table-column prop="skillName" label="技能" min-width="160" />
+          <el-table-column label="带该技能" width="150">
+            <template #default="{ row }">
+              {{ row.withSkill.runs }} 次 ·
+              {{ row.withSkill.rate === undefined ? '—' : `${Math.round(row.withSkill.rate * 100)}%` }}
+            </template>
+          </el-table-column>
+          <el-table-column label="同类别不带" width="150">
+            <template #default="{ row }">
+              {{ row.withoutSkill.runs }} 次 ·
+              {{ row.withoutSkill.rate === undefined ? '—' : `${Math.round(row.withoutSkill.rate * 100)}%` }}
+            </template>
+          </el-table-column>
+          <el-table-column label="差值" width="110">
+            <template #default="{ row }">
+              <el-tag v-if="row.delta === undefined" size="small" type="info">样本不足</el-tag>
+              <el-tag v-else size="small" :type="row.delta < 0 ? 'danger' : row.delta > 0 ? 'success' : 'info'">
+                {{ row.delta > 0 ? '+' : '' }}{{ Math.round(row.delta * 100) }}%
+              </el-tag>
+            </template>
+          </el-table-column>
+        </el-table>
+        <p class="effectiveness-note">
+          说明:「同类别不带」= 同类任务下、但没有应用该技能的运行。
+          这是<span class="note-strong">观察性对比而非受控实验</span> —— 用户可能在任务变难时才想起用技能,
+          所以差值可能低估技能的贡献。样本不足时不给结论,也不会自动禁用任何技能。
+        </p>
+      </el-collapse-item>
+    </el-collapse>
+
     <SkillImportDialog
       v-model="showImportDialog"
       @success="handleImportSuccess"
@@ -300,7 +350,8 @@ interface Skill {
   triggerKeywords: string[];
   enabled: boolean;
   usageCount: number;
-  successRate: number;
+  /** 【M4-D】null = 暂无使用记录(此前恒为 100,是编造的) */
+  successRate: number | null;
 }
 
 interface SkillProposal {
@@ -355,6 +406,7 @@ const loadSkills = async () => {
     console.error('加载技能失败', error);
   }
   loadEffectiveness();
+  loadUtility();
 };
 
 /**
@@ -374,6 +426,27 @@ const loadEffectiveness = async () => {
     console.error('加载效果统计失败', error);
   }
 };
+
+/**
+ * 【M4-D】边际效用 —— 同类别任务下,带该技能 vs 不带该技能的成功率差。
+ * 这是"这个技能到底有没有用"目前能给出的最强信号。
+ */
+const utilityRows = ref<any[]>([]);
+
+const loadUtility = async () => {
+  try {
+    const result = await (window as any).electronAPI?.skills?.getUtility?.();
+    if (result?.success && Array.isArray(result.data)) {
+      utilityRows.value = result.data;
+    }
+  } catch (error) {
+    console.error('加载边际效用失败', error);
+  }
+};
+
+const negativeUtilityCount = computed(() =>
+  utilityRows.value.filter((r: any) => typeof r.delta === 'number' && r.delta < 0).length
+);
 
 const harmfulCount = computed(() =>
   effectivenessRows.value.filter((r: any) => r.verdict === 'harmful').length
@@ -730,6 +803,11 @@ onUnmounted(() => {
   font-size: var(--font-size-caption);
   color: var(--text-secondary);
   line-height: 1.6;
+}
+
+.note-strong {
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
 }
 
 .proposal-detail {

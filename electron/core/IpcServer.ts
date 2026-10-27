@@ -366,7 +366,28 @@ export class IpcServer {
       try {
         const skillLoader = SkillLoader.getInstance();
         const skills = skillLoader.getAllSkills();
-        return { success: true, data: skills };
+        /**
+         * 【M4-D】用【真实数据】覆盖技能卡上的使用统计。
+         *
+         * 此前 `usageCount` / `successRate` 来自 SkillLoader 的技能状态,
+         * 而写这两个字段的 `recordSkillUsage()` **全仓零调用方** ——
+         * 于是技能卡永远显示「0 次使用 / 100% 成功率」,
+         * 那不是"还没数据",那是**编造的**。
+         *
+         * 现改为从 SkillEffectivenessTracker 取真实的应用记录:
+         *   usageCount  = 该技能被应用的次数
+         *   successRate = 应用时运行的成功率(无数据时为 null,UI 显示 "—")
+         */
+        const tracker = SkillEffectivenessTracker.getInstance();
+        const enriched = skills.map((s: any) => {
+          const stat = tracker.getSkillUsage(s.id);
+          return {
+            ...s,
+            usageCount: stat?.runs ?? 0,
+            successRate: stat?.successRate ?? null,
+          };
+        });
+        return { success: true, data: enriched };
       } catch (error) {
         this.log.error('skills:list 失败', error);
         return { success: false, error: String(error) };
@@ -385,6 +406,22 @@ export class IpcServer {
         return { success: true, data: tracker.listAllVerdicts() };
       } catch (error) {
         this.log.error('skills:getEffectiveness 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    /**
+     * 【M4-D】技能的边际效用 —— 同类别任务下,带它 vs 不带它的成功率差。
+     *
+     * 这是「这个技能到底有没有用」目前能给出的最强信号。
+     * 【口径】观察性对比,非受控实验(详见 SkillEffectivenessTracker.getMarginalUtility)。
+     */
+    ipcMain.handle('skills:getUtility', async () => {
+      try {
+        const tracker = SkillEffectivenessTracker.getInstance();
+        return { success: true, data: tracker.listAllUtilities() };
+      } catch (error) {
+        this.log.error('skills:getUtility 失败', error);
         return { success: false, error: String(error) };
       }
     });

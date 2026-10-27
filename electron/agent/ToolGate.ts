@@ -64,6 +64,12 @@ const DEFAULT_PERMISSIONS: Record<string, ToolPermission> = {
   Read: 'auto',
   Glob: 'auto',
   Grep: 'auto',
+  // 【M4-D 补登】load_skill 是只读(读技能正文文件,无副作用)。
+  //   此前漏登 → 落到兜底 'confirm' → headless 场景【直接被拒】,
+  //   UI 场景每加载一次技能就弹一次确认框。
+  //   症状:「技能被应用」这件事在数据里根本不存在(M4-D 的信号源),
+  //   且只读操作被当成有副作用,徒增打断。
+  load_skill: 'auto',
   // 写:需要用户知情
   Edit: 'confirm',
   Write: 'confirm',
@@ -151,6 +157,17 @@ export class ToolGate {
     }
 
     // ② 权限档位:metadata.requiresPermission 为真 → 至少 confirm
+    //
+    // 【口径说明 — 别只改一半】
+    // `requiresPermission: false` 并不等于「auto」:它只说明"这个工具没有声明
+    // 需要权限",具体档位仍查 DEFAULT_PERMISSIONS,查不到就落到兜底 'confirm'。
+    // 兜底是**故意的** —— 陌生工具默认保守(见 ToolGate.test.ts「未知工具默认保守」),
+    // 且不能由工具自己声明来降档:声明 false 的工具未必真的无副作用
+    // (例:D1ScreenshotQA 声明 false,但截图本身是可见的隐私面)。
+    //
+    // → 代价:**新增只读工具必须在本表登记**,否则会静默变成 confirm
+    //   (headless 被拒 / UI 每次弹窗)。tests/unit/ToolGate.test.ts 有
+    //   「内置工具档位与声明一致」用例盯着这件事,漏登记会红。
     const declared = (tool.metadata as { requiresPermission?: boolean })?.requiresPermission === true
     const permission: ToolPermission = declared
       ? 'confirm'
