@@ -34,6 +34,7 @@ import { runD5 } from '../skill/builtin/D5RecordingToSkill';
 import { HermesMemory } from '../hermes/HermesMemory';
 import { SkillLoader } from '../skill/SkillLoader';
 import { SelfLearner } from '../learning/SelfLearner';
+import { SkillEffectivenessTracker } from '../learning/SkillEffectivenessTracker';
 import { CrashReportCollector } from '../insight/CrashReport';
 import { IMMessageStore } from '../channel/IMMessageStore';
 import { FileTransferManager } from '../channel/FileTransferManager';
@@ -368,6 +369,22 @@ export class IpcServer {
         return { success: true, data: skills };
       } catch (error) {
         this.log.error('skills:list 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    /**
+     * 【M4-B】技能/工具效果判定 —— 把学习闭环收集到的数据变成可读结论。
+     *
+     * 此前 SkillEffectivenessTracker 收集了调用与成败,但【零读取方】——
+     * 数据进了 skill-stats.json 就再没人看过。本通道是它的第一个读取方。
+     */
+    ipcMain.handle('skills:getEffectiveness', async () => {
+      try {
+        const tracker = SkillEffectivenessTracker.getInstance();
+        return { success: true, data: tracker.listAllVerdicts() };
+      } catch (error) {
+        this.log.error('skills:getEffectiveness 失败', error);
         return { success: false, error: String(error) };
       }
     });

@@ -89,6 +89,55 @@
         </span>
       </div>
     </div>
+
+    <!--
+      【M4-B】效果判定面板
+      此前学习闭环收集的调用成败数据【没有任何读取方】—— 进了 skill-stats.json 就没人再看过。
+      本面板是它的第一个读取方:把"这个工具/技能到底好不好用"变成能一眼看到的结论。
+
+      【口径诚实】这里显示的是【绝对成功率】判定,不是边际效用。
+      业界实测:真正有害的判据是"带该技能 vs 不带该技能"的差值,而非绝对成功率低。
+      所以本面板只做【提示】,不做自动禁用/回滚 —— 自动处置需要对照数据。
+    -->
+    <el-collapse v-if="effectivenessRows.length > 0" class="effectiveness-panel">
+      <el-collapse-item name="effectiveness">
+        <template #title>
+          <span class="effectiveness-title">
+            效果统计
+            <el-tag v-if="harmfulCount > 0" type="danger" size="small" style="margin-left: 8px;">
+              {{ harmfulCount }} 个表现不佳
+            </el-tag>
+          </span>
+        </template>
+        <el-table :data="effectivenessRows" size="small" style="width: 100%">
+          <el-table-column prop="skillName" label="名称" min-width="160" />
+          <el-table-column label="类型" width="80">
+            <template #default="{ row }">
+              <el-tag size="small" :type="row.unitType === 'tool' ? 'info' : 'primary'" effect="plain">
+                {{ row.unitType === 'tool' ? '工具' : '技能' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column prop="calls" label="调用" width="80" />
+          <el-table-column label="成功率" width="100">
+            <template #default="{ row }">
+              {{ row.successRate === undefined ? '—' : `${Math.round(row.successRate * 100)}%` }}
+            </template>
+          </el-table-column>
+          <el-table-column label="判定" width="130">
+            <template #default="{ row }">
+              <el-tag size="small" :type="verdictTagType(row.verdict)">
+                {{ verdictLabel(row.verdict) }}
+              </el-tag>
+            </template>
+          </el-table-column>
+        </el-table>
+        <p class="effectiveness-note">
+          说明:判定基于绝对成功率,样本少于 3 次不下结论。"表现不佳"仅作提示,不会自动禁用任何技能 ——
+          自动处置需要"带/不带该技能"的对照结果。
+        </p>
+      </el-collapse-item>
+    </el-collapse>
     
     <SkillImportDialog
       v-model="showImportDialog"
@@ -263,7 +312,46 @@ const loadSkills = async () => {
   } catch (error) {
     console.error('加载技能失败', error);
   }
+  loadEffectiveness();
 };
+
+/**
+ * 【M4-B】拉取效果判定。
+ * 数据源:SkillEffectivenessTracker(主进程)—— M4-B 起才有第一个写入方,
+ * 此前收集的调用成败无任何读取方。
+ */
+const effectivenessRows = ref<any[]>([]);
+
+const loadEffectiveness = async () => {
+  try {
+    const result = await (window as any).electronAPI?.skills?.getEffectiveness?.();
+    if (result?.success && Array.isArray(result.data)) {
+      effectivenessRows.value = result.data;
+    }
+  } catch (error) {
+    console.error('加载效果统计失败', error);
+  }
+};
+
+const harmfulCount = computed(() =>
+  effectivenessRows.value.filter((r: any) => r.verdict === 'harmful').length
+);
+
+const verdictLabel = (v: string): string => ({
+  untested: '未使用',
+  insufficient_data: '样本不足',
+  healthy: '表现良好',
+  degraded: '表现一般',
+  harmful: '表现不佳',
+}[v] || v);
+
+const verdictTagType = (v: string): any => ({
+  untested: 'info',
+  insufficient_data: 'info',
+  healthy: 'success',
+  degraded: 'warning',
+  harmful: 'danger',
+}[v] || 'info');
 
 const handleToggleSkill = async (skillId: string, enabled: boolean) => {
   const skill = skills.value.find(s => s.id === skillId);
@@ -581,6 +669,25 @@ onUnmounted(() => {
 .stat-item strong {
   color: var(--text-primary);
   font-weight: var(--font-weight-semibold);
+}
+
+/* 【M4-B】效果判定面板 */
+.effectiveness-panel {
+  flex-shrink: 0;
+  margin-top: var(--space-md);
+}
+
+.effectiveness-title {
+  font-size: var(--font-size-body);
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+}
+
+.effectiveness-note {
+  margin: var(--space-sm) 0 0;
+  font-size: var(--font-size-caption);
+  color: var(--text-secondary);
+  line-height: 1.6;
 }
 
 .proposal-detail {

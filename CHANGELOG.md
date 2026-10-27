@@ -56,16 +56,46 @@ All notable changes to PiPiClaw will be documented in this file.
 - **格式对齐规范** — `SKILL.md` + frontmatter(`name`/`description`/`when_to_use`),
   修复「生成器与解析器互不兼容」导致的自学习技能从未被真正加载
 
+### 🧠 学习闭环接线(M4-B)
+
+学习闭环两端此前**同时断开**:观察端只挂在旧管道上,效果反馈零调用方。
+详见 `docs/NOVA-#008-m4b-learning-closure-design.md` 与台账 DEV-049~054。
+
+- **agent loop 路径接上学习** — 此前最重要的能力路径**完全不产生学习数据**;
+  现每轮记录轨迹(每步带成败)、结果、失败诊断与效果反馈
+- **观察端语义三错** —
+  ①中文正则门控(用户说「整理一下思路」也会被记一条空样本)→ 普通对话流不再产生样本
+  ②**重复指令直接丢弃** → 改为计数(「重复」恰恰是最该学的信号)
+  ③**只记成功** → 失败也记,并附「哪一步坏了 + 属于哪一类」
+- **执行结果不再丢失** — `observeExecution` 第三参此前带下划线前缀(= 故意不用),
+  成败信息 100% 丢失;现归一为 `ok`/`fail`/`partial`
+- **失败分类器独立成模块** — 9 个低基数类目,互斥匹配、穷尽兜底;
+  与 OpenTelemetry GenAI `error.type` 的 `tool_error` 同名
+- **效果判定可读** — `SkillEffectivenessTracker` 此前收集了数据却**零读取方**;
+  现新增低基数判定(untested / insufficient_data / healthy / degraded / harmful)
+  + IPC + `SkillsView` 「效果统计」面板
+- **调研否决了一个动作** — 原计划「效果差的技能自动降权」被**否决**:
+  真正有害的判据是「带/不带该技能」的**差值**为负,不是绝对成功率低。
+  没有对照数据就没有边际效用,故只做提示**不做自动处置**
+
 ### 🐛 修复
 
 - `InstructionGenerator` 漏 `await` → 每轮 systemPrompt 注入字面量 `[object Promise]`
 - 技能保存目录双源(写 `appPath/../skills` 读 `userData/skills`)→ 自学习技能永远扫不到
 - 提案订阅用 `window.require`(`contextIsolation: true` 下恒 undefined)→ 横幅不可能出现
 - `stdio.ts` 缺 `kill()` → MCP server 初始化超时时子进程泄漏
+- **学习块违反「不阻塞 chat 主流」红线** — 裸调 `observeExecution`,
+  一旦抛错则任务流抛 → 回退普通对话流 → 用户看到「LLM 连不上」而非真实失败原因;
+  现整块兜住,异常只记日志
+- **`SkillEffectivenessTracker` 每次记录同步全量写盘** — 接成主链路后,
+  一次 10 步任务 = 10 次同步写 = 主进程被 IO 卡住;现改为去抖 500ms
+- **full-jitter 退避测试测错了对象** — 原用墙钟量间隔,测的是「OS 定时器精度」;
+  Windows 定时器粒度 ~15.6ms 使请求 5ms 实测 12~18ms > 断言上限 10ms;
+  改为断言「请求的退避时长」,并补 `computeBackoffDelay` 纯函数穷举用例
 
 ### 📊 验证
 
-vitest 106 files / 1253 passed / 0 FAIL · vue-tsc 0 error · 后端 tsc 30(= 存量基线)
+vitest 108 files / 1287 passed / 0 FAIL · vue-tsc 0 error · 后端 tsc 30(= 存量基线)
 
 ## [4.5.0-alpha] - 2026-08-06 (LlmAgentBrain v0.1 + MCP PoC + P0 安全,M1)
 

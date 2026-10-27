@@ -34,11 +34,52 @@ import { ModelManager } from '../models/ModelManager';
 /**
  * 观察记录
  */
+/**
+ * 【M4-B】观察条目 —— 升级为「轨迹」型。
+ *
+ * 【依据:业界调研】
+ * - 「按【整条轨迹】评分,而不是只看最终答案」——
+ *   "a correct answer reached through a broken tool call is a latent
+ *   production incident"(经由损坏的工具调用得到的正确答案,是潜伏的生产事故)
+ * - 「捕获轨迹级状态」:trajectory_id / policy_version / final_reward /
+ *   steps / failure:{step,type} / checkpoint_rewards
+ * - 「保留失败」——把事故转成评测用例,而不是让它们消失
+ *
+ * 原实现只有 {instruction, steps, timestamp},且 steps 是未类型化的裸数组,
+ * 成败信息(_result)传进来就被丢弃(参数名带下划线 = 故意不用)。
+ * 后果:分析器拿不到"这次成功了没有、哪一步失败",只能从文本猜。
+ */
 interface Observation {
   id: string;
   instruction: string;
   steps: any[];
   timestamp: number;
+
+  /** 【M4-B】轨迹 id —— 同一次执行的多次观察可归并 */
+  trajectoryId?: string;
+  /**
+   * 【M4-B】最终结果 —— 'ok' | 'fail' | 'partial'。
+   * 此前 _result 参数被丢弃,成败信息完全丢失。
+   */
+  outcome?: 'ok' | 'fail' | 'partial';
+  /**
+   * 【M4-B】同一条指令被观察到的次数。
+   *
+   * 【关键语义修正】原实现检测到重复指令就【丢弃】—— 但"重复"恰恰是
+   * 最该学的信号(用户反复做同一件事 = 一个值得固化的技能)。
+   * 调研结论:「重复的操作模式」正是学习的目标;
+   * 丢重复 = 把要学的东西扔了。现改为计数。
+   */
+  occurrences?: number;
+  /**
+   * 【M4-B】失败诊断 —— {stepIndex, type, message}
+   * 调研:「失败模式分类 + 触发条件」是诊断反馈的必需项。
+   */
+  failure?: { stepIndex?: number; type: string; message?: string };
+  /** 【M4-B】本次执行用到的工具(用于"哪类任务用哪类工具"的分析) */
+  toolsUsed?: string[];
+  /** 【M4-B】是否走的是 agent tool loop(与旧 TaskExecutor 管道区分) */
+  source?: 'agent_loop' | 'task_executor' | 'chat';
 }
 
 /**
@@ -132,27 +173,75 @@ export class SelfLearner {
   }
 
   /**
-   * 观察执行过程（简化版 - 只存入观察列表）
+   * 【M4-B】观察一次执行 —— 轨迹型。
+   *
+   * 【两处语义修正】
+   * 1. **重复不再被丢弃,改为计数。**
+   *    原实现:检测到重复指令就 return,一条指令重复 20 次 = 1 条观察。
+   *    但"重复"恰恰是最该学的信号 —— 用户反复做同一件事,说明它值得
+   *    固化成技能。丢掉重复 = 把要学的东西扔了。现改为 occurrences 计数,
+   *    并在分析时把高频指令作为模式候选。
+   * 2. **结果不再被丢弃。**
+   *    原实现的第三个参数 `_result`(下划线前缀 = 故意不用)导致成败信息
+   *    完全丢失,分析器只能从文本猜。现在 outcome / failure 被记录。
+   *
+   * @param instruction 用户指令原文
+   * @param steps       执行步骤(工具调用序列)
+   * @param result      执行结果 —— 'ok' | 'fail' | 'partial' 或步骤数组
+   * @param meta        轨迹元信息(trajectoryId / toolsUsed / source / failure)
    */
-  public observeExecution(instruction: string, steps: any[], _result: any): void {
+  public observeExecution(
+    instruction: string,
+    steps: any[],
+    result?: any,
+    meta?: {
+      trajectoryId?: string
+      toolsUsed?: string[]
+      source?: 'agent_loop' | 'task_executor' | 'chat'
+      outcome?: 'ok' | 'fail' | 'partial'
+      failure?: { stepIndex?: number; type: string; message?: string }
+    },
+  ): void {
     try {
-      // 检查是否是重复指令（忽略大小写和标点符号）
+      // 归一化后匹配同一条指令
       const normalizedInstruction = this.normalizeInstruction(instruction);
-      const isDuplicate = this.observations.some(obs => 
-        this.normalizeInstruction(obs.instruction) === normalizedInstruction
+      const existing = this.observations.find(obs =>
+        this.normalizeInstruction(obs.instruction) === normalizedInstruction,
       );
 
-      // 如果是重复指令，不添加到观察列表
-      if (isDuplicate) {
-        this.log.info('[SelfLearner] 检测到重复指令，跳过观察', { instruction });
+      // 【M4-B 修正 1】重复 → 计数 + 刷新结果,而不是丢弃
+      if (existing) {
+        existing.occurrences = (existing.occurrences ?? 1) + 1;
+        existing.timestamp = Date.now();
+        // 【M4-B 修正 2】刷新结果时【result 也要参与判定】——
+        // 否则首次是 fail、二次是 ok 时,outcome 仍停在 fail,
+        // 语义变成"第一次的结果说了算",与"最新一次执行说了算"矛盾。
+        const latestOutcome = meta?.outcome ?? this.normalizeOutcome(result);
+        if (latestOutcome) existing.outcome = latestOutcome;
+        if (meta?.failure) existing.failure = meta.failure;
+        if (meta?.toolsUsed) existing.toolsUsed = Array.from(new Set([...(existing.toolsUsed ?? []), ...meta.toolsUsed]));
+        this.saveObservations();
+        this.log.info('[SelfLearner] 重复指令 → 计数', {
+          instruction,
+          occurrences: existing.occurrences,
+        });
         return;
       }
+
+      // 结果归一:可能是字符串、布尔、或带 success 字段的对象
+      const outcome = this.normalizeOutcome(result);
 
       const observation: Observation = {
         id: `obs_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
         instruction,
         steps,
-        timestamp: Date.now()
+        timestamp: Date.now(),
+        occurrences: 1,
+        outcome: meta?.outcome ?? outcome,
+        ...(meta?.trajectoryId ? { trajectoryId: meta.trajectoryId } : {}),
+        ...(meta?.toolsUsed ? { toolsUsed: meta.toolsUsed } : {}),
+        ...(meta?.source ? { source: meta.source } : {}),
+        ...(meta?.failure ? { failure: meta.failure } : {}),
       };
 
       // #007 W1: 窗口 10→100 (订单既定; 观察数据 = LLM 分析输入池, H1 保留钉 — 不主动清)
@@ -163,9 +252,11 @@ export class SelfLearner {
 
       this.saveObservations();
 
-      this.log.info('[SelfLearner] 观察到执行', { 
+      this.log.info('[SelfLearner] 观察到执行', {
         instruction,
-        observationCount: this.observations.length 
+        observationCount: this.observations.length,
+        outcome,
+        tools: meta?.toolsUsed?.length ?? 0,
       });
 
       // #007 W2: 阈值 3→10 (类常量, 实例可覆盖; G1 联动 = slice(-ANALYSIS_THRESHOLD) 同参)
@@ -176,6 +267,30 @@ export class SelfLearner {
     } catch (error) {
       this.log.error('[SelfLearner] 观察执行失败', error);
     }
+  }
+
+  /** 把各种形态的执行结果归一成 'ok' | 'fail' | 'partial' */
+  private normalizeOutcome(result: any): 'ok' | 'fail' | 'partial' | undefined {
+    if (result === undefined || result === null) return undefined;
+    if (typeof result === 'string') {
+      const s = result.toLowerCase();
+      if (s === 'ok' || s === 'success' || s === 'true') return 'ok';
+      if (s === 'fail' || s === 'failed' || s === 'error' || s === 'false') return 'fail';
+      return 'partial';
+    }
+    if (typeof result === 'boolean') return result ? 'ok' : 'fail';
+    if (typeof result === 'object') {
+      if (typeof result.success === 'boolean') return result.success ? 'ok' : 'fail';
+      if (typeof result.ok === 'boolean') return result.ok ? 'ok' : 'fail';
+      if (Array.isArray(result.steps)) {
+        const steps = result.steps as Array<{ status?: string; ok?: boolean }>;
+        const failed = steps.filter(s => s.status === 'failed' || s.ok === false).length;
+        if (failed === 0) return 'ok';
+        if (failed < steps.length) return 'partial';
+        return 'fail';
+      }
+    }
+    return undefined;
   }
 
   /**

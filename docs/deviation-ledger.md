@@ -511,3 +511,80 @@
   - `tests/integration/agent-brain-poc.test.ts` 工具数断言 5 → 6
   - `tests/unit/skills-h1-ui.test.ts` mock 从 `window.require` 改为 `electronAPI.learning.onNewProposal`
   - `tests/unit/self-learner-loop.test.ts` 摘要断言现含触发条件（摘要新增 `- 触发条件:` 行）
+
+---
+
+## W5 接线批偏差登记 · M4-B 学习闭环接线（2026-10-27）
+
+> 本批为「学习闭环两端同时断开」的整改批：观察端没接真实执行、效果反馈零调用方。
+> 编号自 DEV-049 起，按台账「终身唯一、一经分配永不复用」规则。
+> 调研依据与完整设计见 `docs/NOVA-#008-m4b-learning-closure-design.md`。
+
+| ID | 状态 | 摘要 |
+|---|---|---|
+| DEV-049 | 已修 | agent tool loop 路径**完全不产生学习数据** · 观察端只挂在旧 TaskExecutor 管道上，最重要的能力路径是学习闭环的盲区。新增 `ChatManager.recordAgentOutcome()`：轨迹观察 + 结果 + 失败诊断 + 效果反馈 |
+| DEV-050 | 已修 | 观察端语义三错 · ①门控靠中文正则 `/(文件\|整理\|创建\|…)/`，用户说「整理一下思路」也会被记一条 `steps:[]` 的空样本，污染分析池 ②**重复指令直接丢弃** —— 「重复」恰恰是最该学的信号（用户反复做同一件事 = 值得固化成技能）③**只记成功**（`if (result.success)`），失败样本全丢，事故无法转成评测用例。现改为：普通对话流不产生样本、重复改计数、成功失败都记 |
+| DEV-051 | 已修 | 执行结果 100% 丢失 · `observeExecution(instruction, steps, _result)` 第三参带下划线前缀（= 故意不用），成败信息完全丢失，分析器只能从文本猜。现加 `normalizeOutcome()` 归一四种结果形态为 `ok`/`fail`/`partial`，并记 `failure.{stepIndex,type,message}` |
+| DEV-052 | 已修 | 效果反馈两端皆空 · ①`SkillEffectivenessTracker.record()` 全仓零调用方 —— 「技能被调用后效果如何」从未被采集 ②`SkillLoader.recordSkillUsage()` 同样零调用方 → `SkillCard.vue` 渲染的 `usageCount`/`successRate` **永远是编造的**（0 次使用 / 100% 成功率）。现：ChatManager 双路径接入 tracker；新增 `getVerdict()` 低基数判定（untested/insufficient_data/healthy/degraded/harmful）+ `listAllVerdicts()`；新增 IPC `skills:getEffectiveness` + preload + `SkillsView.vue`「效果统计」面板 —— 这是 tracker 的第一个读取方 |
+| DEV-053 | 已修 | 失败分类器挂在有状态单例上 · `SelfLearner.classifyFailure` 静态方法：①单测把 SelfLearner 整个 mock 掉后静态方法消失，调用点直接 TypeError（学习是旁路，不该有能力把主流程带崩）②分类失败是纯函数，与「自我学习」这个有状态单例职责错位。现独立为 `electron/learning/FailureClassifier.ts`：9 个低基数类目、互斥匹配（permission 优先于 tool）、穷尽兜底，与 OTel GenAI `error.type` 的 `tool_error` 同名 |
+| DEV-054 | 已修 | 学习块违反「不阻塞 chat 主流」红线 · 前一版裸调 `observeExecution`，一旦抛错则任务流抛 → 上层 catch → **回退普通对话流** → 用户看到的是「LLM 连不上」，真正的失败原因（任务被拒/命令失败）被吞掉。违反 #006.5 W1 红线。**回归症状**：`tests/unit/chat-execution-ui.test.ts` B-3 由 241ms 变 21s 后 `ECONNRESET`。现整块 try/catch + log，异常不外泄 |
+
+### DEV-049 明细（agent loop 观察端接线，2026-10-27）
+
+- **来源**：M4-A 收尾遗留项「效果反馈零接线」+ 本轮读码复核
+- **旧状态**：`ChatManager.sendMessage` 的 agent loop 分支只 `broadcastConversationUpdate` 后 return，**没有任何观察调用**；`SelfLearner.observeExecution` 的唯一生产调用方在 `TaskExecutor` 分支（`if (result.success)` 内）
+- **新实现**：`recordAgentOutcome(conversationId, instruction, result)` —— ①轨迹观察（每步带 `ok`）②结果追踪（`ok`/`partial`/`fail`）③诊断反馈（首个失败步骤 + 类目）④效果反馈（每次工具调用一条 tracker 记录）
+- **依据**：「按整条轨迹评分，而不是只看最终答案」—— 经由损坏的工具调用得到的正确答案是潜伏的生产事故
+
+### DEV-050 明细（观察端语义三错，2026-10-27）
+
+- **中文正则门控**：`/(文件|文件夹|目录|创建|写入|修改|删除|整理|习惯|偏好|喜欢)/.test(content)` 门控的观察端，steps 恒为 `[]` → 分析器拿不到任何可学的操作序列；且门控是文本猜测，与真实执行无关。**普通对话流现不再产生技能学习样本**（对话记忆 `hermes.addConversationMemory` + 向量沉淀保留 —— 「记住聊过什么」与「学技能」是两件事）
+- **重复即丢弃**：原 `observeExecution` 检测到重复指令就 `return`，一条指令重复 20 次 = 1 条观察。业界共识：「support counts / helpful-harmful counters 是最小可用信号」（ACE 与 ALTK-Evolve 独立收敛到同一条）。现改为 `occurrences` 计数
+- **只记成功**：现成功失败都观察，失败附 `failure.{stepIndex, type, message}`
+- **实现期发现的不一致**（由新测试捕获）：刷新重复项时只读 `meta.outcome`、忽略 `result` 派生值 → 语义变成「第一次的结果说了算」，与「最新一次执行说了算」矛盾。已修为 `meta.outcome ?? normalizeOutcome(result)`
+
+### DEV-051 明细（执行结果归一，2026-10-27）
+
+- 旧签名第三参 `_result`（下划线前缀 = 故意不用）导致成败信息 100% 丢失
+- 现 `normalizeOutcome()` 覆盖四种形态：字符串（`'ok'`/`'success'`/`'fail'`/`'error'`/其它→`partial`）、布尔、`{success}`/`{ok}`、`{steps[]}`（全成功→`ok`，部分失败→`partial`，全失败→`fail`）
+
+### DEV-052 明细（效果反馈两端皆空，2026-10-27）
+
+- **采集端**：`ChatManager` 双路径接入 —— agent loop 路径（每工具调用一条）与 TaskExecutor 路径（每步骤一条）
+- **口径澄清**：新增 `unitType: 'tool' | 'skill'`。**工具名不是技能名** —— 把 `Read` 这类工具名记进技能库会污染技能的效用统计。当前记的是**工具级**成败；技能级效用（应用了技能 S 之后任务是否成功）需 run 携带「本次实际应用的技能列表」，当前 agent 载荷的 `toolCalls` 只有 `{name, ok, durationMs}` 无参数 → 归 M4-C
+- **判定 API**：`getVerdict()` 五档（样本 < 3 次不下结论）、`listAllVerdicts()` 按严重度排序
+- **读取端**（此前一个都没有）：IPC `skills:getEffectiveness` + preload `skills.getEffectiveness()` + `SkillsView.vue`「效果统计」折叠面板
+- **调研否决的动作**：原计划「效果差的技能自动降权」。**否决** —— FlowEvo 对照实验表明真正有害的判据是「带/不带该技能」的**差值**为负（阈值 −0.1），而非绝对成功率低；没有对照数据就没有边际效用。故本批判定**只做展示与告警，不做任何自动处置**
+- **顺带修复的既有性能债**：`SkillEffectivenessTracker.persistToDisk()` 每次 `record()` 同步全量写盘。此前 `record()` 零调用方所以无所谓；接成主链路后一次 10 步任务 = 10 次同步全量写 = 主进程被 IO 卡住。现改为去抖 500ms（`unref` 不阻止进程退出）+ `flush()` 显式落盘
+
+### DEV-053 明细（失败分类器独立化，2026-10-27）
+
+- **问题**：挂在 `SelfLearner.classifyFailure` 静态方法上 —— ①单测 mock 掉 SelfLearner 后静态方法消失，调用点 TypeError ②纯函数挂在有状态单例上，职责错位
+- **新实现**：`electron/learning/FailureClassifier.ts`，9 类目（`permission_denied` / `user_cancelled` / `timeout` / `rate_limited` / `not_found` / `context_overflow` / `parse_error` / `tool_error` / `unknown`），匹配顺序按特异性排（泛化的 `tool` 不能抢走 `permission`），自由文本只进 `message` 不进 `type`
+- **对齐**：OTel GenAI 语义约定中 `error.type` 是 tool span 上唯一 Stable 属性，MCP 工具失败 SHOULD 取 `tool_error` —— 本类目与之同名，便于日后接 OTel
+- **护栏**：限流判定用无歧义词组（`rate limit`/`too many requests`/…）而非 `includes('rate')`，避免误匹配 `generate`/`moderate`/`accurate`
+
+### DEV-054 明细（容错红线，2026-10-27）
+
+- **问题**：学习块裸调 `observeExecution` / `classifyFailure`，未包 try/catch → 抛错则任务流抛 → 上层 catch → 回退普通对话流 → 用户看到「LLM 连不上」而非真实失败原因。违反 #006.5 W1「catch→log, 不阻塞 chat 主流」红线
+- **回归症状**：`tests/unit/chat-execution-ui.test.ts` B-3 由 241ms 变 21095ms 后 `read ECONNRESET`（回退路径去连 `http://localhost:18789` 的 mock provider，网络重试超时）
+- **修法**：整块 try/catch + `this.log.warn('[ChatManager] M4-B 学习记录失败(不阻塞 chat 流)', e)`；异常不外泄，主流程结果一字不改
+- **新增回归钉**：`tests/unit/chat-m4b-learning-wiring.test.ts`「旁路红线:学习侧抛错不得影响用户拿到的回复」
+
+### 关单（W5 接线批 · M4-B 学习闭环接线，2026-10-27）
+
+- **范围**：DEV-049 ~ DEV-054（6 条）
+- **验证**：
+  - vue-tsc: 0 error
+  - vitest: Test Files 108 passed (108) / Tests 1287 passed | 14 skipped (1301) / 0 FAIL
+  - 后端 tsc（tsconfig.node.json）: 30 error（= 存量基线，零新增）
+- **新增测试**：
+  - `tests/unit/learning-trajectory-m4b.test.ts`（17 例）失败分类器 9 类目 + 互斥 + 低基数；轨迹型观察（计数/归一/失败保留/元信息/刷新语义）
+  - `tests/unit/chat-m4b-learning-wiring.test.ts`（5 例）agent loop 接线：轨迹观察 / 效果反馈 / partial-fail 诊断 / 全失败 / 旁路不反噬主链路
+  - `tests/unit/SkillEffectivenessTracker.test.ts`（+8 例）判定五档 + unitType + 排序；落盘去抖 + flush
+- **同时修复的存量失败**（基线复现，非本批引入）：
+  - `tests/unit/error-recovery.test.ts`「重试间隔在指数窗口内(full jitter)」—— 原用**墙钟**量退避间隔，测的是「OS 定时器精度」而非「退避策略」；Windows 定时器粒度 ~15.6ms 使请求 5ms 实测 12~18ms > 断言上限 10ms。改为：①注入 `sleep` 捕获**请求的退避时长**做确定性断言 ②真实 `setTimeout` 只验「确实等了」且上界按 OS 粒度放宽。另补 `computeBackoffDelay` 纯函数穷举断言（原先只验 random=0.5 一个点，漏了 random=0 与 maxDelayMs 截断）
+- **行为变更同步**：
+  - `electron/preload.ts` 新增 `skills.getEffectiveness()` + `IpcChannels.SKILLS_GET_EFFECTIVENESS`
+  - `electron/core/IpcServer.ts` 新增 `skills:getEffectiveness` handler
+  - `src/views/SkillsView.vue` 新增「效果统计」折叠面板（默认折叠，面板下方明写「不会自动禁用任何技能」口径）

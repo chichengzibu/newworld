@@ -181,6 +181,7 @@ const IpcChannels = {
   // ========== 技能管理 ==========
   SKILLS_LIST: 'skills:list',
   SKILLS_TOGGLE: 'skills:toggle',
+  SKILLS_GET_EFFECTIVENESS: 'skills:getEffectiveness',
   SKILLS_RELOAD: 'skills:reload',
   SKILLS_IMPORT_FILE: 'skills:importFile',
   SKILLS_IMPORT_URL: 'skills:importUrl',
@@ -1021,6 +1022,10 @@ const electronAPI = {
 
       toggle: (id: string, enabled: boolean): Promise<IpcResponse<boolean>> =>
         ipcRenderer.invoke(IpcChannels.SKILLS_TOGGLE, id, enabled),
+
+      /** 【M4-B】效果判定列表(工具/技能的调用成败结论) */
+      getEffectiveness: (): Promise<IpcResponse<any[]>> =>
+        ipcRenderer.invoke(IpcChannels.SKILLS_GET_EFFECTIVENESS),
 
       reload: (): Promise<IpcResponse<void>> =>
         ipcRenderer.invoke(IpcChannels.SKILLS_RELOAD),

@@ -192,14 +192,18 @@ when_to_use: 当用户要求目录文件整理时触发
 
 ## 五、遗留与后续
 
-- **观察端仍是中文正则门控**：`ChatManager` 的 `shouldPrecipitate` 用
-  `/(文件|整理|创建|...)/` 判断是否记录观察，且去重逻辑把「重复」过滤掉
-  （而重复恰恰是最该学的信号）。属观察端问题，不在本单范围 → 后续批处理
+> **2026-10-27 更新**：前两项与「技能效果反馈」已由 [M4-B 学习闭环接线](NOVA-#008-m4b-learning-closure-design.md) 处理。
+
+- ~~**观察端仍是中文正则门控**~~ → **M4-B 已修**：中文正则门控取消，
+  普通对话流不再产生技能学习样本；去重改为计数（重复是最该学的信号）
+- ~~**技能效果反馈未接线**~~ → **M4-B 已修**：`SkillEffectivenessTracker.record()`
+  接入 agent loop 与 TaskExecutor 双路径，并新增判定 API + IPC + UI 面板
 - **三套技能系统尚未统一**：`SkillLoader`（解析）/ `SkillManager`（增删改查，
   `executeSkill` 仍是 stub）/ `SkillRuntime`（registry + invoke，有真实
   permissionToken 检查）三者并存。本单只统一了「加载 + 注入 + 工具」这条主链
-- **技能效果反馈未接线**：`SkillEffectivenessTracker.record()` 全仓零调用方
-  —— 闭环里最该有的「学习反馈」环节仍缺失
+- **技能级效用未接**（M4-B 新增遗留）：M4-B 记的是**工具级**成败。
+  「应用了技能 S 之后任务是否成功」需 run 携带「本次实际应用的技能列表」，
+  当前 agent 载荷的 `toolCalls` 只有 `{name, ok, durationMs}` 无参数 → 后续批
 - **Embedding 仍是 stub**：无配置时用 SHA-256 伪向量，召回是噪声。
   `EmbeddingService` 的 ollama/openai/zhipu 后端代码已存在，只差配置
 

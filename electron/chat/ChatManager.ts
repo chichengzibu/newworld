@@ -20,6 +20,8 @@ import { TaskExecutor } from '../task/TaskExecutor';
 import { InstructionGenerator } from '../task/InstructionGenerator';
 import { HistoryAssembler } from './HistoryAssembler';
 import { SelfLearner } from '../learning/SelfLearner';
+import { SkillEffectivenessTracker } from '../learning/SkillEffectivenessTracker';
+import { classifyFailure } from '../learning/FailureClassifier';
 import { CostTracker } from '../insight/CostTracker';
 import { ConfigStore } from '../core/ConfigStore';
 import { AgentEventRelayBus, type AgentRunEvent } from '../agent/AgentEventRelay';
@@ -265,6 +267,19 @@ export class ChatManager {
       try {
         const agentResult = await this.dispatchToAgent(conversationId, content, 'ui');
         if (agentResult.handled) {
+          /**
+           * 【M4-B】agent loop 路径的观察 + 结果反馈。
+           *
+           * 依据业界调研的四组件模型(缺一环则闭环不成立):
+           *   ① 轨迹捕获 ← agent 事件(已有)
+           *   ② 结果追踪 ← 本行:把成败与失败模式写进 tracker
+           *   ③ 诊断反馈 ← failure 分类(工具错/权限/超时/限流…)
+           *   ④ 持久存储 ← skill-stats.json + observations.json(已有)
+           *
+           * 此前 agent loop 路径【完全不产生学习数据】—— 只有旧的
+           * TaskExecutor 管道有观察端。这是最重要的能力路径,却是盲区。
+           */
+          this.recordAgentOutcome(conversationId, content, agentResult);
           this.broadcastConversationUpdate(conversationId);
           const done = agentResult.messageId
             ? this.config.getMessage(conversationId, agentResult.messageId)
@@ -450,20 +465,61 @@ export class ChatManager {
         this.broadcastConversationUpdate(conversationId);
         
         // ============ Hermes 自我学习 ============
-        if (result.success) {
-          // #007 G3 观察端覆盖声明 (订单 b①):
-          // 本行 = G3 在【任务流分支】的既有观察端 (chat 任务成功执行时, 既有链, #007 补声明不动代码)
-          //        三元组: instruction=用户消息原文 / steps=任务steps[] / _result=TaskExecutor 返回对象 (result.success 语义)
-          // 本块外的 handleNormalChat shouldPrecipitate 块 (L515-529) = G3 在【普通对话流】的新增观察端 (#007 本单)
-          //        三元组: instruction=用户消息原文 / steps=[] (v1 不接步骤摘要, W5 接线批扩) / _result='ok'|'fail' (依据 finalMsg.status)
-          // 两分支互斥 (任务流失败 → 回退普通对话流; chat-execution-ui B-1/B-2 走任务流 → 本行覆盖) → 无重复观察
+        /**
+         * 【M4-B 修正】此前【只观察成功的执行】(if (result.success))——
+         * 失败样本全被丢弃。而调研明确:「保留失败 —— 把事故转成评测用例,
+         * 而不是让它们消失」。失败样本恰恰是最有学习价值的。
+         *
+         * 现在成功与失败都观察,并附带失败诊断。
+         *
+         * 【容错红线 — 整块包 try/catch】
+         * 学习是【旁路】,不是主链路的一部分。前一版把 observeExecution 裸调,
+         * 一旦它抛错(哪怕是被单测 mock 掉一个静态方法),整个任务流就抛 →
+         * 被上层 catch → 回退普通对话流 → 用户看到的是"LLM 连不上"这种
+         * 无关错误,而真正的失败原因(任务被拒/命令失败)被吞掉了。
+         * 这违反 #006.5 W1 立的"catch→log, 不阻塞 chat 主流"红线。
+         * 现在:整块兜住,任何异常只记日志,主流程结果一字不改。
+         */
+        try {
           const selfLearner = SelfLearner.getInstance();
+          const resultSteps = (result.result?.steps ?? []) as Array<Record<string, any>>;
+          const failedStep = resultSteps.find(
+            (s) => s?.status === 'failed' || s?.error,
+          );
+          selfLearner.observeExecution(
+            content,
+            steps,
+            result,
+            {
+              source: 'task_executor',
+              toolsUsed: steps.map((s: any) => s?.action).filter(Boolean),
+              ...(failedStep
+                ? {
+                    failure: {
+                      stepIndex: resultSteps.indexOf(failedStep),
+                      ...classifyFailure(failedStep?.error, failedStep?.description),
+                    },
+                  }
+                : {}),
+            },
+          );
 
-          // 观察执行 - SelfLearner内部会自动检查是否达到分析阈值
-          selfLearner.observeExecution(content, steps, result);
-          // 注意：分析是异步的，前端通过 skills:new-proposal 事件接收通知
+          // 效果反馈:每个步骤一条 —— 让 tracker 有数据可统计
+          const tracker = SkillEffectivenessTracker.getInstance();
+          for (const s of resultSteps) {
+            tracker.record({
+              skillName: s?.type ?? s?.description ?? 'unknown',
+              unitType: 'tool',
+              ts: Date.now(),
+              durationMs: Math.max(0, (s?.endTime ?? 0) - (s?.startTime ?? 0)),
+              success: s?.status !== 'failed' && !s?.error,
+              conversationId,
+            });
+          }
+        } catch (e) {
+          this.log.warn('[ChatManager] M4-B 学习记录失败(不阻塞 chat 流)', e);
         }
-        
+
         return finalMsg;
       }
     } catch (taskError) {
@@ -590,19 +646,25 @@ export class ChatManager {
             this.log.warn('[ChatManager] #006.5 W1 向量层沉淀失败 (不阻塞 chat 流)', e);
           }
 
-          // #007 G3 O1 (订单定案): 轮次完成后推 1 条观察 → 触发 SelfLearner 分析池
-          //   三元组实证: instruction = 用户消息原文 / steps = [] (v1 不接 TaskExecutor 步骤摘要, W5 接线批扩)
-          //              _result = 'ok' | 'fail' (依据 finalMsg.status, 现签名第 3 参下划线未用, #007 填语义, 不动方法签名)
-          //   容错: catch→log, 不阻塞 chat 主流 (沿用 #006.5 W1 容错红线)
-          try {
-            SelfLearner.getInstance().observeExecution(
-              content,
-              [],
-              finalMsg.status === 'error' ? 'fail' : 'ok'
-            );
-          } catch (e) {
-            this.log.warn('[ChatManager] #007 G3 observeExecution 失败 (不阻塞 chat 流)', e);
-          }
+          /**
+           * 【M4-B 修正】普通对话流【不再产生技能学习样本】。
+           *
+           * 此前:被中文正则 /(文件|整理|创建|...)/ 门控后,把整轮对话
+           * 推成一条观察(steps 恒为空数组)。后果:
+           *   - 门控是文本猜测,与真实执行无关 —— 用户说"整理一下思路"
+           *     也会被记录,但没有任何执行发生
+           *   - steps 恒为 [] → 分析器拿不到任何可学的操作序列
+           *   - 这样的样本进池,污染了真正有执行轨迹的样本
+           *
+           * 依据调研:「轨迹捕获」要的是【结构化轨迹】,不是聊天文本。
+           * 真正的执行轨迹由两处产生(本批已接):
+           *   - agent tool loop 路径 → recordAgentOutcome
+           *   - TaskExecutor 任务流 → 上方 observeExecution(result, ...)
+           * 普通对话没有执行,没有可学的东西,故不产生观察。
+           *
+           * 对话记忆(hermes.addConversationMemory + 向量沉淀)仍保留 ——
+           * 那是"记住聊过什么",与"学技能"是两件事,不该一起砍。
+           */
         }
       }
 
@@ -1238,6 +1300,71 @@ export class ChatManager {
         w.webContents.send('agent:onEvent', { conversationId, event });
       }
     });
+  }
+
+  /**
+   * 【M4-B】记录 agent loop 的一次执行:轨迹观察 + 效果反馈。
+   *
+   * 调研依据:「按整条轨迹评分,而非只看最终答案」——
+   * 经由失败的工具调用得到的正确答案,是潜伏的生产事故。
+   * 因此这里同时记录:
+   *   - 轨迹(工具调用序列 + 每步成败)
+   *   - 最终结果
+   *   - 失败诊断(首个失败步骤 + 分类)
+   * 并把每次工具调用写进 SkillEffectivenessTracker —— 它此前零调用方,
+   * 意味着"技能被调用后效果如何"这个闭环信号从未被采集。
+   */
+  private recordAgentOutcome(
+    conversationId: string,
+    instruction: string,
+    result: AgentDispatchResult,
+  ): void {
+    const toolCalls = result.toolCalls ?? [];
+    const failed = toolCalls.find(c => !c.ok);
+    const outcome: 'ok' | 'fail' | 'partial' = failed
+      ? (toolCalls.some(c => c.ok) ? 'partial' : 'fail')
+      : 'ok';
+
+    try {
+      // ① 轨迹观察
+      const failure = failed
+        ? {
+            stepIndex: toolCalls.indexOf(failed),
+            ...classifyFailure(failed.name),
+          }
+        : undefined;
+
+      SelfLearner.getInstance().observeExecution(
+        instruction,
+        toolCalls.map(c => ({ name: c.name, ok: c.ok, durationMs: c.durationMs })),
+        outcome,
+        {
+          trajectoryId: result.runId,
+          toolsUsed: toolCalls.map(c => c.name),
+          source: 'agent_loop',
+          ...(failure ? { failure } : {}),
+        },
+      );
+
+      // ② 效果反馈:每个工具调用一条记录 → tracker 才有数据可统计
+      //    unitType='tool' —— 这是【工具级】信号,不是技能级效用。
+      //    技能级效用(应用了技能 S 之后任务是否成功)需要 run 携带
+      //    【本次实际应用的技能列表】,当前 agent 载荷没有这个信息 → 属 M4-C。
+      const tracker = SkillEffectivenessTracker.getInstance();
+      for (const c of toolCalls) {
+        tracker.record({
+          skillName: c.name,
+          unitType: 'tool',
+          ts: Date.now(),
+          durationMs: c.durationMs,
+          success: c.ok,
+          conversationId,
+        });
+      }
+    } catch (e) {
+      // 记录失败不得影响主流程
+      this.log.warn('[ChatManager] recordAgentOutcome 失败(不阻塞)', e);
+    }
   }
 
   /** 广播任务单步状态(让执行过程实时可见) */
