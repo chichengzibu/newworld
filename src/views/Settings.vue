@@ -353,6 +353,89 @@
                 </el-form-item>
               </el-form>
             </el-card>
+
+            <!--
+              【M3-A】嵌入后端配置 —— 知识库真向量的入口。
+              此前 EmbeddingService 的三个真后端代码都在,但**没有任何配置入口**,
+              provider 默认 stub-deterministic → 召回用 SHA-256 伪向量 = 噪声。
+              本面板让用户能选后端、测连通、并看到「语义是否真的成立」。
+            -->
+            <el-card class="settings-card">
+              <div class="settings-h">
+                <h3>{{ t('settings.embeddingBackend') }}</h3>
+              </div>
+              <p class="settings-hint">{{ t('settings.embeddingBackendTip') }}</p>
+
+              <el-alert
+                :type="embeddingRealVectors ? 'success' : 'warning'"
+                :closable="false"
+                show-icon
+                style="margin-bottom: var(--space-md);"
+                :title="embeddingRealVectors ? t('settings.embeddingRealOn') : t('settings.embeddingRealOff')"
+              />
+
+              <el-form label-width="120px">
+                <el-form-item :label="t('settings.embeddingProvider')">
+                  <el-select v-model="embeddingForm.provider" style="width: 260px;">
+                    <el-option value="stub" :label="t('settings.embeddingProviderStub')" />
+                    <el-option value="ollama" :label="t('settings.embeddingProviderOllama')" />
+                    <el-option value="openai" :label="t('settings.embeddingProviderOpenai')" />
+                    <el-option value="zhipu" :label="t('settings.embeddingProviderZhipu')" />
+                  </el-select>
+                </el-form-item>
+
+                <el-form-item v-if="embeddingForm.provider === 'ollama'" :label="t('settings.embeddingBaseUrl')">
+                  <el-input v-model="embeddingForm.baseUrl" style="width: 260px;" placeholder="http://localhost:11434" />
+                  <el-button size="small" style="margin-left: var(--space-sm);" @click="detectLocalEmbeddingModels">
+                    {{ t('settings.embeddingDetect') }}
+                  </el-button>
+                </el-form-item>
+
+                <el-form-item
+                  v-if="embeddingForm.provider === 'openai' || embeddingForm.provider === 'zhipu'"
+                  :label="t('settings.embeddingApiKey')"
+                >
+                  <el-input v-model="embeddingForm.apiKey" type="password" show-password style="width: 260px;" />
+                </el-form-item>
+
+                <el-form-item v-if="embeddingForm.provider !== 'stub'" :label="t('settings.embeddingModel')">
+                  <el-select
+                    v-if="embeddingForm.provider === 'ollama' && localEmbeddingModels.length > 0"
+                    v-model="embeddingForm.model"
+                    style="width: 260px;"
+                    :placeholder="t('settings.embeddingModelPlaceholder')"
+                    clearable
+                  >
+                    <el-option v-for="m in localEmbeddingModels" :key="m" :label="m" :value="m" />
+                  </el-select>
+                  <el-input
+                    v-else
+                    v-model="embeddingForm.model"
+                    style="width: 260px;"
+                    :placeholder="t('settings.embeddingModelPlaceholder')"
+                  />
+                </el-form-item>
+
+                <el-form-item>
+                  <el-button type="primary" size="small" @click="saveEmbeddingConfig">
+                    {{ t('settings.embeddingSave') }}
+                  </el-button>
+                  <el-button size="small" @click="testEmbeddingBackend">
+                    {{ t('settings.embeddingTest') }}
+                  </el-button>
+                </el-form-item>
+
+                <el-form-item v-if="embeddingProbe">
+                  <el-alert
+                    :type="embeddingProbe.ok ? (embeddingProbe.semanticCheck?.meaningful ? 'success' : 'warning') : 'error'"
+                    :closable="false"
+                    show-icon
+                    :title="embeddingProbeTitle"
+                    :description="embeddingProbeDetail"
+                  />
+                </el-form-item>
+              </el-form>
+            </el-card>
           </div>
         </div>
 
@@ -779,6 +862,111 @@ async function saveCoreMemory(): Promise<void> {
   await hermesMemoryStore.updateCoreMemory(hermesMemoryStore.editingCoreMemory);
   ElMessage.success(t('settings.coreMemorySaved'));
 }
+
+// ══════════ 【M3-A】嵌入后端配置 ══════════
+// 此前真后端(ollama/openai/zhipu)代码都在,但没有任何配置入口 →
+// provider 恒为 stub-deterministic → 召回用 SHA-256 伪向量 = 噪声。
+
+const embeddingForm = reactive({
+  provider: 'stub' as 'stub' | 'ollama' | 'openai' | 'zhipu',
+  baseUrl: '',
+  apiKey: '',
+  model: '',
+});
+const embeddingRealVectors = ref(false);
+const localEmbeddingModels = ref<string[]>([]);
+const embeddingProbe = ref<any>(null);
+
+async function loadEmbeddingConfig(): Promise<void> {
+  try {
+    const res = await (window as any).electronAPI?.hermes?.embedding?.get?.();
+    if (res?.success && res.data) {
+      const cfg = res.data.config || {};
+      embeddingForm.provider = (cfg.provider || 'stub') as any;
+      embeddingForm.baseUrl = cfg.baseUrl || '';
+      embeddingForm.apiKey = cfg.apiKey || '';
+      embeddingForm.model = cfg.model || '';
+      embeddingRealVectors.value = !!res.data.realVectors;
+    }
+  } catch (e) {
+    console.error('读取嵌入后端配置失败', e);
+  }
+}
+
+async function detectLocalEmbeddingModels(): Promise<void> {
+  try {
+    const res = await (window as any).electronAPI?.hermes?.embedding?.detect?.(embeddingForm.baseUrl || undefined);
+    if (res?.success && res.data) {
+      localEmbeddingModels.value = res.data.models || [];
+      if (localEmbeddingModels.value.length === 0) {
+        ElMessage.warning(res.data.available
+          ? t('settings.embeddingNoLocalModels')
+          : t('settings.embeddingOllamaDown'));
+      }
+    }
+  } catch (e) {
+    console.error('检测本地嵌入模型失败', e);
+  }
+}
+
+async function saveEmbeddingConfig(): Promise<void> {
+  try {
+    const cfg: any = { provider: embeddingForm.provider };
+    if (embeddingForm.provider !== 'stub') {
+      if (embeddingForm.baseUrl) cfg.baseUrl = embeddingForm.baseUrl;
+      if (embeddingForm.apiKey) cfg.apiKey = embeddingForm.apiKey;
+      if (embeddingForm.model) cfg.model = embeddingForm.model;
+    }
+    const res = await (window as any).electronAPI?.hermes?.embedding?.set?.(cfg);
+    if (res?.success) {
+      embeddingRealVectors.value = embeddingForm.provider !== 'stub';
+      ElMessage.success(t('settings.embeddingSaved'));
+    }
+  } catch (e) {
+    console.error('保存嵌入后端配置失败', e);
+  }
+}
+
+async function testEmbeddingBackend(): Promise<void> {
+  embeddingProbe.value = null;
+  try {
+    const res = await (window as any).electronAPI?.hermes?.embedding?.test?.({
+      provider: embeddingForm.provider,
+      baseUrl: embeddingForm.baseUrl || undefined,
+      apiKey: embeddingForm.apiKey || undefined,
+      modelName: embeddingForm.model || undefined,
+    });
+    if (res?.success) {
+      embeddingProbe.value = res.data;
+    } else {
+      embeddingProbe.value = { ok: false, error: res?.error };
+    }
+  } catch (e) {
+    embeddingProbe.value = { ok: false, error: String(e) };
+  }
+}
+
+const embeddingProbeTitle = computed(() => {
+  const p = embeddingProbe.value;
+  if (!p) return '';
+  if (!p.ok) return `${t('settings.embeddingTestFail')}${p.error ? ': ' + p.error : ''}`;
+  return t('settings.embeddingTestOk');
+});
+
+const embeddingProbeDetail = computed(() => {
+  const p = embeddingProbe.value;
+  if (!p || !p.ok) return '';
+  const parts: string[] = [];
+  if (p.dimension) parts.push(`${p.dimension} 维`);
+  if (p.latencyMs !== undefined) parts.push(`${p.latencyMs}ms`);
+  if (p.semanticCheck) {
+    parts.push(p.semanticCheck.meaningful
+      ? t('settings.embeddingSemanticOk')
+      : t('settings.embeddingSemanticBad'));
+    parts.push(`相近 ${p.semanticCheck.similar} / 无关 ${p.semanticCheck.unrelated}`);
+  }
+  return parts.join(' · ');
+});
 
 async function clearAllMemories(): Promise<void> {
   try {
@@ -1216,6 +1404,7 @@ async function handleTestServer(name: string): Promise<void> {
 onMounted(async () => {
   loadShortcutConfig();
   hermesMemoryStore.fetchMemories();
+  loadEmbeddingConfig();
   await Promise.all([
     modelsStore.fetchProviders(),
     modelsStore.fetchProviderTemplates()

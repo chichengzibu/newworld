@@ -69,8 +69,19 @@ export class HermesAdapter implements HermesMemoryInterface {
     return HermesAdapter.instance
   }
 
-  async recall(query: string, opts: RecallOptions = {}): Promise<Memory[]> {
-    const adapterOpts = opts as AdapterRecallOptions
+  /**
+   * 【M3-A 修类型】签名改为 `AdapterRecallOptions`。
+   *
+   * 此前签名是 `RecallOptions`(契约里只有 topK/minScore),但实现内部读
+   * `useVector`/`useKeyword` —— 于是调用方传这两个字段时,
+   * TS 的多余属性检查直接报错(存量 30 条 typecheck 错误里的一条),
+   * 而运行时靠 `as AdapterRecallOptions` 强转又能读到。
+   *
+   * 即:【类型说没有,运行时说有】。AdapterRecallOptions 继承 RecallOptions,
+   * 放宽参数类型对既有调用方完全兼容(所有老调用方只传 topK/minScore)。
+   */
+  async recall(query: string, opts: AdapterRecallOptions = {}): Promise<Memory[]> {
+    const adapterOpts = opts
     const topK = opts.topK ?? RECALL_DEFAULT_TOPK
     const minScore = opts.minScore ?? RECALL_DEFAULT_MIN_SCORE
     const useVector = adapterOpts.useVector !== false
@@ -94,9 +105,25 @@ export class HermesAdapter implements HermesMemoryInterface {
     let vecResults: Array<{ memory: Memory; score: number }> = []
     if (useVector) {
       const model = this.embeddingModel()
+      /**
+       * 【M3-A 修 bug】模型变了 → 全部重新嵌入。
+       *
+       * 旧逻辑:`if (!inStoreIds.has(m.id))` 才重嵌。
+       * 但换后端时,记忆 id 还在库里(id 没变),于是**一条都不会重嵌** ——
+       * 库里留的是旧模型的向量,拿新模型的查询向量去和它们算余弦,
+       * 结果不是"噪声"而是"错的"。而 MemoryVectorStore 里那套
+       * 「维度/模型变化 → 清空重建」的逻辑因此**永远不会触发**
+       * (它只在 upsert 时检查,而 upsert 被跳过了)。
+       */
+      const indexModel = this.vectorStore.getActiveModel()
+      const modelChanged = !!indexModel && indexModel !== model
+      if (modelChanged) {
+        this.log.warn(`[HermesAdapter] 嵌入模型变化(${indexModel} → ${model}),记忆向量全部重新嵌入`)
+        await this.vectorStore.reset()
+      }
       const inStoreIds = new Set(this.vectorStore.list().map(e => e.id))
       for (const m of candidates) {
-        if (!inStoreIds.has(m.id)) {
+        if (modelChanged || !inStoreIds.has(m.id)) {
           const v = await this.embedder.embedMemory(m, { model })
           await this.vectorStore.upsert(m, v, model)
         }
@@ -133,14 +160,17 @@ export class HermesAdapter implements HermesMemoryInterface {
     await this.vectorStore.upsert(memory, vec, model)
   }
 
-  /** 读取当前启用的嵌入模型(stub / ollama / openai / zhipu),默认 stub */
+  /**
+   * 读取当前启用的嵌入模型(stub / ollama / openai / zhipu),默认 stub。
+   *
+   * 【M3-A】provider→model 的映射此前在本文件**另抄了一份**,
+   * 与 EmbeddingService.getActiveModel() 各维护各的 ——
+   * 两处分叉的后果是"配置说是真向量、实际走的是 stub",
+   * 而且用户完全看不出问题(召回只是变差,不会报错)。
+   * 现单一真源在 EmbeddingService。
+   */
   private embeddingModel(): EmbeddingModel {
-    const cfg = this.configStore.get('hermes.embedding') as { provider?: string } | undefined
-    if (!cfg?.provider) return 'stub-deterministic'
-    if (cfg.provider === 'ollama') return 'ollama-nomic'
-    if (cfg.provider === 'openai') return 'openai-ada'
-    if (cfg.provider === 'zhipu') return 'zhipu-embedding'
-    return 'stub-deterministic'
+    return this.embedder.getActiveModelName()
   }
 
   async curate(): Promise<CuratorReport> {

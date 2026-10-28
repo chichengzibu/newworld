@@ -32,6 +32,7 @@ import type {
 // M1 P0-4: 静态 import runD5 (修复 d5:run 内部 require 在 bundled main.js 路径错位, qa report line 184)
 import { runD5 } from '../skill/builtin/D5RecordingToSkill';
 import { HermesMemory } from '../hermes/HermesMemory';
+import { EmbeddingService, type EmbeddingConfig, type EmbeddingModel } from '../hermes/EmbeddingService';
 import { SkillLoader } from '../skill/SkillLoader';
 import { SelfLearner } from '../learning/SelfLearner';
 import { SkillEffectivenessTracker } from '../learning/SkillEffectivenessTracker';
@@ -357,6 +358,90 @@ export class IpcServer {
         return { success: true };
       } catch (error) {
         this.log.error('hermes:saveCoreMemory 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    // ========== 【M3-A】嵌入后端配置 ==========
+    // 此前 EmbeddingService 的三个真后端(ollama/openai/zhipu)代码都在,
+    // 但【没有任何配置入口】—— provider 默认 stub-deterministic,
+    // 于是召回用的是 SHA-256 伪向量:相似度是噪声,检索等于随机匹配。
+    // 这四个通道是该能力对用户可见的入口。
+
+    ipcMain.handle('hermes:embedding:get', async () => {
+      try {
+        const svc = EmbeddingService.getInstance();
+        const cfg = svc.getConfig();
+        const model: EmbeddingModel = cfg.provider === 'ollama' ? 'ollama-nomic'
+          : cfg.provider === 'openai' ? 'openai-ada'
+          : cfg.provider === 'zhipu' ? 'zhipu-embedding'
+          : 'stub-deterministic';
+        return {
+          success: true,
+          data: {
+            config: cfg,
+            model,
+            // 伪向量 = 语义是假的 —— 界面必须如实告知,不能让用户误以为检索在工作
+            realVectors: model !== 'stub-deterministic',
+          },
+        };
+      } catch (error) {
+        this.log.error('hermes:embedding:get 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    ipcMain.handle('hermes:embedding:set', async (_, cfg: EmbeddingConfig) => {
+      try {
+        const svc = EmbeddingService.getInstance();
+        svc.setConfig(cfg ?? {});
+        // 换后端/换模型 = 旧向量全部作废(维度/语义都变了)——
+        // MemoryVectorStore 在下次 upsert 时会检测到并重建索引。
+        this.log.info('[IpcServer] 嵌入后端已更新', { provider: cfg?.provider, model: cfg?.model });
+        return { success: true, data: { config: svc.getConfig() } };
+      } catch (error) {
+        this.log.error('hermes:embedding:set 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    /** 探测本地 ollama:可达吗?装了哪些嵌入模型? */
+    ipcMain.handle('hermes:embedding:detect', async (_, baseUrl?: string) => {
+      try {
+        const svc = EmbeddingService.getInstance();
+        return { success: true, data: await svc.listOllamaEmbeddingModels(baseUrl) };
+      } catch (error) {
+        this.log.error('hermes:embedding:detect 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    /**
+     * 探测后端可用性 + 语义是否成立。
+     * 「连上了」不等于「有用」—— 伪向量也连得上,但召回是噪声。
+     * 故同时报告「可达」与「相近文本确实比无关文本更相似」。
+     */
+    ipcMain.handle('hermes:embedding:test', async (_, opts?: {
+      provider?: 'ollama' | 'openai' | 'zhipu'
+      baseUrl?: string
+      apiKey?: string
+      modelName?: string
+    }) => {
+      try {
+        const svc = EmbeddingService.getInstance();
+        const model: EmbeddingModel = opts?.provider === 'ollama' ? 'ollama-nomic'
+          : opts?.provider === 'openai' ? 'openai-ada'
+          : opts?.provider === 'zhipu' ? 'zhipu-embedding'
+          : 'stub-deterministic';
+        const result = await svc.probe({
+          model,
+          baseUrl: opts?.baseUrl,
+          apiKey: opts?.apiKey,
+          modelName: opts?.modelName,
+        });
+        return { success: true, data: result };
+      } catch (error) {
+        this.log.error('hermes:embedding:test 失败', error);
         return { success: false, error: String(error) };
       }
     });

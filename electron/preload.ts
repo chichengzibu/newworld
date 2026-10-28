@@ -169,6 +169,11 @@ const IpcChannels = {
   // Hermes 记忆管理
   HERMES_GET_MEMORIES: 'hermes:getMemories',
   HERMES_SAVE_CORE_MEMORY: 'hermes:saveCoreMemory',
+  // 【M3-A】嵌入后端配置 —— 真向量的入口
+  HERMES_EMBEDDING_GET: 'hermes:embedding:get',
+  HERMES_EMBEDDING_SET: 'hermes:embedding:set',
+  HERMES_EMBEDDING_DETECT: 'hermes:embedding:detect',
+  HERMES_EMBEDDING_TEST: 'hermes:embedding:test',
 
   // Phase 2: 任务预览与确认
   TASK_TRACE: 'task:trace',
@@ -1013,7 +1018,24 @@ const electronAPI = {
       ipcRenderer.invoke(IpcChannels.HERMES_GET_MEMORIES),
 
     saveCoreMemory: (content: string): Promise<IpcResponse<void>> =>
-      ipcRenderer.invoke(IpcChannels.HERMES_SAVE_CORE_MEMORY, content)
+      ipcRenderer.invoke(IpcChannels.HERMES_SAVE_CORE_MEMORY, content),
+
+    /** 【M3-A】嵌入后端配置 —— 此前真后端代码在,但没有任何配置入口 */
+    embedding: {
+      get: (): Promise<IpcResponse<{ config: any; model: string; realVectors: boolean }>> =>
+        ipcRenderer.invoke(IpcChannels.HERMES_EMBEDDING_GET),
+
+      set: (cfg: { provider?: string; apiKey?: string; baseUrl?: string; model?: string }): Promise<IpcResponse<any>> =>
+        ipcRenderer.invoke(IpcChannels.HERMES_EMBEDDING_SET, cfg),
+
+      /** 探测本地 ollama:可达吗?装了哪些嵌入模型? */
+      detect: (baseUrl?: string): Promise<IpcResponse<{ available: boolean; models: string[]; error?: string }>> =>
+        ipcRenderer.invoke(IpcChannels.HERMES_EMBEDDING_DETECT, baseUrl),
+
+      /** 探测后端可用性 + 语义是否成立(伪向量也"连得上",但召回是噪声) */
+      test: (opts?: { provider?: string; baseUrl?: string; apiKey?: string; modelName?: string }): Promise<IpcResponse<any>> =>
+        ipcRenderer.invoke(IpcChannels.HERMES_EMBEDDING_TEST, opts),
+    }
   },
 
   // ========== 技能管理 ==========

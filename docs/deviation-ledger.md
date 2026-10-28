@@ -736,3 +736,58 @@
   - `electron/core/IpcServer.ts` 新增 `skills:getUtility` handler；`skills:list` 改为用 tracker 真实数据覆盖 usageCount/successRate
   - `src/views/SkillsView.vue` 新增「边际效用」折叠面板（带该技能 / 同类别不带 / 差值，样本不足显示标签）
   - `src/components/skills/SkillCard.vue` 成功率无数据显示 `—` 而非假的 100%
+
+---
+
+## W5 接线批偏差登记 · M3-A 知识库真向量（2026-10-28）
+
+> 路线图 `docs/plan/v5-10week.md` M3 的前半：把 SHA-256 伪向量换成真向量。
+> 编号自 DEV-066 起。完整设计见 `docs/NOVA-#009-m3a-real-vectors-design.md`。
+
+| ID | 状态 | 摘要 |
+|---|---|---|
+| DEV-066 | 已修 | 真向量「只有代码、没有入口」 · `EmbeddingService` 的 ollama/openai/zhipu 三个真后端**全都实现了**，但 provider 默认 `stub-deterministic` → 所有人拿到的都是伪向量；且**全仓没有任何地方写入 `hermes.embedding` 配置**（无 IPC、无 UI），用户想设也设不了。伪向量的后果不是精度差一点，是**完全无语义**——相似文本的余弦是随机值，记忆检索退化成「随机取 N 条」，且不报错、无指标、无线索 |
+| DEV-067 | 已修 | ollama 后端只打老接口且模型名硬编码 · 只打 `/api/embeddings`（不支持批量，`embedBatch` = N 次往返）；模型名硬编码 `nomic-embed-text` —— 用户本机装的是 bge-m3 就会直接失败（而用户明明装了可用模型）。现：优先现代 `/api/embed`（`input` 数组 → 一次请求），老接口回退；模型名优先级 = 用户配置 → 本机探测到的嵌入模型 → 名义默认 |
+| DEV-068 | 已修 | 伪向量被真后端污染成 NaN（最严重）· `hashToVector` 用 `this.dimension` 决定长度，而 `dimension` 会被真后端改写（嵌入一次 bge-m3 → 1024）。而 `hash`+`hash2` 合计只有 64 字节 → `hash2[i-32]` 越界 → **向量全 NaN** → 余弦 NaN → `score >= minScore` 恒 false → **召回静默返回空**。即「切回伪向量后记忆检索彻底失效且不报错」。真后端此前不可达，洞一直藏着。现：伪向量维度**固定 64** + 取模循环取字节 |
+| DEV-069 | 已修 | 换模型后旧向量不清 · `recall` 的 `if (!inStoreIds.has(m.id))` 在换后端时一条都不重嵌（记忆 id 没变）→ 库里留旧模型的向量，拿新模型的查询向量去比 → 结果是**错的**。更讽刺：`MemoryVectorStore` 那套「模型变化→清空重建」逻辑**永不触发**（它只在 upsert 时检查，而 upsert 被跳过）。现：`recall` 比对索引 `activeModel`，变了就 `reset()` 后全量重嵌 |
+| DEV-070 | 已修 | 一条 NaN 毒死整个索引 · `upsert` 不检查向量合法性 → 一条 NaN 进库 → 所有余弦 NaN → 整个索引一条都召不回，且不报错。现：`upsert` 拒收含 NaN/Infinity 的向量 |
+| DEV-071 | 已修 | 契约与实现不一致（一条存量 typecheck 错误）· `HermesAdapter.recall(query, opts: RecallOptions)` 的契约类型只有 `topK`/`minScore`，实现内部却读 `useVector`/`useKeyword` → 调用方传这两个字段时 TS 报「多余属性」，运行时靠强转又能读到。**类型说没有，运行时说有**。现签名放宽为 `AdapterRecallOptions`（继承 `RecallOptions`，向后兼容）→ **后端 typecheck 30 → 29** |
+| DEV-072 | 已修 | provider→model 映射抄了两份 · `HermesAdapter.embeddingModel()` 另抄一份映射，与 `EmbeddingService.getActiveModel()` 各维护各的 → 分叉的后果是「配置说是真向量、实际走的是 stub」，且用户完全看不出来（召回只是变差，不会报错）。现单一真源在 `EmbeddingService.getActiveModelName()` |
+
+### DEV-066 明细（配置入口，2026-10-28）
+
+- **新增 4 个 IPC**（此前一个都没有）：
+  - `hermes:embedding:get` —— 当前配置 + 生效模型 + **是否真向量**
+  - `hermes:embedding:set` —— 保存配置（并清缓存：旧向量不可复用）
+  - `hermes:embedding:detect` —— 探测本地 ollama：可达吗？装了哪些嵌入模型？
+  - `hermes:embedding:test` —— 探测可达性 + **语义自检** + 维度 + 延迟
+- **设置页 UI**（`Settings → 记忆`）：状态条（真向量=绿 / 伪向量=橙并明写「召回是噪声」）+ 后端选择 + 服务地址 + API Key + 模型下拉（本机已装的嵌入模型）+ 「检测本地模型」+「测试连接」
+- **语义自检**：探测时同时嵌入「一对相近文本」与「一对无关文本」，比较两个余弦，差值 > 0.1 才算 `meaningful`。理由：「连上了」不等于「有用」—— 伪向量也连得上
+
+### DEV-068~070 明细（三个因接线而暴露的洞，2026-10-28）
+
+- 这三个洞在真后端**不可达**时一直藏着；一旦接通入口立刻变成生产事故
+- DEV-068 的触发链：嵌入一次 bge-m3（dimension→1024）→ 切回伪向量 → 伪向量也 1024 维 → `hash2[991]` 越界 → 全 NaN → 余弦 NaN → `score >= minScore` 恒 false → **召回静默返回空**
+- DEV-069 的连锁讽刺：`MemoryVectorStore` 里那套「模型变化→清空重建」的逻辑**永远不会触发** —— 它只在 `upsert` 时检查，而 `upsert` 恰恰因为 id 没变被跳过了
+- DEV-070 是纵深防御：即便别处传进来 NaN，也不能让它进库
+
+### 关单（W5 接线批 · M3-A 知识库真向量，2026-10-28）
+
+- **范围**：DEV-066 ~ DEV-072（7 条）
+- **验证**：
+  - vue-tsc: 0 error
+  - vitest: Test Files 113 passed (113) / Tests 1354 passed | 14 skipped (1368) / 0 FAIL
+  - 后端 tsc（tsconfig.node.json）: **29 error**（= 修掉 1 条存量错误后的新基线）
+- **A/B 对照（本地 ollama bge-m3，真跑）**：8 条记忆（1 相关 + 7 干扰）、6 条**改写**查询、只用向量召回、统计 top-1 命中
+  - **真向量：6/6**（随机基线 1/8 = 12.5%）
+  - **伪向量：0/6**
+  - 余弦实测 `cos(查询,目标)=0.7753` vs `cos(查询,无关)=0.4049`
+- **新增测试**：
+  - `tests/unit/embedding-service-m3a.test.ts`（17 例）现代/老接口分流 · 批量一次请求 · 模型自动探测 · 只列嵌入模型 · 语义自检三态 · 换后端清缓存 · **伪向量维度固定 64** · **伪向量不含 NaN** · 确定性
+  - `tests/integration/embedding-local-ollama.test.ts`（5 例）**打真的本地 ollama**：探测模型 · 余弦间隔 · 探测自检 · 改写召回排第一 · **A/B 命中率 6/6 vs 0/6**（ollama 不可用时跳过，不红 CI）
+  - `tests/unit/memory-vector-persistence.test.ts`（+1 例）**V8：NaN/Infinity 向量拒收**
+- **行为变更同步**：
+  - `electron/preload.ts` 新增 `hermes.embedding.{get,set,detect,test}` + 4 个 channel 常量
+  - `electron/core/IpcServer.ts` 新增 4 个 handler
+  - `src/views/Settings.vue` 记忆页新增「嵌入后端」卡片
+  - `src/locales/{zh-CN,en-US}.ts` 新增 23 个文案键
