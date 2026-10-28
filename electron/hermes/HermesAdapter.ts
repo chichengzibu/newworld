@@ -20,6 +20,38 @@ export interface AdapterRecallOptions extends RecallOptions {
  * 禁"语义检索"措辞: 全单统一用 "相关度过滤 / 管线召回"。
  */
 export const RECALL_DEFAULT_TOPK = 5
+
+/**
+ * 【M3-B】RRF 的 k 常数 —— 行业标准值 60。
+ * k 越大,头部名次之间的差距被压得越平(更看重"进没进前列");
+ * k 越小,第一名优势越明显。
+ */
+const RRF_K = 60
+
+/**
+ * 【M3-B】RRF 融合 —— 只看排名,不看分数。
+ *
+ * @param lists 各路检索结果(已按相关性降序)
+ * @param k     平滑常数(越大越平)
+ */
+export function rrfFuse(
+  lists: Array<Array<{ id: string; memory: Memory; score: number }>>,
+  k: number,
+): ScoredMemory[] {
+  const fused = new Map<string, ScoredMemory>()
+  for (const list of lists) {
+    list.forEach((item, index) => {
+      const contribution = 1 / (k + index + 1)
+      const existing = fused.get(item.id)
+      if (existing) {
+        existing._score += contribution
+      } else {
+        fused.set(item.id, { ...item.memory, _score: contribution })
+      }
+    })
+  }
+  return Array.from(fused.values()).sort((a, b) => b._score - a._score)
+}
 export const RECALL_DEFAULT_MIN_SCORE = 0.1
 /**
  * #006.5 R-1 (休眠 brain 链) 阈值常量 — 宽召回 — 备选上下文宁多勿漏
@@ -133,22 +165,38 @@ export class HermesAdapter implements HermesMemoryInterface {
       vecResults = raw.map(r => ({ memory: r.entry.memory, score: r.score }))
     }
 
-    const merged = new Map<string, ScoredMemory>()
-    for (const r of vecResults) {
-      const existing = merged.get(r.memory.id)
-      if (!existing || r.score > existing._score) {
-        merged.set(r.memory.id, { ...r.memory, _score: r.score })
-      }
-    }
-    for (const r of kwResults) {
-      const existing = merged.get(r.memory.id)
-      if (!existing || r.score > existing._score) {
-        merged.set(r.memory.id, { ...r.memory, _score: r.score })
-      }
-    }
+    /**
+     * 【M3-B】融合方式改为 RRF(Reciprocal Rank Fusion)。
+     *
+     * 【旧实现的问题 —— 拿两把不同的尺子比大小】
+     * 旧代码对两路结果**取分数的最大值**:
+     *   关键词路的分数 = 命中词数 / 查询词数(覆盖率,∈[0,1])
+     *   向量路的分数   = 余弦相似度(∈[-1,1])
+     * 两者量纲完全不同,却直接比大小。后果:
+     *   - 命中 1 个字面词的弱匹配(覆盖率 1.0)能盖过语义高度相关的结果(余弦 0.9)
+     *   - 只在一路出现的结果,得分完全由那一路决定,另一路的证据被丢弃
+     *   - 两路都命中的结果(最该排前面的)**得不到任何加分**
+     *
+     * 【RRF 怎么解决】
+     * RRF 只看**排名**,不看分数:
+     *     score(d) = Σ over lists 1 / (k + rank_list(d))     k=60(标准常数)
+     *   - 量纲问题消失(名次是序数,不是实数)
+     *   - 两路都命中的结果得分接近翻倍 → 「双路一致」成为强信号
+     *   - 不需要给两路分数做归一化(那一步最容易引入手工调参的偏差)
+     * 这是混合检索的标准做法(Elasticsearch / Weaviate / Cohere 都在用)。
+     *
+     * 【口径】minScore 仍是**向量路的语义门**(低于此相似度直接不进候选),
+     * 融合只决定候选之间的排序。关键词路没有分数门 —— 覆盖率不适合设门。
+     */
+    const merged = rrfFuse(
+      [
+        vecResults.map(r => ({ id: r.memory.id, memory: r.memory, score: r.score })),
+        kwResults.map(r => ({ id: r.memory.id, memory: r.memory, score: r.score })),
+      ],
+      RRF_K,
+    )
 
-    return Array.from(merged.values())
-      .sort((a, b) => b._score - a._score)
+    return merged
       .slice(0, topK)
       .map(m => ({ id: m.id, content: m.content, score: m.score, createdAt: m.createdAt }))
   }
