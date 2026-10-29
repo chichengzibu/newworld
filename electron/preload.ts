@@ -1281,7 +1281,19 @@ const electronAPI = {
       ipcRenderer.invoke(IpcChannels.INSIGHT_TRACE_START, name, attrs),
     traceEnd: (spanId: string): Promise<IpcResponse<{ spanId: string; endMs: number; stub: boolean }>> =>
       ipcRenderer.invoke(IpcChannels.INSIGHT_TRACE_END, spanId),
-    costToday: (): Promise<IpcResponse<{ totalCostUsd: number; totalTokens: number; stub: boolean }>> =>
+    /**
+     * 【M3-E】今日成本 —— 此前 handler 是**硬编码 0 的 stub**,
+     * 而 CostTracker 一直在真实记账。现返回真数据。
+     */
+    costToday: (): Promise<IpcResponse<{
+      totalCostUsd: number
+      totalTokens: number
+      totalInputTokens: number
+      totalOutputTokens: number
+      byModel: Record<string, number>
+      recent: any[]
+      stub: boolean
+    }>> =>
       ipcRenderer.invoke(IpcChannels.INSIGHT_COST_TODAY)
   },
 

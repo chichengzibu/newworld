@@ -61,6 +61,11 @@ export class CostTracker {
     this.pricing.set('gpt-4o-mini', { inputPer1kUsd: 0.00015, outputPer1kUsd: 0.0006 })
     this.pricing.set('claude-sonnet-4', { inputPer1kUsd: 0.003, outputPer1kUsd: 0.015 })
     this.pricing.set('ollama-llama3', { inputPer1kUsd: 0, outputPer1kUsd: 0 })
+    // 【M3-E】本地模型条目 —— 本地推理没有 API 费用,成本确实是 0,
+    // 但要有条目才能在按模型分布里归到"本地"这一类(而不是落到"未知")。
+    this.pricing.set('ollama-qwen3.5', { inputPer1kUsd: 0, outputPer1kUsd: 0 })
+    this.pricing.set('ollama-bge-m3', { inputPer1kUsd: 0, outputPer1kUsd: 0 })
+    this.pricing.set('ollama-qwen3.8', { inputPer1kUsd: 0, outputPer1kUsd: 0 })
     this.pricing.set('zhipu-glm-4', { inputPer1kUsd: 0.001, outputPer1kUsd: 0.001 })
   }
 
@@ -72,10 +77,50 @@ export class CostTracker {
     return this.pricing.get(model)
   }
 
+  /**
+   * 【M3-E】定价查表 —— 精确命中 → 归一化命中。
+   *
+   * 【为什么需要归一化】
+   * 定价表是按**基座名**建的('gpt-4o' / 'ollama-llama3'),而真实记录的是
+   * **具体模型 id**('gpt-4o-2024-11-20' / 'qwen3.5:9b')。
+   * 只做精确查表 → 大部分调用落到 0 定价 → 成本恒为 0(和那个 stub 一样没信息)。
+   *
+   * 【归一化规则】
+   *   ① 精确命中
+   *   ② 去掉 provider 前缀与版本后缀后再查('ollama/qwen3.5:9b' → 'qwen3.5')
+   *   ③ 都查不到 → 0 定价(**本地模型本就该是 0** —— 没有 API 费用)
+   *
+   * 【口径提醒】本地模型记 0 美元是对的;对本地用户,真正有用的信号是
+   * **token 数按模型的分布**(上下文预算),不是美元。
+   */
+  private lookupPricing(model: string): ModelPricing {
+    const exact = this.pricing.get(model)
+    if (exact) return exact
+
+    const norm = (s: string): string =>
+      s.toLowerCase()
+        .replace(/^(ollama|openai|anthropic|zhipu|deepseek)[-\/]/, '')
+        .replace(/[:@].*$/, '')          // 去掉 ':9b' / '@latest' 标签
+        .replace(/-latest$/, '')
+        .replace(/-\d{4}-\d{2}-\d{2}$/, '')   // 去掉日期版本
+        .trim()
+
+    const target = norm(model)
+    for (const [key, p] of this.pricing) {
+      if (norm(key) === target) return p
+    }
+    // 前缀命中('qwen3.5' 命中 'qwen3.5-9b' 之类)
+    for (const [key, p] of this.pricing) {
+      const nk = norm(key)
+      if (nk && target.startsWith(nk)) return p
+    }
+    return { inputPer1kUsd: 0, outputPer1kUsd: 0 }
+  }
+
   recordUsage(
     entry: Omit<UsageEntry, 'id' | 'ts' | 'costUsd'> & { costUsd?: number },
   ): UsageEntry {
-    const pricing = this.pricing.get(entry.model) ?? { inputPer1kUsd: 0, outputPer1kUsd: 0 }
+    const pricing = this.lookupPricing(entry.model)
     const computed =
       (entry.inputTokens / 1000) * pricing.inputPer1kUsd +
       (entry.outputTokens / 1000) * pricing.outputPer1kUsd

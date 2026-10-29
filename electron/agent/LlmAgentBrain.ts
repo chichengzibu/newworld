@@ -282,7 +282,7 @@ export class LlmAgentBrain implements AgentBrain {
      * fail-safe"而废弃 —— 安全边界不能建立在约定上。
      */
     preApprovedToolConfirm?: boolean
-  } = {}): Promise<{ runId: string; content: string; iterations: number; totalDurationMs: number; totalTokens: number; toolCalls: Array<{ name: string; ok: boolean; durationMs: number; entity?: { kind: string; id: string } }>; appliedSkills: string[] }> {
+  } = {}): Promise<{ runId: string; content: string; iterations: number; totalDurationMs: number; totalTokens: number; promptTokens: number; completionTokens: number; model: string; toolCalls: Array<{ name: string; ok: boolean; durationMs: number; entity?: { kind: string; id: string } }>; appliedSkills: string[] }> {
     const runId = opts.runId ?? `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     const controller = new AbortController()
     const state: RunState = { runId, aborted: false, controller }
@@ -344,6 +344,9 @@ export class LlmAgentBrain implements AgentBrain {
     const convId = opts.conversationId ?? 'unknown'
     // #005 spawn (预算隔离): usage 聚合 + 刹车判定 (run 局部变量, 无状态红线)
     let totalTokens = 0
+    /** 【M3-E】分项 token 计数 —— 成本记账要能区分输入/输出 */
+    let promptTokens = 0
+    let completionTokens = 0
     let budgetBraked = false
     const budgetCheck = (): boolean => {
       if (opts.maxTokens !== undefined && totalTokens >= opts.maxTokens && !budgetBraked) {
@@ -380,7 +383,7 @@ export class LlmAgentBrain implements AgentBrain {
           pushCkpt(takeCkpt('interrupted', 'aborted')) // #004 接缝②: 中止前 flush 当前态 (A2 append-only)
           LlmAgentBrainEvents.emit({ type: 'run_aborted', runId, iterations: iter - 1 })
           this.runs.delete(runId)
-          return { runId, content: finalContent, iterations: iter - 1, totalDurationMs: Date.now() - startMs, totalTokens, toolCalls: toolCallsLog, appliedSkills: [...appliedSkills] }
+          return { runId, content: finalContent, iterations: iter - 1, totalDurationMs: Date.now() - startMs, totalTokens, promptTokens, completionTokens, model: opts.model ?? DEFAULT_MODEL, toolCalls: toolCallsLog, appliedSkills: [...appliedSkills] }
         }
         // #005 spawn (预算刹车): 每轮 LLM 调用前判定 — 超限即停 tool 循环,
         // 下方 maxIter 收尾块取【最后 assistant】为 final (降级到 final, 不 throw 不中断会话)
@@ -409,7 +412,7 @@ export class LlmAgentBrain implements AgentBrain {
             || '这次的内容太长,超出模型能一次读完的量了。建议拆成几步,或者只把关键部分发给我。';
           pushCkpt(takeCkpt('finalized'));
           this.runs.delete(runId);
-          return { runId, content: finalContent, iterations, totalDurationMs: Date.now() - startMs, totalTokens, toolCalls: toolCallsLog, appliedSkills: [...appliedSkills] };
+          return { runId, content: finalContent, iterations, totalDurationMs: Date.now() - startMs, totalTokens, promptTokens, completionTokens, model: opts.model ?? DEFAULT_MODEL, toolCalls: toolCallsLog, appliedSkills: [...appliedSkills] };
         }
         if (ctxPlan.action !== 'none') {
           this.log.info(`LlmAgentBrain: run ${runId} 上下文降级 — ${ctxPlan.reason}`);
@@ -439,6 +442,10 @@ export class LlmAgentBrain implements AgentBrain {
         )
         // #005 spawn 预算: 聚合本轮 usage → run 级 totalTokens (budgetCheck 下轮前判定)
         if (typeof result.totalTokens === 'number') totalTokens += result.totalTokens
+        // 【M3-E】分项累加 —— 适配器本来就回传 promptTokens/completionTokens,
+        // 此前只取 total → 成本记账只能记总额,无法区分"输入贵"还是"输出贵"。
+        if (typeof result.promptTokens === 'number') promptTokens += result.promptTokens
+        if (typeof result.completionTokens === 'number') completionTokens += result.completionTokens
 
         // 把 assistant message 回写
         const assistantMsg: LlmMessage = { role: 'assistant', content: result.content }
@@ -544,7 +551,7 @@ export class LlmAgentBrain implements AgentBrain {
       LlmAgentBrainEvents.emit({ type: 'final_answer', runId, content: finalContent, iterations, totalDurationMs })
       pushCkpt(takeCkpt('finalized')) // #004 接缝④: 终态标记 (run 完整, 恢复时无需续跑)
       this.runs.delete(runId)
-      return { runId, content: finalContent, iterations, totalDurationMs, totalTokens, toolCalls: toolCallsLog, appliedSkills: [...appliedSkills] }
+      return { runId, content: finalContent, iterations, totalDurationMs, totalTokens, promptTokens, completionTokens, model: opts.model ?? DEFAULT_MODEL, toolCalls: toolCallsLog, appliedSkills: [...appliedSkills] }
     } catch (e) {
       const totalDurationMs = Date.now() - startMs
       const errMsg = e instanceof Error ? e.message : String(e)
@@ -563,7 +570,7 @@ export class LlmAgentBrain implements AgentBrain {
     runId: string,
     signal: AbortSignal,
     opts: { provider?: 'openai' | 'openai-compatible' | 'anthropic' | 'zhipu'; model: string }
-  ): Promise<{ content: string; reasoning: string; toolCalls: LlmToolCall[]; error?: string; totalTokens?: number }> {
+  ): Promise<{ content: string; reasoning: string; toolCalls: LlmToolCall[]; error?: string; totalTokens?: number; promptTokens?: number; completionTokens?: number }> {
     const req = {
       model: opts.model,
       messages,
@@ -574,6 +581,9 @@ export class LlmAgentBrain implements AgentBrain {
     let content = ''
     let reasoning = ''
     let totalTokens = 0 // #005 spawn 预算刹车: usage chunk 聚合 (LlmClient:99-100 既有流面)
+    /** 【M3-E】分项 token(输入/输出) —— 成本记账要能区分 */
+    let promptTokens = 0
+    let completionTokens = 0
     const toolAcc: Map<number, LlmToolCall> = new Map()
     try {
       for await (const chunk of this.llm.streamChat(req, signal)) {
@@ -588,6 +598,10 @@ export class LlmAgentBrain implements AgentBrain {
           toolAcc.set(toolAcc.size, ch.toolCall)
         } else if (ch.type === 'usage' && ch.usage) {
           totalTokens = Math.max(totalTokens, ch.usage.totalTokens ?? 0)
+          // 【M3-E】分项也留 —— 适配器本来就回传 promptTokens/completionTokens,
+          // 此前只取 total → 成本记账只能记总额,分不出"输入贵"还是"输出贵"。
+          promptTokens = Math.max(promptTokens, ch.usage.promptTokens ?? 0)
+          completionTokens = Math.max(completionTokens, ch.usage.completionTokens ?? 0)
         } else if (ch.type === 'error') {
           throw new Error(ch.error ?? 'unknown stream error')
         }
@@ -608,6 +622,8 @@ export class LlmAgentBrain implements AgentBrain {
       reasoning,
       toolCalls: Array.from(toolAcc.values()),
       totalTokens,
+      promptTokens,
+      completionTokens,
     }
   }
 
@@ -647,7 +663,22 @@ export class LlmAgentBrain implements AgentBrain {
       const r = await this.run(content, runOpts)
       // 【M4-D】appliedSkills 随载荷上抛 —— 上层据此记录
       // 「技能 S 被应用 + 这次运行成功没」的技能级效用信号。
-      return { action: 'reply', payload: { text: r.content, model: 'agent-v0.1', durationMs: r.totalDurationMs, iterations: r.iterations, totalTokens: r.totalTokens, runId: r.runId, toolCalls: r.toolCalls, appliedSkills: r.appliedSkills } }
+      // 【M3-E】载荷带**真实模型名**与**分项 token** ——
+      // 此前 model 恒为 'agent-v0.1'(脑的版本标签),调用方无法知道是哪个模型花的 token。
+      return { action: 'reply', payload: {
+        text: r.content,
+        model: 'agent-v0.1',
+        /** 【M3-E】真实使用的 LLM 模型名(成本按它归集) */
+        llmModel: r.model,
+        durationMs: r.totalDurationMs,
+        iterations: r.iterations,
+        totalTokens: r.totalTokens,
+        promptTokens: r.promptTokens,
+        completionTokens: r.completionTokens,
+        runId: r.runId,
+        toolCalls: r.toolCalls,
+        appliedSkills: r.appliedSkills,
+      } }
     } catch (e) {
       this.log.warn('LlmAgentBrain.think: fallback stub', e)
       return { action: 'reply', payload: { text: `[LlmAgentBrain error] ${(e as Error).message}`, model: 'agent-v0.1-stub', durationMs: 0 } }

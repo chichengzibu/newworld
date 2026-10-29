@@ -1250,18 +1250,39 @@ export class ChatManager {
         toolCalls?: Array<{ name: string; ok: boolean; durationMs: number; entity?: { kind: string; id: string } }>
         /** 【M4-D】本次 run 实际应用过的技能 id */
         appliedSkills?: string[]
+        /** 【M3-E】真实使用的 LLM 模型名(成本按它归集) */
+        llmModel?: string
+        /** 【M3-E】分项 token —— 此前只取 total,输入/输出混在一栏 */
+        promptTokens?: number
+        completionTokens?: number
       };
       const text = payload.text ?? '';
       const totalTokens = payload.totalTokens ?? 0;
       const toolCalls = payload.toolCalls ?? [];
 
-      // token 记账 —— run() 已吐出,此前在此处断链丢失
+      /**
+       * token 记账 —— run() 已吐出,此前在此处断链丢失。
+       *
+       * 【M3-E 修正两处记账失真】
+       * ① model 此前恒为字面量 `'agent-loop'` —— 成本按**一个假模型名**归集,
+       *    于是"哪个模型花了多少钱"根本查不出来(全部混在一栏)。
+       *    现用载荷里的**真实模型名**(`llmModel`),取不到才回落。
+       * ② inputTokens 此前塞的是 **totalTokens**,outputTokens 恒为 0 ——
+       *    输入输出混在一栏,无法区分"提示词长"还是"回答长"。
+       *    适配器本来就回传 promptTokens/completionTokens,此前被 brain 丢掉了,
+       *    现已一路带上来。
+       */
       if (totalTokens > 0) {
         try {
+          const promptTokens = payload.promptTokens ?? 0;
+          const completionTokens = payload.completionTokens ?? 0;
+          // 分项缺失时(老 provider 不回传)按 total 兜底,不记成 0
+          const inputTokens = promptTokens > 0 ? promptTokens : totalTokens;
+          const outputTokens = completionTokens;
           CostTracker.getInstance().recordUsage({
-            model: 'agent-loop',
-            inputTokens: totalTokens,
-            outputTokens: 0,
+            model: payload.llmModel || 'agent-loop',
+            inputTokens,
+            outputTokens,
             conversationId,
           });
         } catch (e) {

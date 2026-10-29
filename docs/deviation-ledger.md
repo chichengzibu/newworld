@@ -905,3 +905,36 @@
   - 后端 tsc（tsconfig.node.json）: 29 error（= 存量基线，零新增）
 - **新增测试**：`tests/unit/skill-directories-m3d.test.ts`（12 例）
   额外目录技能被加载 · 同名主目录优先 · 移除目录后不再加载 · 添加不存在的目录被拒 · 重复添加去重 · 预览列出技能 · 预览不存在目录不报错 · 存储信息如实报告 · 删除技能删对目录 · 删除不存在的技能报失败 · **删除的路径守卫（未登记目录一律拒）** · 目录已不存在时只清索引
+
+---
+
+## W5 接线批偏差登记 · M3-E 成本记账（2026-10-29）
+
+> 继续「能力可达性」审计(第三类:有能力实现但零调用方)的结果。
+> 编号自 DEV-085 起。完整设计见 `docs/NOVA-#009-m3e-cost-accounting-design.md`。
+
+| ID | 状态 | 摘要 |
+|---|---|---|
+| DEV-085 | 已修 | 成本读出口是**硬编码 0 的 stub** · `insight:cost:today` 恒返回 `{totalCostUsd: 0, totalTokens: 0, stub: true}` —— 而 CostTracker 一直在真实记账。数据在、接口在,唯独读出来是**假的**。用户看到「今天花了 $0.0000」会以为没花钱,而钱已经花了 —— **假数据比没数据更危险**。且渲染层**从未调用**它(连假的都读不到) |
+| DEV-086 | 已修 | 成本按**假模型名**归集 · ChatManager 记账时 `model` 恒为字面量 `'agent-loop'` → 全部混在一栏,「哪个模型花了多少钱」根本查不出来。现载荷带真实模型名(`llmModel`),brain 的 `run()` 返回 `opts.model ?? DEFAULT_MODEL` |
+| DEV-087 | 已修 | 输入输出 token 混在一栏 · 记账时 `inputTokens` 塞的是 `totalTokens`、`outputTokens` 恒为 0。根因在更上游:**适配器本来就回传 `promptTokens`/`completionTokens`,但 brain 聚合 usage chunk 时只取 totalTokens 把分项丢了**。现一路带上:usage chunk → brain 聚合 → run() → think() 载荷 → 记账 |
+| DEV-088 | 已修 | 定价查表必然落空 · 定价表按**基座名**建(`gpt-4o`/`ollama-llama3`),真实记录是**模型 id**(`qwen3.5:9b`)→ 精确查表落空 → 成本恒 0。现归一化查表(精确 → 去 provider 前缀与版本后缀 → 前缀命中 → 0 定价),并补本地模型条目 |
+
+### DEV-085~088 明细（成本记账，2026-10-29）
+
+- **审计结果**：`CostTracker.getTodayCost()` / `getUsageByConversation()` / `getRecentUsage()` 生产调用点均为 **0**
+- **归因先于金额**：对本地模型用户(本项目主要形态)成本**本就该是 0 美元** —— 那是事实不是记账失败;真正有用的是 **token 数按模型的分布**(上下文预算)。故修法顺序:先修归因(模型名 + 分项),再谈金额
+- **定价归一化规则**：精确命中 → 去 provider 前缀(`openai/`/`ollama-`)与版本后缀(`:9b`/`@latest`/`-2024-07-18`)后精确命中 → 前缀命中 → 0 定价
+- **读出口**：`insight:cost:today` 换成 `CostTracker.getTodayCost()` + `getRecentUsage(20)`;`ModelCompare.vue`「使用量排行」页顶部新增「今日成本」卡片(今日费用 / 输入 token / 输出 token / 按模型分布)
+
+### 关单（W5 接线批 · M3-E 成本记账，2026-10-29）
+
+- **范围**：DEV-085 ~ DEV-088（4 条）
+- **验证**：
+  - vue-tsc: 0 error
+  - vitest: Test Files 117 passed (117) / Tests 1398 passed | 14 skipped (1412) / 0 FAIL
+  - 后端 tsc（tsconfig.node.json）: 29 error（= 存量基线，零新增）
+- **新增测试**：`tests/unit/cost-tracking-m3e.test.ts`（7 例）
+  brain 带回分项与真实模型名 · 载荷带 llmModel 与分项 · 按模型归集（不再混在 'agent-loop' 一栏）·
+  按会话可查 · 今日汇总成本 > 0（不再是硬编码 0）· 定价归一化命中 ·
+  **本地模型成本为 0 是事实、不是记账失败（且仍归到该模型名下）**

@@ -220,9 +220,27 @@ All notable changes to PiPiClaw will be documented in this file.
   故只扫一级子目录、**符号链接默认不跟随**、额外目录必须用户显式添加
 - **UI** —「技能管理」页新增「技能目录」卡片:添加 → 系统目录选择器 → **预览** → 确认
 
+### 💰 成本记账(M3-E)
+
+继续「能力可达性」审计的第三个发现:成本**一直在记**,但**没人读得到** ——
+`CostTracker` 的读侧方法生产调用点全为 0。顺着找到唯一的读出口,
+发现它是**硬编码 0 的 stub**。
+
+- **读出口换成真数据** — `insight:cost:today` 此前恒返回
+  `{totalCostUsd: 0, totalTokens: 0, stub: true}`。数据在 CostTracker 里真实记着,
+  唯独读出来是假的 —— **假数据比没数据更危险**
+- **成本按真实模型名归集** — 此前 model 恒为字面量 `'agent-loop'`,
+  全部混在一栏,「哪个模型花了多少钱」根本查不出来
+- **输入输出 token 分开记** — 此前 `inputTokens` 塞的是 totalTokens、outputTokens 恒 0。
+  根因在更上游:适配器本来就回传 `promptTokens`/`completionTokens`,被 brain 丢掉了;
+  现一路带到记账
+- **定价查表归一化** — 定价表按基座名建,记录是具体模型 id → 精确查表必然落空。
+  现:精确 → 去 provider 前缀与版本后缀 → 前缀命中
+- **UI** —「模型对比 → 使用量排行」页顶部新增「今日成本」卡片(费用 / 输入 / 输出 / 按模型分布)
+
 ### 📊 验证
 
-vitest 116 files / 1391 passed / 0 FAIL · vue-tsc 0 error · 后端 tsc 29(= 修掉 1 条存量后的基线)
+vitest 117 files / 1398 passed / 0 FAIL · vue-tsc 0 error · 后端 tsc 29(= 修掉 1 条存量后的基线)
 
 ## [4.5.0-alpha] - 2026-08-06 (LlmAgentBrain v0.1 + MCP PoC + P0 安全,M1)
 

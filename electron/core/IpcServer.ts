@@ -2672,9 +2672,36 @@ export class IpcServer {
       }
     });
 
+    /**
+     * 【M3-E】今日成本 —— 此前是**硬编码 0 的 stub**。
+     *
+     * 【为什么这是个真问题】
+     * CostTracker 一直在真实记账(agent 路径 + AgentBrain 都调 recordUsage),
+     * 而这个唯一的读出口返回 `{totalCostUsd: 0, totalTokens: 0, stub: true}` ——
+     * 也就是说:数据在,接口在,唯独读出来是假的。
+     * 用户看到"今天花了 $0.0000",会以为没花钱 —— 而钱已经花了。
+     * 假数据比没数据更危险。
+     *
+     * 现改为读 CostTracker 的真实汇总,并把分项与按模型分布一并给出
+     * (分项能区分"提示词长"还是"回答长";按模型分布依赖 M3-E 修好的真实模型名)。
+     */
     ipcMain.handle('insight:cost:today', async () => {
       try {
-        return { success: true, data: { totalCostUsd: 0, totalTokens: 0, stub: true } };
+        const { CostTracker } = await import('../insight/CostTracker');
+        const tracker = CostTracker.getInstance();
+        const today = tracker.getTodayCost();
+        return {
+          success: true,
+          data: {
+            totalCostUsd: today.totalCostUsd,
+            totalTokens: today.totalInputTokens + today.totalOutputTokens,
+            totalInputTokens: today.totalInputTokens,
+            totalOutputTokens: today.totalOutputTokens,
+            byModel: today.byModel,
+            recent: tracker.getRecentUsage(20),
+            stub: false,
+          },
+        };
       } catch (error) {
         this.log.error('insight:cost:today 失败', error);
         return { success: false, error: String(error) };

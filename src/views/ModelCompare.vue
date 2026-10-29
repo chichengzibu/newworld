@@ -60,6 +60,36 @@
 
       <!-- Tab 2: 使用量排行(P2-02) -->
       <el-tab-pane label="使用量排行" name="usage">
+        <!--
+          【M3-E】今日成本(真实值)
+          此前 insight:cost:today 是硬编码 0 的 stub —— 数据在 CostTracker 里真实记着,
+          唯独读出来是假的。现读真值,并给出分项(输入/输出)与按模型分布。
+        -->
+        <el-card class="today-cost" shadow="never">
+          <div class="today-cost-head">
+            <span class="today-cost-title">今日成本</span>
+            <el-button size="small" text @click="loadTodayCost">刷新</el-button>
+          </div>
+          <div class="usage-summary">
+            <el-statistic title="今日费用(USD)" :value="Number(todayCost.totalCostUsd.toFixed(4))" :precision="4" />
+            <el-statistic title="输入 token" :value="todayCost.totalInputTokens" />
+            <el-statistic title="输出 token" :value="todayCost.totalOutputTokens" />
+            <el-statistic title="按模型分布" :value="Object.keys(todayCost.byModel || {}).length" />
+          </div>
+          <div v-if="todayModelRows.length > 0" class="today-cost-models">
+            <el-tag
+              v-for="row in todayModelRows"
+              :key="row.model"
+              size="small"
+              style="margin: 2px;"
+              type="info"
+            >
+              {{ row.model }} · ${{ row.cost.toFixed(4) }}
+            </el-tag>
+          </div>
+          <p v-else class="muted">今天还没有成本记录</p>
+        </el-card>
+
         <div class="usage-summary">
           <el-statistic title="总调用次数" :value="usageTotal.totalCalls" />
           <el-statistic title="总 token 数" :value="usageTotal.totalTokens" />
@@ -247,6 +277,26 @@ async function loadMyRatings(): Promise<void> {
   }
 }
 
+/**
+ * 【M3-E】今日成本 —— 读 insight:cost:today(此前是硬编码 0 的 stub)
+ */
+const todayCost = ref<any>({
+  totalCostUsd: 0, totalTokens: 0, totalInputTokens: 0, totalOutputTokens: 0, byModel: {}, recent: [],
+});
+
+const todayModelRows = computed(() =>
+  Object.entries(todayCost.value.byModel || {}).map(([model, cost]) => ({ model, cost: Number(cost) }))
+);
+
+async function loadTodayCost(): Promise<void> {
+  try {
+    const res = await (window as any).electronAPI?.insight?.costToday?.();
+    if (res?.success && res.data) todayCost.value = res.data;
+  } catch (e) {
+    console.warn('loadTodayCost failed', e);
+  }
+}
+
 async function loadUsage(): Promise<void> {
   try {
     const [top, total] = await Promise.all([
@@ -264,6 +314,7 @@ onMounted(() => {
   loadStats()
   loadMyRatings()
   loadUsage()
+  loadTodayCost()
 })
 </script>
 
@@ -305,5 +356,25 @@ onMounted(() => {
   margin-top: 16px;
   font-size: 12px;
   color: var(--text-secondary, #999);
+}
+
+.today-cost {
+  margin-bottom: var(--space-md);
+}
+
+.today-cost-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-sm);
+}
+
+.today-cost-title {
+  font-weight: var(--font-weight-semibold);
+  color: var(--text-primary);
+}
+
+.today-cost-models {
+  margin-top: var(--space-sm);
 }
 </style>
