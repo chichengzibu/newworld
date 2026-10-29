@@ -829,3 +829,49 @@
 - **新增测试**：
   - `tests/unit/hybrid-retrieval-m3b.test.ts`（11 例）分词 6 例（含「改写查询命中 —— 旧分词器做不到，锁住 0 命中这个事实」）+ RRF 5 例（量纲无关 / 双路一致优先 / 单路不丢 / 空列表不炸 / 单调不增）
   - `tests/integration/embedding-local-ollama.test.ts`（+2 例，打真本地 ollama）「bigram 让关键词路在改写查询上重新有效」+「混合 RRF 不劣于纯向量路」
+
+---
+
+## W5 接线批偏差登记 · M3-C 进程沙箱（2026-10-29）
+
+> 路线图 `docs/plan/v5-10week.md` M3 的后半：ProcessSandbox + 平台分支。
+> 编号自 DEV-076 起。完整设计见 `docs/NOVA-#009-m3c-process-sandbox-design.md`。
+
+| ID | 状态 | 摘要 |
+|---|---|---|
+| DEV-076 | 已修 | 命令超时/中止只杀直接子进程 → **孤儿进程堆积** · `execFile` 超时只杀直接子进程,它起的孙进程变成孤儿继续吃 CPU/占端口/握句柄。**实测(Windows)**:父进程被杀后,孙进程 PID 44896 仍在运行。典型后果:`npm install` 超时后 postinstall 子进程继续跑;脚本里 `start-server &` 的后台服务永久驻留 |
+| DEV-077 | 已修 | 「用户点停止」只停了 LLM · `LlmAgentBrain.abortRun()` 调 `controller.abort()`,但那个 controller **只用于中止 LLM 流** —— 正在跑的命令完全感知不到,继续跑完(最长 60s),它起的孙进程继续跑(永久)。用户看到「停了」,机器上其实「还在跑」 |
+| DEV-078 | 已修 | 进程隔离无平台分支 · 新增 `electron/sandbox/ProcessSandbox.ts`:POSIX 走**进程组**(`detached: true` + `kill(-pgid)`),Windows 走 **`taskkill /T /F`**(系统自带树杀,语义等价 Job Object 的 `KILL_ON_JOB_CLOSE`)。刻意**不用 Job Object**:需原生模块(N-API),与本项目 package.json **零原生依赖**的取向冲突 → 资源限额能力留作接口扩展位 |
+| DEV-079 | 已修 | `trusted-dirs.test.ts` 的 child_process mock 只提供 execFile · 生产路径换成 spawn 后 → `spawn is not a function` → 该文件全红。已补 spawn 的假实现(记录探针 + 返回假 ChildProcess,next tick 以 code 0 触发 close)—— 这是「mock 面跟随生产调用形态」,不是绕过测试 |
+| DEV-080 | 已修 | 执行器换了但审计口径要不变 · 换 ProcessSandbox 时保持:数组传参不走 shell(v3 #9) / 最小环境不继承 parent 敏感 env / 两段式审计(start 行 exec 前同步写,写失败即拒)/ finish 写失败**不改判命令结果**只标孤儿 + 真 console.error。新增:被杀时 finish 行记 `execError: killed:<原因>` |
+
+### DEV-076~077 明细（孤儿进程 + 中止不落地，2026-10-29）
+
+- **实测(Windows)**：`Start-Process node -ArgumentList '-e','setTimeout(()=>{},60000)'` 起的孙进程，在父进程被杀后 PID 44896 **依然存活**
+- **新执行器语义**：
+  | | execFile | ProcessSandbox |
+  |---|---|---|
+  | 超时/中止时 | 只杀直接子进程 | **杀整棵树** |
+  | 异常 | 抛 | 返回结构化结果（调用方自己记账） |
+  | 输出超限 | 抛错，输出全丢 | **截断并标注** |
+  | 中止信号 | 不支持 | 支持 `AbortSignal` |
+- **中止信号贯通链**：`brain.run 的 AbortController → toolCtx.signal(RuntimeToolContext 新增可选字段) → BashTool.execute → execCommand({signal}) → doExecFile → runInSandbox({signal})`。口径:signal 可选,不传=不可中止(旧行为),brain 必传
+
+### DEV-078 明细（平台分支，2026-10-29）
+
+- **平台原生对照**：Linux cgroup v2 / macOS 无(仅 rlimit) / Windows Job Object(`KILL_ON_JOB_CLOSE`) —— 三者 Node 都**不能直接用**
+- **本批实现**：POSIX 进程组(`detached: true` 让子进程成为新会话组长 + `kill(-pgid)`)· Windows `taskkill /pid <pid> /T /F`(`/T` = 连同子进程)
+- **不用 Job Object 的理由**：需原生模块 → electron-builder 打包要为 Electron ABI 重编译 → 跨平台构建链(w win/mac/linux/ohos)各自编译 → 与本项目**零原生依赖**取向冲突。资源限额能力留作接口扩展位
+
+### 关单（W5 接线批 · M3-C 进程沙箱，2026-10-29）
+
+- **范围**：DEV-076 ~ DEV-080（5 条）
+- **验证**：
+  - vue-tsc: 0 error
+  - vitest: Test Files 115 passed (115) / Tests 1379 passed | 14 skipped (1393) / 0 FAIL
+  - 后端 tsc（tsconfig.node.json）: 29 error（= 存量基线，零新增）
+- **新增测试**：`tests/unit/process-sandbox-m3c.test.ts`（12 例）
+  - 正常退出 / 非零退出 / stderr / 超时 / 中止 / 输出超限 / 命令不存在 / cwd / isolation 逃生口 / 平台默认分支
+  - **【核心回归钉】超时 → 整棵树被杀（孙进程不残留）** —— 测法:被沙箱跑的命令**自己**起长跑孙进程并把 pid 打到 stdout,超时后验那个 pid 还在不在（不能另起进程树 —— 那样验的不是被沙箱命令的树）
+  - **接线：BashTool 收到中止信号 → 命令被中止**（验信号一路传到执行层）
+- **改动的存量测试**：`tests/unit/trusted-dirs.test.ts` 补 `node:child_process` 的 `spawn` 假实现（生产路径已从 execFile 换成 spawn）

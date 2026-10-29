@@ -53,6 +53,8 @@ export class BashTool implements PiPiTool {
       cwd,
       timeoutMs,
       contextKind: ctx?.contextKind ?? 'headless',
+      // 【M3-C】中止信号透传 —— 用户点「停止」时整棵进程树被杀
+      ...(ctx?.signal ? { signal: ctx.signal } : {}),
     })
 
     if (r.ok) {

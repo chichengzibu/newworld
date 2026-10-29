@@ -476,7 +476,12 @@ export class LlmAgentBrain implements AgentBrain {
           let exec: ToolExecResult
           // #005 Step 0 (DEV-014 切除): contextKind 显式贯穿 — 禁脑读模块态 (全局态已删),
           // 本 run 的 ctx 由入口派生后经 think→run 携带; 子实例 (spawnCtx) 继承出生 ctx; 均无 → 'headless' (fail-safe)
-          const toolCtx = { contextKind: opts.contextKind ?? this.spawnCtx?.contextKind ?? 'headless' }
+          // 【M3-C】带上 run 的中止信号 —— 用户点「停止」时,
+          // 正在跑的命令能自己订阅并把整棵进程树杀掉(此前只停 LLM 流,命令照跑)。
+          const toolCtx = {
+            contextKind: opts.contextKind ?? this.spawnCtx?.contextKind ?? 'headless',
+            signal: state.controller.signal,
+          }
           /**
            * 【M2-B】工具权限门 —— 修安全洞: EditTool 标注 requiresPermission:true
            * 但此前 run loop 从不读取该字段,写文件零确认。本门作为兜底层,

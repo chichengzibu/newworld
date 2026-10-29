@@ -43,15 +43,45 @@ const execProbe = vi.hoisted(() => ({
 }))
 
 vi.mock('node:child_process', () => {
-  // commandDecide 用 promisify(execFile) 包裹 → 需让 promisify 直接用我的 promise 版。
-  // 设 promisify.custom (nodejs.util.promisify.custom), 使 `const {stdout,stderr}=await execFileAsync(...)` 解构到对象。
+  // 【M3-C】生产执行路径已从 execFile 换成 ProcessSandbox 的 spawn
+  // (杀整棵进程树, 见 docs/NOVA-#009-m3c-process-sandbox-design.md),
+  // 故本 mock 需同时提供 spawn —— 只给 execFile 会让生产代码拿到
+  // "spawn is not a function"。
+  //
+  // spawn 的假实现: 记录探针 → 返回一个假 ChildProcess
+  // (stdout/stderr 为流,'close' 事件在下一 tick 以 code 0 触发)。
+  const { EventEmitter } = require('node:events')
+  const { PassThrough } = require('node:stream')
+
+  const fakeSpawn = (command: string, args: string[] | undefined, opts?: { cwd?: string }) => {
+    execProbe.calls.push({ command, args: args === undefined ? [] : [...args], cwd: opts?.cwd ?? '' })
+    const child = new EventEmitter() as any
+    child.pid = 424242
+    child.stdout = new PassThrough()
+    child.stderr = new PassThrough()
+    child.kill = () => { child.killed = true; return true }
+    child.unref = () => {}
+    // 下一 tick 模拟"命令跑完"
+    setTimeout(() => {
+      try { child.stdout.end(); child.stderr.end() } catch { /* noop */ }
+      child.emit('close', 0, null)
+    }, 0)
+    return child
+  }
+
+  // commandDecide 旧路径仍用 promisify(execFile) —— 保留以便兼容
   const promisifyCustom = Symbol.for('nodejs.util.promisify.custom')
   const realExecFile = (command: string, args: string[] | undefined, opts?: { cwd?: string }) => {
     execProbe.calls.push({ command, args: args === undefined ? [] : [...args], cwd: opts?.cwd ?? '' })
     return Promise.resolve({ stdout: '', stderr: '' })
   }
   realExecFile[promisifyCustom] = realExecFile
-  return { execFile: realExecFile, execFileSync: () => '', default: { execFile: realExecFile } }
+  return {
+    execFile: realExecFile,
+    execFileSync: () => '',
+    spawn: fakeSpawn,
+    default: { execFile: realExecFile, spawn: fakeSpawn },
+  }
 })
 
 // 2) electron: commandDecide 仅用于 ipcMain.on (ensureReplyHandler) + BrowserWindow (defaultBrowserConfirm);

@@ -47,6 +47,17 @@ export interface RuntimeToolContext {
   contextKind: ContextKind
   /** 预留: run 溯源 (#006/#007 / DEV-023 接线批填值, 本单不读不写) */
   runScope?: { runId: string; parentRunId?: string } | null
+  /**
+   * 【M3-C】本次 run 的中止信号。
+   *
+   * 【为什么加】
+   * 用户点「停止」时,此前只有 LLM 流被中止 —— **正在跑的命令不受影响**:
+   * 它继续跑完(最长 60s),它起的孙进程继续跑(永久)。
+   * 带上这个信号后,命令执行可以自己订阅中止 → 整棵树被杀。
+   *
+   * 【口径】可选:不传就是"不可中止"(旧行为)。brain 一定会传。
+   */
+  signal?: AbortSignal
 }
 
 /** 工具接口 */

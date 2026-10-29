@@ -26,8 +26,7 @@
  * 注意: 本文件 import electron (BrowserWindow/ipcMain 用于默认确认弹窗)。
  *   纯决策逻辑在 constants.ts, 可独立测试; 本文件的 exec/audit/confirm 由测试文件 mock。
  */
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
+import { runInSandbox } from '../../sandbox/ProcessSandbox'
 import * as path from 'node:path'
 import * as fs from 'node:fs'
 import { BrowserWindow, ipcMain } from 'electron'
@@ -39,7 +38,6 @@ import {
 } from './constants'
 import { ConfigStore } from '../../core/ConfigStore'
 
-const execFileAsync = promisify(execFile)
 const AUDIT_DIR = 'audit'
 const AUDIT_FILE = 'openclaw.audit.jsonl'
 const CONFIRM_TIMEOUT_MS = 30_000
@@ -223,6 +221,8 @@ export interface CommandExecArgs {
   timeoutMs?: number
   /** contextKind (v3 #4 + 裁决 #4): 必填, 由入口派生, 绝不从 LLM args 读 */
   contextKind: ContextKind
+  /** 【M3-C】中止信号 —— 用户点「停止」时整棵进程树被杀 */
+  signal?: AbortSignal
 }
 
 export interface CommandExecResult {
@@ -284,17 +284,18 @@ export async function execCommand(args: CommandExecArgs): Promise<CommandExecRes
       writeDenyRow(opId, norm, cmdArgs, args.cwd ?? '', reason, ctx, 'false', 'ui-reject/timeout')
       return { ok: false, opId, stdout: '', stderr: '', exitCode: null, denied: true, denialReason: reason, humanConfirm: 'false' }
     }
-    return doExecFile(opId, baseCmdRaw, norm, cmdArgs, args.cwd, timeoutMs, ctx, 'true')
+    return doExecFile(opId, baseCmdRaw, norm, cmdArgs, args.cwd, timeoutMs, ctx, 'true', args.signal)
   }
 
   // AUTO
-  return doExecFile(opId, baseCmdRaw, norm, cmdArgs, args.cwd, timeoutMs, ctx, 'not-required')
+  return doExecFile(opId, baseCmdRaw, norm, cmdArgs, args.cwd, timeoutMs, ctx, 'not-required', args.signal)
 }
 
 /** exec 路径 (auto 通过 / confirm ui 批准): v3 #9 防护 → 两段式审计 (fail-closed) → execFile */
 async function doExecFile(
   opId: string, baseCmdRaw: string, norm: string, cmdArgs: string[],
   cwdIn: string | undefined, timeoutMs: number, ctx: ContextKind, humanConfirm: 'true' | 'false' | 'not-required',
+  signal?: AbortSignal,
 ): Promise<CommandExecResult> {
   const confirmChannel = humanConfirm === 'true' ? 'ui' : '-'
 
@@ -333,35 +334,50 @@ async function doExecFile(
     return { ok: false, opId, stdout: '', stderr: '', exitCode: null, denied: true, denialReason: `audit-unavailable: ${e?.message ?? e}`, humanConfirm }
   }
 
-  // execFile (v3 #9: 数组传参, 不走 shell)
+  /**
+   * 【M3-C】执行走 ProcessSandbox(进程隔离),不再用 execFile。
+   *
+   * 【为什么换】execFile 超时/中止时只杀**直接子进程** —— 它起的孙进程
+   * 会变成孤儿继续跑(实测:父进程被杀后 `node -e setTimeout(...)` 仍在运行)。
+   * 对一个能在用户机器上跑命令的助手,这是实打实的资源泄漏。
+   * ProcessSandbox 按平台分支杀整棵树:
+   *   POSIX → 进程组(负 pid);Windows → taskkill /T /F
+   *
+   * 【口径不变】
+   *   - 数组传参、不走 shell(v3 #9)
+   *   - 最小环境,不继承 parent 敏感 env
+   *   - 两段式审计:start 行 exec 前同步写,写失败即拒(硬 fail-closed)
+   *   - finish 写失败**不改判命令结果**,只标孤儿 + 真 console.error
+   */
+  const result = await runInSandbox(baseCmdRaw, cmdArgs, {
+    cwd: resolvedCwd,
+    timeoutMs,
+    env: { PATH: process.env.PATH ?? '', SYSTEMROOT: process.env.SYSTEMROOT ?? '', USERPROFILE: process.env.USERPROFILE ?? '' },
+    maxBuffer: 1024 * 1024,
+    // 【M3-C】中止信号 —— 用户点「停止」时整棵进程树被杀
+    ...(signal ? { signal } : {}),
+  })
+
+  // 钉子[phase 配对 + 分段失败② + 升级 b 真 warn]: finish 写失败不改判命令结果
   try {
-    const { stdout, stderr } = await execFileAsync(baseCmdRaw, cmdArgs, {
-      cwd: resolvedCwd,
-      timeout: timeoutMs,
-      windowsHide: true,
-      // 最小环境, 不继承 parent 敏感 env (原 BashTool 安全姿态保留)
-      env: { PATH: process.env.PATH ?? '', SYSTEMROOT: process.env.SYSTEMROOT ?? '', USERPROFILE: process.env.USERPROFILE ?? '' },
-      maxBuffer: 1024 * 1024,
+    auditAppendSync({
+      opId, baseCmd: norm,
+      exit: result.exitCode ?? (result.killed ? -1 : -1),
+      phase: 'finish', contextKind: ctx,
+      ...(result.killed ? { execError: `killed:${result.killReason}` } : {}),
     })
-    // 钉子[phase 配对 + 分段失败② + 升级 b 真 warn]: 真实 exit; finish 写失败不改判命令, 记真 console.error + 标孤儿
-    try {
-      auditAppendSync({ opId, baseCmd: norm, exit: 0, phase: 'finish', contextKind: ctx })
-    } catch (finErr: any) {
-      console.error(`[audit] finish-row write failed for opId=${opId} (baseCmd=${norm}): ${finErr?.message ?? finErr}. This opId is now ORPHAN (start has no finish). Command result NOT affected.`)
-    }
-    return { ok: true, opId, stdout: (stdout ?? '').toString(), stderr: (stderr ?? '').toString(), exitCode: 0, denied: false, humanConfirm }
-  } catch (e: any) {
-    const exitCode: number = typeof e.status === 'number' ? e.status : (e.killed ? -1 : -1)
-    try {
-      auditAppendSync({ opId, baseCmd: norm, exit: exitCode, phase: 'finish', contextKind: ctx, execError: e.message })
-    } catch (finErr: any) {
-      console.error(`[audit] finish-row write failed for opId=${opId} (baseCmd=${norm}): ${finErr?.message ?? finErr}. This opId is now ORPHAN (start has no finish). Command result NOT affected.`)
-    }
-    return {
-      ok: false, opId,
-      stdout: (e.stdout ?? '').toString(), stderr: (e.stderr ?? '').toString(),
-      exitCode, denied: false,
-      denialReason: `exit=${exitCode}`, humanConfirm,
-    }
+  } catch (finErr: any) {
+    console.error(`[audit] finish-row write failed for opId=${opId} (baseCmd=${norm}): ${finErr?.message ?? finErr}. This opId is now ORPHAN (start has no finish). Command result NOT affected.`)
+  }
+
+  if (result.ok) {
+    return { ok: true, opId, stdout: result.stdout, stderr: result.stderr, exitCode: 0, denied: false, humanConfirm }
+  }
+  return {
+    ok: false, opId,
+    stdout: result.stdout, stderr: result.stderr,
+    exitCode: result.exitCode ?? (result.killed ? -1 : -1), denied: false,
+    denialReason: result.killed ? `killed:${result.killReason}` : `exit=${result.exitCode}`,
+    humanConfirm,
   }
 }

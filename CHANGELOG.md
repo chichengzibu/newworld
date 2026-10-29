@@ -186,9 +186,25 @@ All notable changes to PiPiClaw will be documented in this file.
   (诚实结论:分词是可测量的改善;RRF 在命中率上持平,它的价值是结构性的 ——
   故测试断言**性质**而非命中率)
 
+### 🏃 进程沙箱(M3-C)
+
+路线图 M3 的后半。动手前先量现状,发现了一个具体问题:
+**父进程被杀后,它起的孙进程仍在运行**(Windows 实测 PID 44896 存活)——
+`execFile` 超时只杀直接子进程,孙进程变孤儿继续吃 CPU、占端口、握句柄。
+
+- **整棵树被杀** — 新增 `ProcessSandbox`,按平台分支:
+  POSIX 走**进程组**(`detached` + 杀负 pid),Windows 走 **`taskkill /T /F`**
+  (系统自带树杀,语义等价 Job Object 的 `KILL_ON_JOB_CLOSE`)。
+  刻意不用 Job Object:需原生模块,与本项目零原生依赖的取向冲突
+- **「用户点停止」真的停了** — 此前 `abortRun` 只中止 LLM 流,
+  **正在跑的命令完全感知不到**(继续跑完,孙进程继续跑)。
+  现中止信号一路贯通:brain → toolCtx.signal → BashTool → execCommand → sandbox
+- **输出超限改为截断标注** — 此前直接抛错,输出全丢
+- **审计口径不变** — 两段式审计、fail-closed、最小环境全部保留
+
 ### 📊 验证
 
-vitest 114 files / 1367 passed / 0 FAIL · vue-tsc 0 error · 后端 tsc 29(= 修掉 1 条存量后的基线)
+vitest 115 files / 1379 passed / 0 FAIL · vue-tsc 0 error · 后端 tsc 29(= 修掉 1 条存量后的基线)
 
 ## [4.5.0-alpha] - 2026-08-06 (LlmAgentBrain v0.1 + MCP PoC + P0 安全,M1)
 
