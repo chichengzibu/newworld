@@ -41,6 +41,12 @@ export interface SkillState {
   name: string;
   description: string;
   /**
+   * 【M3-D】该技能来自哪个目录(绝对路径)。
+   * 主目录 = userData/skills;额外目录 = 用户自己加的目录。
+   * 有了它才能:① 删除技能时知道删哪个 ② 界面显示技能的来源
+   */
+  sourceDir?: string;
+  /**
    * 【M4-A 新增】触发条件 —— 来自 frontmatter 的 `when_to_use`。
    *
    * 此前本项目自造了 `triggerCondition` 字段,但 SkillState 接口里根本没有它,
@@ -147,28 +153,179 @@ export class SkillLoader {
     this.log.info('[SkillLoader] 目录复制完成', { source, dest });
   }
 
+  /**
+   * 【M3-D】扫描**多个**技能目录。
+   *
+   * 【为什么要多目录】
+   * 此前只有 `userData/skills` 一个目录 —— 技能要么是应用导入的,
+   * 要么是自学习闭环生成的。用户自己项目里的技能目录(`<repo>/skills`)
+   * 完全看不到。而 preload 里早就有 6 个 `skills:addCustomDir` 之类的通道
+   * 声明,却没有实现、没有调用方 —— 典型的"能力只有一张嘴"。
+   *
+   * 【优先级】主目录 > 额外目录(按加入顺序)。
+   * 同名技能以**先到者**为准,后来的跳过并记日志 —— 技能 id 是
+   * `load_skill` 的寻址键,必须全局唯一,不能靠前缀区分(那会让
+   * id 变成 `dir:skill` 这种形态,与既有 SKILL.md 约定冲突)。
+   */
   private loadAllSkills(): void {
-    this.log.info('[SkillLoader] 开始加载技能...', { path: this.skillsDir });
-    
+    const primary = this.skillsDir
+    const extras = this.getExtraDirs()
+    this.log.info('[SkillLoader] 开始加载技能...', { path: primary, extraDirs: extras.length })
+
     try {
-      const skillDirs = fs.readdirSync(this.skillsDir, { withFileTypes: true })
-        .filter(dirent => dirent.isDirectory())
-        .map(dirent => dirent.name);
-
-      this.log.info('[SkillLoader] 发现技能目录', { count: skillDirs.length });
-
-      for (const skillDir of skillDirs) {
-        this.loadSkill(skillDir);
+      let loaded = 0
+      // 主目录优先
+      loaded += this.loadSkillsFromDir(primary, false)
+      // 额外目录(按加入顺序)
+      for (const dir of extras) {
+        if (path.resolve(dir) === path.resolve(primary)) continue   // 重复添加的跳过
+        loaded += this.loadSkillsFromDir(dir, true)
       }
 
-      this.log.info('[SkillLoader] 技能加载完成', { count: this.skills.size });
+      this.log.info('[SkillLoader] 技能加载完成', {
+        count: this.skills.size,
+        loaded,
+        skipped: loaded - this.skills.size,
+      })
     } catch (error) {
       this.log.error('[SkillLoader] 加载技能失败', error);
     }
   }
 
-  private loadSkill(skillDir: string): void {
-    const skillPath = path.join(this.skillsDir, skillDir);
+  /**
+   * 扫一个目录下的所有技能子目录。
+   *
+   * 【符号链接默认不跟随】`dirent.isDirectory()` 对符号链接返回 false ——
+   * 于是指向目录外的软链不会被加载。这既是安全默认(技能内容会进 LLM 上下文,
+   * 指向任意路径等于任意读取),也让"用户想软链一个技能目录"变成显式不支持。
+   */
+  private loadSkillsFromDir(baseDir: string, isExtra: boolean): number {
+    let loaded = 0
+    let dirs: string[] = []
+    try {
+      if (!fs.existsSync(baseDir)) {
+        if (isExtra) this.log.warn('[SkillLoader] 额外技能目录不存在,跳过', { path: baseDir })
+        return 0
+      }
+      dirs = fs.readdirSync(baseDir, { withFileTypes: true })
+        .filter(dirent => dirent.isDirectory())
+        .map(dirent => dirent.name)
+    } catch (error) {
+      this.log.warn('[SkillLoader] 读技能目录失败,跳过', { path: baseDir, error: String(error) })
+      return 0
+    }
+
+    for (const skillDir of dirs) {
+      const before = this.skills.size
+      this.loadSkill(skillDir, baseDir)
+      if (this.skills.size > before) loaded++
+      else if (isExtra) {
+        this.log.warn('[SkillLoader] 额外目录里的技能与已有技能同名,跳过', {
+          skillId: skillDir, dir: baseDir,
+        })
+      }
+    }
+    return loaded
+  }
+
+  /**
+   * 【M3-D】用户额外添加的技能目录(持久化)。
+   *
+   * 存 `skills.extraDirs` —— 与 `skills.states`(启用状态/统计)分开放,
+   * 两者职责不同:一个是"扫哪儿",一个是"每个技能什么状态"。
+   */
+  public getExtraDirs(): string[] {
+    const dirs = this.configStore.get('skills.extraDirs') as string[] | undefined
+    return Array.isArray(dirs) ? dirs.filter(d => typeof d === 'string' && d.trim()) : []
+  }
+
+  public setExtraDirs(dirs: string[]): string[] {
+    const clean = (Array.isArray(dirs) ? dirs : [])
+      .filter(d => typeof d === 'string' && d.trim())
+      .map(d => path.resolve(d.trim()))
+      // 去重(同一目录加两次没意义)
+      .filter((d, i, arr) => arr.indexOf(d) === i)
+    this.configStore.set('skills.extraDirs', clean)
+    this.reloadSkills()
+    this.log.info('[SkillLoader] 额外技能目录已更新', { count: clean.length })
+    return clean
+  }
+
+  public addExtraDir(dir: string): { ok: boolean; dirs: string[]; error?: string } {
+    const resolved = path.resolve(dir.trim())
+    if (!fs.existsSync(resolved) || !fs.statSync(resolved).isDirectory()) {
+      return { ok: false, dirs: this.getExtraDirs(), error: `目录不存在: ${resolved}` }
+    }
+    const dirs = this.getExtraDirs()
+    if (dirs.includes(resolved)) {
+      return { ok: true, dirs }
+    }
+    return { ok: true, dirs: this.setExtraDirs([...dirs, resolved]) }
+  }
+
+  public removeExtraDir(dir: string): { ok: boolean; dirs: string[] } {
+    const resolved = path.resolve(dir.trim())
+    return { ok: true, dirs: this.setExtraDirs(this.getExtraDirs().filter(d => d !== resolved)) }
+  }
+
+  /**
+   * 预览一个目录里有什么技能(不加载)—— 给"添加目录"界面用。
+   */
+  public previewDirectory(dir: string): { exists: boolean; path: string; skills: Array<{ id: string; name?: string; description?: string }> } {
+    const resolved = path.resolve(dir.trim())
+    if (!fs.existsSync(resolved) || !fs.statSync(resolved).isDirectory()) {
+      return { exists: false, path: resolved, skills: [] }
+    }
+    const skills: Array<{ id: string; name?: string; description?: string }> = []
+    try {
+      for (const dirent of fs.readdirSync(resolved, { withFileTypes: true })) {
+        if (!dirent.isDirectory()) continue
+        const candidates = ['SKILL.md', 'skill.md']
+        for (const fname of candidates) {
+          const fp = path.join(resolved, dirent.name, fname)
+          if (!fs.existsSync(fp)) continue
+          const raw = fs.readFileSync(fp, 'utf-8')
+          const parsed = this.parseSkillMd(dirent.name, raw)
+          if (parsed) {
+            skills.push({ id: dirent.name, name: parsed.name, description: parsed.description })
+          }
+          break
+        }
+      }
+    } catch (error) {
+      this.log.warn('[SkillLoader] 预览目录失败', { path: resolved, error: String(error) })
+    }
+    return { exists: true, path: resolved, skills }
+  }
+
+  /** 技能存储信息(主目录 + 额外目录 + 各自技能数) */
+  public getStorageInfo(): {
+    primaryDir: string
+    extraDirs: string[]
+    primaryCount: number
+    extraCounts: Array<{ dir: string; count: number; exists: boolean }>
+    total: number
+  } {
+    const extras = this.getExtraDirs()
+    const countIn = (dir: string): number => {
+      try {
+        if (!fs.existsSync(dir)) return 0
+        return fs.readdirSync(dir, { withFileTypes: true }).filter(d => d.isDirectory()).length
+      } catch { return 0 }
+    }
+    const extraCounts = extras.map(dir => ({ dir, count: countIn(dir), exists: fs.existsSync(dir) }))
+    const primaryCount = countIn(this.skillsDir)
+    return {
+      primaryDir: this.skillsDir,
+      extraDirs: extras,
+      primaryCount,
+      extraCounts,
+      total: this.skills.size,
+    }
+  }
+
+  private loadSkill(skillDir: string, baseDir?: string): void {
+    const skillPath = path.join(baseDir ?? this.skillsDir, skillDir);
 
     // 【M4-A】文件名兼容:Anthropic Agent Skills 规范用大写 SKILL.md,
     // 本项目历史上有小写 skill.md。两个都认,优先大写(规范优先)。
@@ -189,6 +346,19 @@ export class SkillLoader {
       const skill = this.parseSkillMd(skillDir, content);
 
       if (skill) {
+        /**
+         * 【M3-D】同名以【先到者】为准 —— 主目录优先于额外目录。
+         *
+         * 技能 id 是 `load_skill` 的寻址键,必须全局唯一。
+         * 若让后来的覆盖先来的,主目录里的技能会被额外目录的同名技能顶掉 ——
+         * 用户会看到"我导入的技能不见了",且毫无线索。
+         */
+        if (this.skills.has(skill.id)) {
+          this.log.warn('[SkillLoader] 技能 id 重复,保留先加载的那个', {
+            id: skill.id, dir: baseDir ?? this.skillsDir,
+          });
+          return;
+        }
         // 从配置中读取状态
         const skillStates = this.configStore.get('skills.states') as Record<string, any> || {};
         const savedState = skillStates[skill.id] || {};
@@ -207,6 +377,8 @@ export class SkillLoader {
           hasReferences: hasDir('references'),
           hasScripts: hasDir('scripts'),
           hasAssets: hasDir('assets'),
+          // 【M3-D】记来源目录 —— 删除技能时要知道删哪个,界面也要显示来源
+          sourceDir: baseDir ?? this.skillsDir,
         });
 
         this.log.info('[SkillLoader] 加载技能成功', { id: skill.id, name: skill.name, fileSize });
@@ -545,6 +717,47 @@ export class SkillLoader {
    */
   public getAllSkills(): SkillState[] {
     return Array.from(this.skills.values());
+  }
+
+  /**
+   * 【M3-D】删除一个技能 —— 删它所在的**技能子目录**。
+   *
+   * 【安全 — 这是删目录,必须严格】
+   * 只允许删「已知技能根目录」下的「一级子目录」:
+   *   已知根 = 主目录(userData/skills) ∪ 用户添加的额外目录
+   * 任何越界(路径穿越、符号链接指向外部、根目录本身)一律拒绝。
+   * 技能 id 是用户/LLM 给的字符串 —— 不能直接拿它拼路径就删。
+   */
+  public removeSkill(skillId: string): { ok: boolean; error?: string; removedFrom?: string } {
+    const skill = this.skills.get(skillId)
+    if (!skill) return { ok: false, error: `技能不存在: ${skillId}` }
+
+    const base = path.resolve(skill.sourceDir ?? this.skillsDir)
+    const allowedRoots = [path.resolve(this.skillsDir), ...this.getExtraDirs().map(d => path.resolve(d))]
+    if (!allowedRoots.includes(base)) {
+      return { ok: false, error: `拒绝: 该技能来自未登记的目录 ${base}` }
+    }
+
+    // 只删 base 下的一级子目录,且必须真的在 base 之内
+    const target = path.resolve(base, skillId)
+    if (path.dirname(target) !== base) {
+      return { ok: false, error: `拒绝: 目标越界 ${target}` }
+    }
+    if (!fs.existsSync(target)) {
+      // 目录已不存在(只剩索引里的记录)→ 清掉索引即可
+      this.skills.delete(skillId)
+      this.reloadSkills()
+      return { ok: true, removedFrom: base }
+    }
+    try {
+      fs.rmSync(target, { recursive: true, force: true })
+    } catch (e) {
+      return { ok: false, error: `删除失败: ${String(e)}` }
+    }
+    this.skills.delete(skillId)
+    this.reloadSkills()
+    this.log.info('[SkillLoader] 技能已删除', { id: skillId, dir: base })
+    return { ok: true, removedFrom: base }
   }
 
   /**

@@ -91,6 +91,62 @@
     </div>
 
     <!--
+      【M3-D】技能目录 —— 用户自己的技能目录也能被扫到。
+      此前只有 userData/skills 一个目录(导入的 / 自学习生成的),
+      用户项目里的技能目录完全看不到。
+    -->
+    <el-card class="skills-dir-card">
+      <div class="dir-header">
+        <h3>{{ '技能目录' }}</h3>
+        <el-button size="small" @click="addSkillDirectory">
+          <el-icon><Plus /></el-icon>
+          {{ '添加技能目录' }}
+        </el-button>
+      </div>
+
+      <div class="dir-primary">
+        <span class="dir-label">{{ '主目录' }}</span>
+        <code class="dir-path">{{ storageInfo?.primaryDir || '—' }}</code>
+        <el-tag size="small" type="info">{{ storageInfo?.primaryCount ?? 0 }}</el-tag>
+      </div>
+
+      <div v-if="(storageInfo?.extraDirs?.length ?? 0) > 0" class="dir-extras">
+        <div v-for="d in storageInfo.extraDirs" :key="d.dir" class="dir-extra">
+          <code class="dir-path">{{ d.dir }}</code>
+          <el-tag size="small" :type="d.exists ? 'info' : 'danger'">
+            {{ d.exists ? d.count : '目录不存在' }}
+          </el-tag>
+          <el-button size="small" text type="danger" @click="removeSkillDirectory(d.dir)">
+            {{ '移除' }}
+          </el-button>
+        </div>
+      </div>
+      <p v-else class="dir-empty">{{ '尚未添加额外目录。添加后，这些目录里的技能也会被加载。' }}</p>
+
+      <!-- 添加前的预览:先让用户看见这个目录里有什么技能 -->
+      <div v-if="dirPreview" class="dir-preview">
+        <div class="dir-preview-head">
+          <code class="dir-path">{{ dirPreview.path }}</code>
+          <el-tag size="small" type="success">{{ dirPreview.skills.length }}</el-tag>
+        </div>
+        <div v-if="dirPreview.skills.length === 0" class="dir-preview-empty">
+          {{ '该目录下没有找到技能（每个技能需是一个含 SKILL.md 的子目录）' }}
+        </div>
+        <div v-else class="dir-preview-list">
+          <el-tag v-for="s in dirPreview.skills" :key="s.id" size="small" style="margin: 2px;">
+            {{ s.name || s.id }}
+          </el-tag>
+        </div>
+        <div class="dir-preview-actions">
+          <el-button size="small" type="primary" @click="confirmAddSkillDirectory">
+            {{ '确认添加' }}
+          </el-button>
+          <el-button size="small" @click="dirPreview = null">{{ '取消' }}</el-button>
+        </div>
+      </div>
+    </el-card>
+
+    <!--
       【M4-B】效果判定面板
       此前学习闭环收集的调用成败数据【没有任何读取方】—— 进了 skill-stats.json 就没人再看过。
       本面板是它的第一个读取方:把"这个工具/技能到底好不好用"变成能一眼看到的结论。
@@ -335,7 +391,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue';
-import { Upload, MagicStick, Box, SuccessFilled } from '@element-plus/icons-vue';
+import { Upload, MagicStick, Box, SuccessFilled, Plus } from '@element-plus/icons-vue';
 import { ElMessage } from "element-plus/es/components/message/index"
 // #007 H1: 提案超时阈值 (30 分钟, 订单既定)
 const PROPOSAL_TIMEOUT_MS = 30 * 60 * 1000
@@ -431,6 +487,63 @@ const loadEffectiveness = async () => {
  * 【M4-D】边际效用 —— 同类别任务下,带该技能 vs 不带该技能的成功率差。
  * 这是"这个技能到底有没有用"目前能给出的最强信号。
  */
+// ══════════ 【M3-D】技能目录 ══════════
+// 用户自己的技能目录也能被扫到。此前只有 userData/skills 一个目录。
+
+const storageInfo = ref<any>(null);
+const dirPreview = ref<any>(null);
+
+const loadStorageInfo = async (): Promise<void> => {
+  try {
+    const res = await (window as any).electronAPI?.skills?.getStorageInfo?.();
+    if (res?.success && res.data) storageInfo.value = res.data;
+  } catch (e) {
+    console.error('读取技能存储信息失败', e);
+  }
+};
+
+/** 选目录 → 预览 → 确认添加(两步:先让用户看见里面有什么) */
+const addSkillDirectory = async (): Promise<void> => {
+  try {
+    const picked = await (window as any).electronAPI?.dialog?.openFile?.({
+      properties: ['openDirectory', 'createDirectory'],
+      title: '选择技能目录',
+    });
+    if (!picked || picked.canceled || !picked.filePaths?.length) return;
+    const dir = picked.filePaths[0];
+    const res = await (window as any).electronAPI?.skills?.getDirectoryPreview?.(dir);
+    if (res?.success) {
+      dirPreview.value = res.data;
+    } else {
+      ElMessage.error(res?.error || '读取目录失败');
+    }
+  } catch (e) {
+    console.error('选择技能目录失败', e);
+  }
+};
+
+const confirmAddSkillDirectory = async (): Promise<void> => {
+  if (!dirPreview.value) return;
+  const res = await (window as any).electronAPI?.skills?.addCustomDir?.(dirPreview.value.path);
+  if (res?.success) {
+    ElMessage.success('技能目录已添加');
+    dirPreview.value = null;
+    await loadStorageInfo();
+    await loadSkills();
+  } else {
+    ElMessage.error(res?.error || '添加失败');
+  }
+};
+
+const removeSkillDirectory = async (dir: string): Promise<void> => {
+  const res = await (window as any).electronAPI?.skills?.removeCustomDir?.(dir);
+  if (res?.success) {
+    ElMessage.success('技能目录已移除');
+    await loadStorageInfo();
+    await loadSkills();
+  }
+};
+
 const utilityRows = ref<any[]>([]);
 
 const loadUtility = async () => {
@@ -598,6 +711,7 @@ let unsubscribeProposal: (() => void) | null = null;
 
 onMounted(() => {
   loadSkills();
+  loadStorageInfo();
 
   const api = (window as any).electronAPI;
   if (api?.learning?.onNewProposal) {
@@ -819,6 +933,75 @@ onUnmounted(() => {
 .detail-section {
   display: flex;
   flex-direction: column;
+  gap: var(--space-sm);
+}
+
+/* 【M3-D】技能目录 */
+.skills-dir-card {
+  margin-top: var(--space-md);
+}
+
+.dir-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: var(--space-sm);
+}
+
+.dir-primary,
+.dir-extra {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  padding: 4px 0;
+}
+
+.dir-label {
+  font-size: var(--font-size-body);
+  color: var(--text-secondary);
+  min-width: 48px;
+}
+
+.dir-path {
+  font-size: var(--font-size-caption);
+  color: var(--text-primary);
+  background: var(--bg-secondary);
+  padding: 2px 6px;
+  border-radius: 4px;
+  word-break: break-all;
+}
+
+.dir-empty {
+  margin: var(--space-xs) 0 0;
+  font-size: var(--font-size-caption);
+  color: var(--text-secondary);
+}
+
+.dir-preview {
+  margin-top: var(--space-sm);
+  padding: var(--space-sm);
+  border: 1px dashed var(--border-color);
+  border-radius: 8px;
+}
+
+.dir-preview-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-bottom: var(--space-xs);
+}
+
+.dir-preview-empty {
+  font-size: var(--font-size-caption);
+  color: var(--text-secondary);
+}
+
+.dir-preview-list {
+  margin-bottom: var(--space-xs);
+}
+
+.dir-preview-actions {
+  display: flex;
   gap: var(--space-sm);
 }
 

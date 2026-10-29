@@ -511,6 +511,74 @@ export class IpcServer {
       }
     });
 
+    // ══════════ 【M3-D】技能目录管理 ══════════
+    // 这 6 个通道在 preload 里**早就声明了**,但主进程从没有实现、渲染层也从没调用 ——
+    // 典型的"能力只有一张嘴":真调了会得到 "No handler registered"。
+    // 现补齐实现(用户自定义技能目录的增删查 + 技能删除 + 存储信息)。
+
+    ipcMain.handle('skills:addCustomDir', async (_, dirPath: string) => {
+      try {
+        const loader = SkillLoader.getInstance();
+        const r = loader.addExtraDir(dirPath);
+        return { success: r.ok, data: r.dirs, error: r.error };
+      } catch (error) {
+        this.log.error('skills:addCustomDir 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    ipcMain.handle('skills:removeCustomDir', async (_, dirPath: string) => {
+      try {
+        const loader = SkillLoader.getInstance();
+        const r = loader.removeExtraDir(dirPath);
+        return { success: true, data: r.dirs };
+      } catch (error) {
+        this.log.error('skills:removeCustomDir 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    ipcMain.handle('skills:getCustomDirs', async () => {
+      try {
+        const loader = SkillLoader.getInstance();
+        return { success: true, data: loader.getExtraDirs() };
+      } catch (error) {
+        this.log.error('skills:getCustomDirs 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    ipcMain.handle('skills:getDirectoryPreview', async (_, dirPath: string) => {
+      try {
+        const loader = SkillLoader.getInstance();
+        return { success: true, data: loader.previewDirectory(dirPath) };
+      } catch (error) {
+        this.log.error('skills:getDirectoryPreview 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    ipcMain.handle('skills:getStorageInfo', async () => {
+      try {
+        const loader = SkillLoader.getInstance();
+        return { success: true, data: loader.getStorageInfo() };
+      } catch (error) {
+        this.log.error('skills:getStorageInfo 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    ipcMain.handle('skills:remove', async (_, skillId: string) => {
+      try {
+        const loader = SkillLoader.getInstance();
+        const r = loader.removeSkill(skillId);
+        return { success: r.ok, data: r, error: r.error };
+      } catch (error) {
+        this.log.error('skills:remove 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
     ipcMain.handle('skills:toggle', async (_, skillId: string, enabled: boolean) => {
       try {
         const skillLoader = SkillLoader.getInstance();

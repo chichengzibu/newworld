@@ -875,3 +875,33 @@
   - **【核心回归钉】超时 → 整棵树被杀（孙进程不残留）** —— 测法:被沙箱跑的命令**自己**起长跑孙进程并把 pid 打到 stdout,超时后验那个 pid 还在不在（不能另起进程树 —— 那样验的不是被沙箱命令的树）
   - **接线：BashTool 收到中止信号 → 命令被中止**（验信号一路传到执行层）
 - **改动的存量测试**：`tests/unit/trusted-dirs.test.ts` 补 `node:child_process` 的 `spawn` 假实现（生产路径已从 execFile 换成 spawn）
+
+---
+
+## W5 接线批偏差登记 · M3-D 技能目录（2026-10-29）
+
+> 本批不是按计划做的,是**全仓系统性审计扫出来的**。
+> 编号自 DEV-081 起。完整设计见 `docs/NOVA-#009-m3d-skill-directories-design.md`。
+
+| ID | 状态 | 摘要 |
+|---|---|---|
+| DEV-081 | 已修 | 6 个技能通道「只有一张嘴」 · preload 早就声明了 `skills:addCustomDir`/`removeCustomDir`/`getCustomDirs`/`getDirectoryPreview`/`getStorageInfo`/`remove`,但主进程**从无 handler**、渲染层**从无调用方**、`SkillLoader` **只有 userData/skills 一个目录** → 真调会得到 `No handler registered`。而 `preload` 是 contextBridge 暴露面 = 对外承诺的 API,承诺不存在的能力比不承诺更糟 |
+| DEV-082 | 已修 | 用户项目里的技能目录完全看不到 · 技能来源此前只有一层(应用自己管的 userData/skills),缺 Anthropic 规范的「项目层」。现支持用户额外挂目录,目录里的技能照样被加载(主目录 > 额外目录,先到者为准 —— 技能 id 是 `load_skill` 唯一寻址键,必须全局唯一) |
+| DEV-083 | 已修 | 删除技能没有路径守卫的风险面 · `removeSkill` 删的是**目录**,而技能 id 是用户/LLM 给的字符串 → 不能拼路径就删。现守卫:允许的根 = 主目录 ∪ 用户添加的额外目录;且 `path.dirname(target) === base`(防路径穿越);来源目录不在允许列表 → 一律拒 |
+| DEV-084 | 已修 | 技能目录扫描是提示词注入面 · 技能正文会进 system prompt = 用户指定的目录可以往提示词里塞东西。故:只扫一级子目录(须含 SKILL.md/skill.md)·**符号链接默认不跟随**(`dirent.isDirectory()` 对软链返回 false,既防越界也防任意读取)· 额外目录必须用户显式添加 |
+
+### DEV-081~084 明细（技能目录，2026-10-29）
+
+- **审计方法**：全仓三类系统性扫描 —— ① IPC 三角（preload 声明 ↔ 主进程 handle ↔ 渲染层 invoke）② 配置键三角（`configStore.get` ↔ `configStore.set`）③ 能力可达性（有实现无调用方 / 有声明无实现）。结果：10 个通道声明了但全仓无 handler，其中 6 个是技能目录
+- **新增能力**：`getExtraDirs`/`setExtraDirs`（持久化到 `skills.extraDirs`,与 `skills.states` 分开放:一个是「扫哪儿」,一个是「每个技能什么状态」）· `addExtraDir`/`removeExtraDir` · `previewDirectory`（预览,不加载）· `getStorageInfo`（目录不存在**如实标出**）· `removeSkill` · `SkillState.sourceDir`
+- **UI**：`SkillsView.vue` 新增「技能目录」卡片 —— 主目录 / 额外目录列表 / 「添加技能目录」→ 系统目录选择器 → **预览**（先让用户看见里面有什么技能）→ 确认。预览这一步是有意的:目录里没技能时用户会以为功能坏了
+
+### 关单（W5 接线批 · M3-D 技能目录，2026-10-29）
+
+- **范围**：DEV-081 ~ DEV-084（4 条）
+- **验证**：
+  - vue-tsc: 0 error
+  - vitest: Test Files 116 passed (116) / Tests 1391 passed | 14 skipped (1405) / 0 FAIL
+  - 后端 tsc（tsconfig.node.json）: 29 error（= 存量基线，零新增）
+- **新增测试**：`tests/unit/skill-directories-m3d.test.ts`（12 例）
+  额外目录技能被加载 · 同名主目录优先 · 移除目录后不再加载 · 添加不存在的目录被拒 · 重复添加去重 · 预览列出技能 · 预览不存在目录不报错 · 存储信息如实报告 · 删除技能删对目录 · 删除不存在的技能报失败 · **删除的路径守卫（未登记目录一律拒）** · 目录已不存在时只清索引

@@ -202,9 +202,27 @@ All notable changes to PiPiClaw will be documented in this file.
 - **输出超限改为截断标注** — 此前直接抛错,输出全丢
 - **审计口径不变** — 两段式审计、fail-closed、最小环境全部保留
 
+### 📁 技能目录(M3-D)
+
+本批不是按计划做的,是**全仓系统性审计扫出来的**。
+审计三类系统性缺陷(IPC 三角 / 配置键三角 / 能力可达性),
+结果:10 个通道声明了但**全仓无 handler**,其中 6 个是技能目录 ——
+
+- **能力只有一张嘴** — preload 早就声明了 `skills:addCustomDir` 等 6 个通道,
+  但主进程从无 handler、渲染层从无调用方、加载器只有一个目录。
+  而 preload 是 contextBridge 暴露面 = **对外承诺的 API**,
+  承诺不存在的能力比不承诺更糟
+- **用户项目里的技能目录完全看不到** — 现支持额外挂目录,目录里的技能照样加载
+  (主目录优先 —— 技能 id 是 `load_skill` 唯一寻址键,必须全局唯一)
+- **删除技能有路径守卫** — 技能 id 是用户/LLM 给的字符串,不能拼路径就删:
+  只允许删「已知根目录」下的一级子目录
+- **目录扫描是提示词注入面** — 技能正文会进 system prompt,
+  故只扫一级子目录、**符号链接默认不跟随**、额外目录必须用户显式添加
+- **UI** —「技能管理」页新增「技能目录」卡片:添加 → 系统目录选择器 → **预览** → 确认
+
 ### 📊 验证
 
-vitest 115 files / 1379 passed / 0 FAIL · vue-tsc 0 error · 后端 tsc 29(= 修掉 1 条存量后的基线)
+vitest 116 files / 1391 passed / 0 FAIL · vue-tsc 0 error · 后端 tsc 29(= 修掉 1 条存量后的基线)
 
 ## [4.5.0-alpha] - 2026-08-06 (LlmAgentBrain v0.1 + MCP PoC + P0 安全,M1)
 
