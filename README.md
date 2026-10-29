@@ -220,13 +220,14 @@ piclaw/
 │   │   └── AgentEventRelay.ts # 运行事件中继(接会话归属)
 │   ├── chat/            # 聊天管理器
 │   ├── core/            # 核心基础设施
-│   ├── hermes/          # Hermes 记忆系统
-│   ├── learning/        # 自我学习引擎
+│   ├── hermes/          # Hermes 记忆系统(向量召回 + 混合检索 RRF)
+│   ├── learning/        # 自我学习引擎(轨迹观察 / 技能效用)
 │   ├── mcp/             # MCP 客户端(stdio transport)
 │   ├── models/          # 模型管理
 │   ├── openclaw/        # OpenClaw 集成
 │   ├── permissions/     # 权限管理
 │   ├── platform/        # 平台抽象(win/mac/linux/ohos)
+│   ├── sandbox/         # 进程沙箱(进程组 / taskkill 树杀)
 │   ├── skill/           # 技能加载器(渐进披露)
 │   ├── task/            # 任务执行引擎
 │   ├── types/           # 类型定义
