@@ -938,3 +938,46 @@
   brain 带回分项与真实模型名 · 载荷带 llmModel 与分项 · 按模型归集（不再混在 'agent-loop' 一栏）·
   按会话可查 · 今日汇总成本 > 0（不再是硬编码 0）· 定价归一化命中 ·
   **本地模型成本为 0 是事实、不是记账失败（且仍归到该模型名下）**
+
+---
+
+## W5 接线批偏差登记 · M3-F 构建修复（2026-10-30）
+
+> 本批是**跑一次 build 才发现的**:应用此前根本打不出包。
+> 编号自 DEV-089 起。完整设计见 `docs/NOVA-#009-m3f-build-repair-design.md`。
+
+| ID | 状态 | 摘要 |
+|---|---|---|
+| DEV-089 | 已修 | **应用构建失败 —— 根本打不出包** · `npm run build` 报 `Could not resolve "../actor/ActorRegistry" from "electron/runtime/bridge/IpcBridge.ts"` → electron 主进程 bundle 解析不到 → 无产物、无法发布。根因:commit `7f6d988`「清理无用文件 141 个」删掉了 `runtime/actor/{Actor,ActorRegistry,index}` 与 `runtime/conversation/{State,Transition,index}`,而 `IpcBridge`/`Conversation`/`MessageQueue` **仍 import 它们**。`IpcBridge` 是**活的**(`main.ts:240` 调 `registerHandler()`) |
+| DEV-090 | 已修 | 构建**不做类型检查** → 30 条类型错误(含 7 条断链)长期无人理会 · 构建只跑 `vite build`(esbuild,纯语法转译)。这类工具永远不会告诉你 import 断了。类型错误里藏着的正是「模块被删但 import 还在」这类**构建级**故障,而它**不报运行时错、不让任何单测变红** |
+| DEV-091 | 已修 | 契约漏字段 4 处 · `SplashOptions.onFailed`(设计稿 F7 与类注释都写明这个回调,接口里**漏了字段** → 5 处调用点全是类型错误)· `ChannelMessage.from`/`.subject`(`IMMessageStore` 一直在用:按发送者过滤、按标题加权检索)→ 4 处类型错误 |
+| DEV-092 | 已修 | 代码本身 18 处类型错误 · `SplashWindow` 的 `platform === 'test'`(TS 判永假)与 `webContents.on('mouse-down')`(**不是该 API**,改 `before-input-event` + `input.type === 'mouseDown'`);`main.ts` 的 per-contents `'crashed'` 与 app 级 `'render-process-gone'` **完全重复**(同一件事上报两次)已删;`WindowManager` 闭包里 TS 无法窄化 `this.mainWindow`;`LlmAgentBrain` throw 后 `spawnCtx` 被窄化成 `undefined` → `?.depth` 成 `never`(深度改在 throw 前取出);`ModelUsageTracker` 两代 schema 联合类型窄化;`PermissionConfig` 缺 `'upgrade-default'`(合法的第 6 个 reason);`ClawHubManager` 的 `publishedAt` 可能 undefined + 模板字面量缺 `createdAt` |
+| DEV-093 | 已修 | 构建缺类型检查门禁 · `scripts/build.mjs` 新增第 1 步 `tsc --noEmit -p tsconfig.node.json`,不过直接 exit 1。失败时明确提示「typecheck 里的 Cannot find module 通常意味着有模块被删但 import 还在 —— 那会让 electron 主进程构建失败」 |
+| DEV-094 | 已修 | 冒烟测试断言过期 · 原断言查 `dist-electron/tsconfig.node.tsbuildinfo` —— 那是「用 tsc 产 main.js」的年代留下的产物证明;构建早已改走 vite(tsc 不再 emit)→ **这条断言永远失败**。换成真正有意义的那道门:主进程类型检查必须通过 |
+| DEV-095 | 已修 | 「删文件」与「改 import」的一致性无任何测试覆盖 · 新增 `tests/unit/import-integrity.test.ts`:全仓扫相对 import 验证能解析 + 不残留零字节空壳 + 不越出仓库根。扫描前剥掉注释(否则注释里提到的路径会被当真 import)、跳过模板目录(里面的 import 是要生成出去的代码文本) |
+
+### DEV-089 明细（构建断链，2026-10-30）
+
+- **恢复的模块**（原样恢复，不是重写）：`Actor.ts` / `ActorRegistry.ts` / `actor/index.ts`（来自 `ba269d0`）· `State.ts` / `Transition.ts` / `conversation/index.ts`（来自 `d432a0e`）
+- **另修** `preload.ts` 的 voice import：原路径 `'../core/voice'` 指向**仓库根**（本文件在 `electron/` 下，正确是 `'./core/voice'`）；又因 `moduleResolution:'bundler'` 不解析目录索引，最终指向 `'./core/voice/index'`
+- **为什么那 4 个模块值得恢复而不是连着 IpcBridge 一起删**：IpcBridge 是活的 —— 它把渲染进程的消息经 EventBus 派给已注册 actor，是 runtime 消息层的入口
+
+### DEV-095 明细（死能力清理，2026-10-30）
+
+| 删除 | 原因 |
+|---|---|
+| `SelfLearner.checkSkillMatch()` | 被 M4-A 的 `rankSkillsByRelevance`（单次 LLM 调用批量排序）取代，零调用方 |
+| `SelfLearner.checkPatternThreshold()` | **恒返回 false** 的兼容壳 —— 调用方拿到的是**错答案**，不只是没答案 |
+| `SelfLearner.generateSkillProposal(fingerprint)` | 忽略入参的兼容壳，返回的其实是 pendingProposal |
+| `SkillManager` 整套 CRUD + 自有存储（232 → 41 行） | **第二个 phantom 技能存储**，零生产调用方；只留 `getSkillsDir()`（路径单点，3 个活调用方）。瘦身后的文件里明确标注「技能的真实存储在哪」 |
+
+### 关单（W5 接线批 · M3-F 构建修复，2026-10-30）
+
+- **范围**：DEV-089 ~ DEV-095（7 条）
+- **验证**：
+  - `npm run build`：**通过** → 产出 `release/PiPiClaw-4.5.0-alpha-Setup.exe`（97MB）+ `dist-electron/{main,preload}.js`
+  - 后端 tsc（tsconfig.node.json）: **0 error**（= 修完 30 条存量）
+  - `scripts/smoke-test.mjs`: 22 passed / 0 failed
+  - vitest: Test Files 118 passed (118) / Tests 1401 passed | 14 skipped (1415) / 0 FAIL
+  - vue-tsc: 0 error
+- **新增测试**：`tests/unit/import-integrity.test.ts`（3 例）—— 相对 import 全部可解析 / 不残留零字节空壳 / 不越出仓库根

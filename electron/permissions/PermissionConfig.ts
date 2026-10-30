@@ -60,7 +60,9 @@ export class PermissionConfig {
   private emitModeChange(opts: {
     from: string | null;
     to: string;
-    reason: 'user-setActive' | 'init-default' | 'reset' | 'ipc-reset' | 'env-reset';
+    // 【M3-F】'upgrade-default' 是合法 reason(配置升级时把老 permissive 换成 safe),
+    // 但类型里没列 → 调用点报错。补上。
+    reason: 'user-setActive' | 'init-default' | 'reset' | 'ipc-reset' | 'env-reset' | 'upgrade-default';
     via?: string;
   }): void {
     const payload = {

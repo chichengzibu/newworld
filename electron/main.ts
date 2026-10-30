@@ -55,15 +55,11 @@ if (SENTRY_DSN) {
   });
 
   // 渲染进程崩溃/消失:真实用户监控闭环——主进程侧捕获并上报
-  app.on('web-contents-created', (_e, contents) => {
-    contents.on('crashed', (event, ...rest) => {
-      try {
-        Sentry.captureException(new Error('webContents crashed'), {
-          extra: { details: rest?.[0] ?? String(event) },
-        });
-      } catch { /* swallow */ }
-    });
-  });
+  // 【M3-F 删】原先这里还有一个 per-webContents 的 'crashed' 监听,
+  // 与紧随其后的 app 级 'render-process-gone' **完全重复**(同一件事上报两次)。
+  // 而且 'crashed' 在当前 Electron 版本里已不在 webContents.on 的类型里
+  // (只有 'render-process-gone',其 reason 枚举里含 'crashed')→ 类型错误。
+  // 保留 app 级那一个即可。
   app.on('render-process-gone', (_e, _wc, details) => {
     try {
       Sentry.captureException(new Error('render-process-gone'), {

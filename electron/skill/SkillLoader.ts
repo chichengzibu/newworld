@@ -1145,7 +1145,7 @@ export class SkillLoader {
    *
    * 【语义变更 —— 重要】
    * 旧实现:技能 ≤5 个 → 全部注入全文;>5 个 → 对每个技能【串行发一次 LLM
-   *   调用】去问 selfLearner.checkSkillMatch,且传入的 triggerCondition
+   *   调用】去问 selfLearner.checkSkillMatch(已于 M3-F 删除),且传入的 triggerCondition
    *   恒为 undefined(实际拿字符串"无"作对照)。N 个技能 = N 次 LLM 往返,
    *   每次规划都付这个成本,且匹配质量接近随机。
    *

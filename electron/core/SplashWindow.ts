@@ -3,6 +3,14 @@ import * as path from 'node:path';
 import { LogManager } from './LogManager';
 
 export interface SplashOptions {
+  /**
+   * loadFile 失败 / 资源文件缺失 → 主进程降级直开主窗。
+   *
+   * 【M3-F 补】设计稿 F7 与本文件头注释都写明"loadFile 失败 → onFailed 回调 →
+   * 主进程降级直开主窗(本类不做静默吞错)",但接口里**漏了这个字段** ——
+   * 于是 5 处调用点全是类型错误,类型系统还在替我们记着这笔债。
+   */
+  onFailed?(reason?: string): void;
   /** 事件推给 splash 窗(nova:boot-event) */
   onEvent?(payload: Record<string, unknown>): void;
   /** 跳过请求 → 主进程侧立即放行 */
@@ -61,7 +69,9 @@ export class SplashWindow {
    * 返回 false = loadFile 同步失败 / 文件不存在 → 主进程应降级(F7), 不静默吞。
    */
   create(): boolean {
-    if (process.platform === 'test') return false;
+    // 【M3-F】'test' 不在 NodeJS.Platform 联合类型里 → 比较被 TS 判为"永假"。
+    // 这里确实是刻意的测试环境短路,显式转 string 保住意图。
+    if ((process.platform as string) === 'test') return false;
     if (this.win && !this.win.isDestroyed()) return true;
 
     const splashPath = path.join(app.getAppPath(), 'resources', 'splash.html');
@@ -128,8 +138,14 @@ export class SplashWindow {
 
       // ---- 跳过(设计稿 F5/F6) ----
       // 主进程级点击跳过:splash 任意位置点击即跳过(不依赖渲染层)
-      this.win.webContents.on('mouse-down', () => {
-        this.opts.onSkip?.();
+      // 【M3-F】'mouse-down' 不是 webContents 的事件名(类型系统一直报错)。
+      // 主进程侧要感知"用户在 splash 上点了鼠标",正确的 API 是
+      // `before-input-event` —— 它把渲染侧收到的输入事件回传主进程,
+      // 正好对应设计稿 F5/F6 的"主进程级点击跳过"。
+      this.win.webContents.on('before-input-event', (_e, input) => {
+        if (input.type === 'mouseDown') {
+          this.opts.onSkip?.();
+        }
       });
       // 键盘跳过走渲染端 splash.html keydown → window.nova?.skip()
       //   → preload nova.skip() → IpcServer nova:boot-skip → onSkip(同一链路, preload 双窗共用)

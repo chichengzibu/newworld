@@ -699,6 +699,9 @@ export class LlmAgentBrain implements AgentBrain {
   async spawn(subtask: SubTask, parentCtx?: { contextKind?: SpawnContext['contextKind']; parentRunId: string; checkpoint?: (ev: RunCheckpointEvent) => void }): Promise<SubAgent> {
     // #005 spawn R2 钉: 深度上限 MAX_SPAWN_DEPTH=1 — 子实例(带 spawnCtx)再 spawn 即超限, 立即 throw (非静默降级, 非静默降级到脑内递归)。
     // 用「是否已带出生上下文」判定, 不依赖 depth 计数字段 — 单例(undefined)=父允许, 子实例(有)=已达上限。
+    // 【M3-F】深度要在 throw 判断**之前**取出:
+    // throw 之后 TS 把 this.spawnCtx 窄化成 undefined,再读 `?.depth` 就成了 never。
+    const parentDepth = this.spawnCtx?.depth ?? 0;
     if (this.spawnCtx !== undefined) {
       throw new Error(`LlmAgentBrain.spawn: 深度超限 (MAX_SPAWN_DEPTH=${MAX_SPAWN_DEPTH}) — 子代理禁止再 spawn [${subtask.instruction.slice(0, 30)}]`)
     }
@@ -708,7 +711,7 @@ export class LlmAgentBrain implements AgentBrain {
     }
     // #005 spawn ① 独立性: 新实例 (独立 tools Map / runs Map, 同 BUILTIN_TOOLS 源零提权), 禁 brain:this 自引用 (旧 stub 债已删)。
     const child = LlmAgentBrain.create({
-      depth: (this.spawnCtx?.depth ?? 0) + 1, // 父=0 → 子=1 (= MAX_SPAWN_DEPTH)
+      depth: parentDepth + 1, // 父=0 → 子=1 (= MAX_SPAWN_DEPTH)
       parentRunId: parentCtx.parentRunId,
       contextKind: parentCtx.contextKind,
       checkpointHook: parentCtx.checkpoint,

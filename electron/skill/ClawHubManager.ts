@@ -434,7 +434,7 @@ export class ClawHubManager {
     today.setHours(0, 0, 0, 0)
     const todayStart = today.getTime()
     const userTodayTemplates = [...this.templates.values()].filter(
-      (t) => t.authorId === args.authorId && t.publishedAt >= todayStart,
+      (t) => t.authorId === args.authorId && (t.publishedAt ?? 0) >= todayStart,
     )
     if (userTodayTemplates.length >= 5) {
       throw new Error('每天最多发布 5 个模板,请明天再试')
@@ -451,6 +451,7 @@ export class ClawHubManager {
       authorName: args.authorName,
       manifestContent: args.manifestContent,
       publishedAt: now,
+      createdAt: now,
       downloads: 0,
       isBuiltin: false,
     }
@@ -478,7 +479,7 @@ export class ClawHubManager {
           t.tags.some((tag) => tag.toLowerCase().includes(q)),
       )
     }
-    return results.sort((a, b) => b.publishedAt - a.publishedAt)
+    return results.sort((a, b) => (b.publishedAt ?? 0) - (a.publishedAt ?? 0))
   }
 
   /** P3-01: 简易敏感词检查 (扩展性预留) */

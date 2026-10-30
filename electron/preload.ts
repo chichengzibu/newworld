@@ -10,7 +10,10 @@
 import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron';
 
 // NOVA #005-B · M4 — 语音设置类型(第②笔, IPC 接线配套 import; 不新增模块)
-import type { VoiceSettings } from '../core/voice';
+// 【M3-F 修断链】原路径是 '../core/voice' —— 但本文件在 electron/ 下,
+// '../core/voice' 指向仓库根(不存在)。正确是 './core/voice';
+// 又因 tsconfig 用 moduleResolution:'bundler'(不解析目录索引),需指到 barrel 文件。
+import type { VoiceSettings } from './core/voice/index';
 
 // Sentry 渲染↔主进程桥接:必须在 preload 顶部引入,使渲染端事件能转发到主进程上报。
 import '@sentry/electron/preload';

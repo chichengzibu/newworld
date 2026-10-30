@@ -111,7 +111,28 @@ function findArtifact(dir) {
   return found;
 }
 
-console.log('\n=== [1/3] vite build ===');
+/**
+ * 【M3-F 新增】主进程类型检查门禁 —— 构建前必须过。
+ *
+ * 【为什么必须有这道门】
+ * 此前构建**只跑 vite**(esbuild,不做类型检查),于是:
+ *   - 30 条类型错误(含 7 条断链)长期无人理会
+ *   - 其中 4 条断链直接让 electron 主进程**构建失败** —— 应用打不出包
+ *   - 而这一切不报运行时错、不让任何单测变红
+ *
+ * 类型错误里藏着的正是「模块被删了但 import 还在」这类**构建级**故障。
+ * vite 只做语法转译,不做类型检查 —— 类型检查必须单独跑,否则等于没有。
+ */
+console.log('\n=== [1/4] typecheck (主进程) ===');
+const tsc = await run(binName('tsc'), ['--noEmit', '-p', 'tsconfig.node.json'], 300000);
+if (tsc.status !== 0) {
+  console.error('\n✘ 主进程类型检查失败 —— 构建中止。');
+  console.error('  注:typecheck 里出现的 "Cannot find module" 通常意味着');
+  console.error('      有模块被删但 import 还在 —— 那会让 electron 主进程构建失败。');
+  process.exit(1);
+}
+
+console.log('\n=== [2/4] vite build ===');
 const vite = await run(binName('vite'), ['build'], 180000);
 if (vite.status !== 0) {
   console.error('\n✘ vite build 失败');
@@ -121,7 +142,7 @@ if (vite.status !== 0) {
 let overall = 0;
 
 if (!SKIP_EB) {
-  console.log('\n=== [2/3] electron-builder ===');
+  console.log('\n=== [3/4] electron-builder ===');
   const ebArgs = ['--publish=never'];
   if (platformArg) ebArgs.push(platformArg);
   const eb = await run(binName('electron-builder'), ebArgs, 300000);
@@ -143,10 +164,10 @@ if (!SKIP_EB) {
     );
   }
 } else {
-  console.log('\n=== [2/3] electron-builder (跳过 --skip-electron) ===');
+  console.log('\n=== [3/4] electron-builder (跳过 --skip-electron) ===');
 }
 
-console.log('\n=== [3/3] build-report ===');
+console.log('\n=== [4/4] build-report ===');
 const rep = await run('node', ['scripts/build-report.mjs', ...(CI ? ['--ci'] : [])], 60000);
 // build-report 的回归防护/CI 门禁失败 → 整体失败
 if (rep.status !== 0) overall = rep.status ?? 1;

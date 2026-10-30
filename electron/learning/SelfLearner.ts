@@ -6,7 +6,8 @@
  * 1. 观察用户的操作并收集到观察列表
  * 2. 达到阈值时调用大模型分析行为模式
  * 3. 生成泛化的技能提案（语义理解→抽象模式→创建技能）
- * 4. 实现语义匹配的技能触发机制
+ * 4. 为语义匹配提供素材(匹配本身在 SkillLoader.rankSkillsByRelevance:
+ *    一次 LLM 调用批量排序;agent loop 路径则由模型按 description 自行路由)
  *
  * ── #006 X1 反向注释 (与 MemoryVectorStore 正反向一致) ─────────
  * 本类 = 执行行为层 (observations.json, "用户做了什么")。
@@ -1140,51 +1141,12 @@ export class SelfLearner {
     }
   }
 
-  /**
-   * 语义匹配检查（判断新指令是否触发已保存技能）
-   */
-  public async checkSkillMatch(
-    userInstruction: string,
-    skillName: string,
-    triggerCondition: string
-  ): Promise<boolean> {
-    try {
-      // 获取激活的模型
-      const enabledProviders = this.modelManager.getEnabledProviders();
-      if (enabledProviders.length === 0) {
-        return false;
-      }
-
-      const provider = enabledProviders[0];
-      const modelId = provider.defaultModel || provider.models[0]?.id;
-
-      if (!modelId) {
-        return false;
-      }
-
-      // 构建判断提示词
-      const prompt = `当前用户指令：${userInstruction}\n\n已保存技能"${skillName}"的触发条件：${triggerCondition}\n\n请问：当前用户指令是否符合该技能的触发条件？只回答"是"或"否"。`;
-
-      // 调用大模型判断
-      const response = await this.makeChatCompletionRequest(provider, modelId, prompt);
-
-      if (response) {
-        const normalized = response.toLowerCase().trim();
-        return normalized.includes('是') || normalized.includes('yes');
-      }
-
-    } catch (error) {
-      this.log.error('[SelfLearner] 语义匹配失败', error);
-    }
-
-    return false;
-  }
 
   /**
    * 【M4-A】批量技能排序 —— 单次 LLM 调用返回相关技能 id 列表。
    *
    * 【为什么加这个】
-   * 旧的 checkSkillMatch 是"一个技能一次 LLM 调用"。N 个技能 = N 次往返,
+   * 旧的 checkSkillMatch(已于 M3-F 删除)是"一个技能一次 LLM 调用"。N 个技能 = N 次往返,
    * 技能一多(比如 20 个)每次规划都要等 20 个网络往返,而结果只是拿到
    * 一堆 true/false。批量一次调用把成本降到 1/N,且能得到【排序】而非
    * 二元判断 —— 旧实现取前 3 个时,顺序其实是遍历顺序,不是相关度顺序。
@@ -1432,18 +1394,5 @@ ${skillList}
     this.log.info('[SelfLearner] 学习统计已重置');
   }
 
-  /**
-   * [兼容] 保持原来的checkPatternThreshold接口（始终返回false）
-   */
-  public checkPatternThreshold(_fingerprint: string): boolean {
-    return false;
-  }
-
-  /**
-   * [兼容] 保持原来的generateSkillProposal接口
-   */
-  public generateSkillProposal(_fingerprint: string): SkillProposal | null {
-    return this.pendingProposal;
-  }
 }
 

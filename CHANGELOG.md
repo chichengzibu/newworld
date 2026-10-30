@@ -238,9 +238,34 @@ All notable changes to PiPiClaw will be documented in this file.
   现:精确 → 去 provider 前缀与版本后缀 → 前缀命中
 - **UI** —「模型对比 → 使用量排行」页顶部新增「今日成本」卡片(费用 / 输入 / 输出 / 按模型分布)
 
+### 📦 构建修复(M3-F)
+
+跑一次 `npm run build` 才发现的:**应用此前根本打不出包**。
+
+- **构建失败** — `Could not resolve "../actor/ActorRegistry"`。根因:commit
+  `7f6d988`「清理无用文件 141 个」删掉了 `runtime/actor/*` 与
+  `runtime/conversation/*`,而 `IpcBridge`/`Conversation`/`MessageQueue`
+  **仍 import 它们**。`IpcBridge` 是**活的**(`main.ts` 启动即注册 IPC 通道)。
+  补回 6 个被删模块 + 修 `preload.ts` 的 voice import 路径
+- **构建不做类型检查** — 只跑 vite(esbuild,纯语法转译),于是 30 条类型错误
+  (含 7 条断链)长期无人理会,而这类故障**不报运行时错、不让任何单测变红**。
+  现 `build.mjs` 把 `tsc --noEmit` 设为**第 1 道门禁**,不过直接中止
+- **30 条类型错误 → 0** — 分两类:契约漏字段 4 处(`SplashOptions.onFailed`
+  设计稿里写明要有的回调、接口里漏了;`ChannelMessage.from/subject` 一直在用)
+  + 代码本身 18 处(含一处**用了不是该 API 的事件名**、
+  一处与 app 级监听**完全重复**的上报)
+- **冒烟测试的过期断言** — 原先查 `tsbuildinfo`(tsc 产 main.js 时代的产物证明),
+  构建早已改走 vite → **这条断言永远失败**。换成真门禁:主进程类型检查必须通过
+- **导入完整性护栏** — 新增测试全仓扫相对 import 验证能解析 + 不残留零字节空壳
+  + 不越出仓库根。删文件与改 import 的一致性,任何行为测试都覆盖不到
+- **死能力清理** — `SelfLearner.checkSkillMatch`(被 M4-A 取代)、
+  `checkPatternThreshold`(**恒返回 false** 的兼容壳)、`generateSkillProposal`(忽略入参)、
+  `SkillManager` 整套 CRUD(**第二个 phantom 技能存储**,232 → 41 行)
+
 ### 📊 验证
 
-vitest 117 files / 1398 passed / 0 FAIL · vue-tsc 0 error · 后端 tsc 29(= 修掉 1 条存量后的基线)
+vitest 118 files / 1401 passed / 0 FAIL · vue-tsc 0 error · 后端 tsc **0 error**(修完 30 条存量)
+`npm run build` 通过并产出安装包 · smoke-test 22 passed / 0 failed
 
 ## [4.5.0-alpha] - 2026-08-06 (LlmAgentBrain v0.1 + MCP PoC + P0 安全,M1)
 

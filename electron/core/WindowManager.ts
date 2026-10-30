@@ -105,7 +105,11 @@ export class WindowManager {
       //   门控返回 false → 挂起待收口(BootOrchestrator.reveal 时调 show);
       //   无门控(e2e 旁路/单测/降级直开) → 立即 show, 与既有行为逐字一致。
       if (this.revealGate) {
-        const allow = this.revealGate(this.mainWindow);
+        // 【M3-F】this.mainWindow 是 `BrowserWindow | null`;在回调闭包里
+        // TS 无法做属性窄化(可能被别处改掉)→ 先取局部 const 再判空。
+        const win = this.mainWindow;
+        if (!win) return;
+        const allow = this.revealGate(win);
         if (allow) {
           this.mainWindow?.show();
         } else {

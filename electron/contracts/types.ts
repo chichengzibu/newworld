@@ -134,7 +134,22 @@ export interface EvolutionReport { newMemories: number; mutated: number }
 export interface SkillInput { [k: string]: unknown }
 export interface SkillContext { userId?: string; permissionToken?: string }
 export interface SkillOutput { ok: boolean; data?: unknown; error?: string }
-export interface ChannelMessage { to: string; text?: string; attachments?: unknown[] }
+/**
+ * 通道消息。
+ *
+ * 【M3-F 补】`from` / `subject` 是 IMMessageStore 一直在用的字段
+ * (按发送者过滤、按标题加权检索),但契约里没声明 → 4 处类型错误。
+ * 契约漏字段比代码写错更隐蔽:运行时一切正常,只有类型系统在报。
+ */
+export interface ChannelMessage {
+  to: string
+  /** 发送方 id —— 供「按发送者过滤」用 */
+  from?: string
+  text?: string
+  /** 标题/主题 —— 检索时权重更高(命中 +2) */
+  subject?: string
+  attachments?: unknown[]
+}
 export type MessageHandler = (msg: ChannelMessage) => void | Promise<void>
 export interface Disposable { dispose(): void }
 export interface ChannelHealth { healthy: boolean; latencyMs?: number; error?: string }
