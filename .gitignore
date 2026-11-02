@@ -90,6 +90,11 @@ user-journey-ollama/
 dist.bak-*/
 dist-electron.bak-*/
 *-release.zip
+# 【M3-F 补】release.bak-* —— build.mjs 的 moveAside() 会把旧产物 rename 成
+# <dir>.bak-<timestamp> 再重建。这些是**构建产物**(单个 ~465MB,含 Electron 二进制),
+# 此前 .gitignore 只覆盖了 dist/dist-electron 的 bak,漏了 release 的 →
+# 一次 build 就把近 1GB 的构建产物提交进了仓库。
+release.bak-*/
 
 # ── P0:本地构建输出/工具工作区 ──
 registry-out/
