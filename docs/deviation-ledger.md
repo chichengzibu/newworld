@@ -981,3 +981,45 @@
   - vitest: Test Files 118 passed (118) / Tests 1401 passed | 14 skipped (1415) / 0 FAIL
   - vue-tsc: 0 error
 - **新增测试**：`tests/unit/import-integrity.test.ts`（3 例）—— 相对 import 全部可解析 / 不残留零字节空壳 / 不越出仓库根
+
+---
+
+## W5 接线批偏差登记 · M4-G 架构收敛（2026-11-02）
+
+> M3-F 恢复了被误删的模块，但它们仍是**没接入主线的平行架构**。本批收敛。
+> 编号自 DEV-096 起。完整设计见 `docs/NOVA-#009-m4g-architecture-convergence-design.md`。
+
+| ID | 状态 | 摘要 |
+|---|---|---|
+| DEV-096 | 已修 | `runtime/actor` + `runtime/conversation` 是**没接入主线的平行架构** · actor 模型来自 #005 时期,当前设计文档(NOVA #003~#009)从未提及它 → 从未注册过任何 actor,`IpcBridge` 里「查 registry → 投给 actor」那段**永远走不到**。`conversation` 6 状态机同样未接入,只被 `AgentBrain` 当**类型**挂着 |
+| DEV-097 | 已修 | `AgentBrain` 挂着一个永不赋值的字段 · `setConversation` 零调用方 → `this.conversation` 恒为 null → `conversationId: this.conversation?.id ?? 'unknown'` **恒为 'unknown'**。现删掉字段与方法,直接写明常量(不再假装它会变) |
+| DEV-098 | 已修 | 渲染进程类型检查不在构建门禁里 · M3-F 只给主进程加了门禁,`vue-tsc` 只在 `npm run typecheck` 单独跑、构建不碰 → 渲染层类型错误同样是「构建能过、运行时炸」。现构建 5 步:[主进程 typecheck / 渲染进程 typecheck / vite build / electron-builder / build-report] |
+| DEV-099 | 已修 | 导入完整性护栏只扫 electron/ · **测试文件 import 已被删的模块**同样会让 vitest 整个文件 0 test(报「Failed to resolve import」,不是断言失败)—— 本批就撞上了(`MessageQueue.test.ts`)。护栏扩到 `tests/` |
+| DEV-100 | 已修 | 护栏自身有个 bug(假警报) · 解析候选里没放**原样路径** → `import X from './X.vue'` 被拼成 `X.vue.vue` → 一片假警报。已把原样路径放进候选首位 |
+
+### DEV-096 明细（平行架构收敛，2026-11-02）
+
+| 删除 | 理由 |
+|---|---|
+| `electron/runtime/actor/{Actor,ActorRegistry,index,MessageQueue}` | 从未注册过任何 actor；`MessageQueue` 连 import 方都没有 |
+| `electron/runtime/conversation/{Conversation,State,Transition,index}` | 6 状态机从未接入；只被当类型用 |
+| `tests/unit/MessageQueue.test.ts` | 只测死代码（模块已删） |
+
+- **IpcBridge 瘦身**：删掉「查 ActorRegistry → 投给 actor」那段（永远走不到），只留 EventBus 桥接 —— **行为一字不变**。`IpcBridgeMessage.from` 类型从 `ActorId` 改为 `string`（它本来接收任意来源标签）
+- **为什么删而不是接上**：当前设计文档从未出现 actor 模型 —— 它不是规划中的架构，是个没有落点的实验。而 `SkillManager` 那次已经证明「平行架构」的代价：每次读代码都要先判断「哪个是真的」
+
+### DEV-099~100 明细（护栏，2026-11-02）
+
+- 护栏扫描范围扩到 `tests/`（测试文件 import 已被删的模块 → vitest 整个文件 0 test，崩法隐蔽）
+- 修护栏自身的 `.vue` 扩展名拼接 bug（原样路径没进候选 → `X.vue.vue`）
+- 零字节空壳检查也扩到 `tests/`
+
+### 关单（W5 接线批 · M4-G 架构收敛，2026-11-02）
+
+- **范围**：DEV-096 ~ DEV-100（5 条）
+- **验证**：
+  - vitest: Test Files 117 passed (117) / Tests 1393 passed | 14 skipped (1407) / 0 FAIL
+  - 后端 tsc（tsconfig.node.json）: 0 error
+  - vue-tsc: 0 error
+  - `npm run build`: 通过（5 步，含两道类型检查门禁）并产出安装包
+- **顺带删除**：`tests/unit/MessageQueue.test.ts`（只测已删的模块）

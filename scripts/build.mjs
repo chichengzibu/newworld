@@ -123,7 +123,7 @@ function findArtifact(dir) {
  * 类型错误里藏着的正是「模块被删了但 import 还在」这类**构建级**故障。
  * vite 只做语法转译,不做类型检查 —— 类型检查必须单独跑,否则等于没有。
  */
-console.log('\n=== [1/4] typecheck (主进程) ===');
+console.log('\n=== [1/5] typecheck (主进程) ===');
 const tsc = await run(binName('tsc'), ['--noEmit', '-p', 'tsconfig.node.json'], 300000);
 if (tsc.status !== 0) {
   console.error('\n✘ 主进程类型检查失败 —— 构建中止。');
@@ -132,7 +132,20 @@ if (tsc.status !== 0) {
   process.exit(1);
 }
 
-console.log('\n=== [2/4] vite build ===');
+/**
+ * 【M3-G 补】渲染进程类型检查也进门禁。
+ *
+ * 主进程那道门加上之后,渲染层还是裸的 —— vue-tsc 只在 `npm run typecheck`
+ * 里单独跑,构建不碰它。而渲染层的类型错误同样是「构建能过、运行时炸」。
+ */
+console.log('\n=== [2/5] typecheck (渲染进程) ===');
+const vueTsc = await run(binName('vue-tsc'), ['--noEmit', '-p', 'tsconfig.json'], 300000);
+if (vueTsc.status !== 0) {
+  console.error('\n✘ 渲染进程类型检查失败 —— 构建中止。');
+  process.exit(1);
+}
+
+console.log('\n=== [3/5] vite build ===');
 const vite = await run(binName('vite'), ['build'], 180000);
 if (vite.status !== 0) {
   console.error('\n✘ vite build 失败');
@@ -142,7 +155,7 @@ if (vite.status !== 0) {
 let overall = 0;
 
 if (!SKIP_EB) {
-  console.log('\n=== [3/4] electron-builder ===');
+  console.log('\n=== [4/5] electron-builder ===');
   const ebArgs = ['--publish=never'];
   if (platformArg) ebArgs.push(platformArg);
   const eb = await run(binName('electron-builder'), ebArgs, 300000);
@@ -164,10 +177,10 @@ if (!SKIP_EB) {
     );
   }
 } else {
-  console.log('\n=== [3/4] electron-builder (跳过 --skip-electron) ===');
+  console.log('\n=== [4/5] electron-builder (跳过 --skip-electron) ===');
 }
 
-console.log('\n=== [4/4] build-report ===');
+console.log('\n=== [5/5] build-report ===');
 const rep = await run('node', ['scripts/build-report.mjs', ...(CI ? ['--ci'] : [])], 60000);
 // build-report 的回归防护/CI 门禁失败 → 整体失败
 if (rep.status !== 0) overall = rep.status ?? 1;

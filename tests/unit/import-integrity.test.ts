@@ -39,6 +39,9 @@ function walk(dir: string, out: string[] = []): string[] {
 function resolves(importer: string, spec: string): boolean {
   const base = path.resolve(path.dirname(importer), spec)
   const candidates = [
+    // 【M3-G 修】spec 自带扩展名时(常见于 .vue),必须先试**原样** ——
+    // 否则会拼出 "CommandPalette.vue.vue" 这种永远不存在的路径。
+    base,
     base + '.ts',
     base + '.tsx',
     base + '.d.ts',
@@ -49,6 +52,7 @@ function resolves(importer: string, spec: string): boolean {
     path.join(base, 'index.tsx'),
     path.join(base, 'index.js'),
     path.join(base, 'index.d.ts'),
+    path.join(base, 'index.vue'),
   ]
   return candidates.some((c) => {
     try { return fs.existsSync(c) && fs.statSync(c).isFile() } catch { return false }
@@ -75,7 +79,13 @@ function isTemplateFile(f: string): boolean {
 
 describe('导入完整性 —— electron 主进程不得有断链', () => {
   it('所有相对 import 都能解析到文件', () => {
-    const files = walk(path.join(ROOT, 'electron'))
+    // 主进程 + 测试都要扫:
+    // 测试文件 import 已被删的模块,同样会让 vitest 直接崩(整个文件 0 test),
+    // 而且崩法很隐蔽 —— 报的是「Failed to resolve import」,不是断言失败。
+    const files = [
+      ...walk(path.join(ROOT, 'electron')),
+      ...walk(path.join(ROOT, 'tests')),
+    ]
     const broken: string[] = []
 
     for (const f of files) {
@@ -97,8 +107,11 @@ describe('导入完整性 —— electron 主进程不得有断链', () => {
     ).toEqual([])
   })
 
-  it('electron 目录下不残留零字节文件(删除操作留下的空壳)', () => {
-    const files = walk(path.join(ROOT, 'electron'))
+  it('electron / tests 目录下不残留零字节文件(删除操作留下的空壳)', () => {
+    const files = [
+      ...walk(path.join(ROOT, 'electron')),
+      ...walk(path.join(ROOT, 'tests')),
+    ]
     const empty = files
       .filter((f) => fs.statSync(f).size === 0)
       .map((f) => path.relative(ROOT, f))

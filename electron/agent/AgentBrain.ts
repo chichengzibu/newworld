@@ -18,7 +18,6 @@ import { AgentEventBus } from './AgentEventBus'
 import { TraceCollector } from '../insight/TraceCollector'
 import { CostTracker } from '../insight/CostTracker'
 import { TaskKanban } from '../insight/TaskKanban'
-import { Conversation } from '../runtime/conversation/Conversation'
 import type {
   AgentContext,
   Decision,
@@ -47,7 +46,6 @@ export class AgentBrainImpl {
   private trace = TraceCollector.getInstance()
   private cost = CostTracker.getInstance()
   private kanban = TaskKanban.getInstance()
-  private conversation: Conversation | null = null
   private history: ThinkingStep[] = []
   private checkpoints: Map<string, AgentCheckpointState> = new Map()
   private subAgents: Map<string, AgentBrainImpl> = new Map()
@@ -143,7 +141,10 @@ export class AgentBrainImpl {
   async checkpoint(): Promise<string> {
     if (!this.config.get().enableCheckpoint) return ''
     const state: AgentCheckpointState = {
-      conversationId: this.conversation?.id ?? 'unknown',
+      // 【M3-G】原为 `this.conversation?.id ?? 'unknown'` —— 但那个字段
+      // 从没被赋过值(setConversation 零调用方),恒为 'unknown'。
+      // 直接写明,不再挂一个永不改变的值。
+      conversationId: 'unknown',
       ts: Date.now(),
       history: [...this.history],
       decisions: [],
@@ -175,14 +176,6 @@ export class AgentBrainImpl {
 
   setHistory(history: ThinkingStep[]): void {
     this.history = [...history]
-  }
-
-  setConversation(c: Conversation): void {
-    this.conversation = c
-  }
-
-  getConversation(): Conversation | null {
-    return this.conversation
   }
 
   getSubAgent(id: string): AgentBrainImpl | undefined {

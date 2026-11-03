@@ -1,14 +1,12 @@
 import { ipcMain, IpcMainInvokeEvent } from 'electron'
 import { LogManager } from '../../core/LogManager'
 import { EventBus } from './EventBus'
-import type { ActorMessage, ActorId } from '../actor/Actor'
-import { ActorRegistry } from '../actor/ActorRegistry'
-import { randomUUID } from 'node:crypto'
 
 const IPC_BRIDGE_CHANNEL = 'runtime:ipc-bridge'
 
 export interface IpcBridgeMessage {
-  from: ActorId
+  /** 发送方标识(会话 id / actor id / 任意来源标签) */
+  from: string
   type: string
   payload: unknown
 }
@@ -22,7 +20,6 @@ export class IpcBridge {
   private static instance: IpcBridge
   private log = LogManager.getInstance()
   private bus = EventBus.getInstance()
-  private registry = ActorRegistry.getInstance()
   private registered = false
 
   private constructor() {}
@@ -38,19 +35,11 @@ export class IpcBridge {
     if (this.registered) return
     ipcMain.handle(IPC_BRIDGE_CHANNEL, async (_: IpcMainInvokeEvent, msg: IpcBridgeMessage) => {
       this.log.debug(`IpcBridge: 收到 ${msg.from} 的 ${msg.type}`)
+      // 【M3-G 收敛】原先这里还会查 ActorRegistry 并把消息投给对应 actor。
+      // 但全仓**没有任何 actor 注册过**(actor 模型是 #005 时期的一套平行架构,
+      // 从未接入当前主线)→ 那段代码永远走不到,是条不可达的路径。
+      // 现只保留 EventBus 桥接 —— 这才是它实际在做的事。
       await this.bus.publish(`ipc:${msg.type}`, msg.payload, msg.from)
-      const actor = this.registry.lookup(msg.from)
-      if (actor) {
-        const actorMsg: ActorMessage = {
-          id: randomUUID(),
-          from: msg.from,
-          to: msg.from,
-          type: msg.type,
-          payload: msg.payload,
-          timestamp: Date.now(),
-        }
-        await actor.send(actorMsg)
-      }
       return { success: true, bridge: 'ipc', echoed: msg.type }
     })
     this.registered = true

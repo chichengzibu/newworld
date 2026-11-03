@@ -262,10 +262,30 @@ All notable changes to PiPiClaw will be documented in this file.
   `checkPatternThreshold`(**恒返回 false** 的兼容壳)、`generateSkillProposal`(忽略入参)、
   `SkillManager` 整套 CRUD(**第二个 phantom 技能存储**,232 → 41 行)
 
+### 🧹 架构收敛(M4-G)
+
+M3-F 把被误删的模块恢复了 —— 但它们仍是**没接入主线的平行架构**。
+本批收敛:仓库里曾同时存在三套技能运行时 + 两套 agent 实现。
+
+- **删除 `runtime/actor` + `runtime/conversation`** — actor 模型来自 #005 时期,
+  当前设计文档从未提及 → 从未注册过任何 actor,`IpcBridge` 里那段
+  「查 registry → 投给 actor」**永远走不到**;conversation 6 状态机同样未接入,
+  只被 `AgentBrain` 当类型挂着
+- **IpcBridge 瘦身为纯 EventBus 桥接** — 行为一字不变(那段分支本就不可达),
+  但代码不再**假装**有能力
+- **去掉永不赋值的字段** — `setConversation` 零调用方 → `conversationId`
+  恒为 `'unknown'`。现直接写明,不再假装它会变
+- **渲染进程类型检查也进构建门禁** — 主进程有门禁后渲染层还是裸的,
+  而渲染层类型错误同样是「构建能过、运行时炸」。构建现为 5 步:
+  主进程 typecheck / 渲染进程 typecheck / vite build / electron-builder / build-report
+- **导入完整性护栏扩到 tests/** — 测试文件 import 已被删的模块,
+  会让 vitest 整个文件 0 test(报「Failed to resolve import」,不是断言失败),
+  本批就撞上了;顺带修了护栏自身的 `.vue` 扩展名拼接 bug
+
 ### 📊 验证
 
-vitest 118 files / 1401 passed / 0 FAIL · vue-tsc 0 error · 后端 tsc **0 error**(修完 30 条存量)
-`npm run build` 通过并产出安装包 · smoke-test 22 passed / 0 failed
+vitest 117 files / 1393 passed / 0 FAIL · vue-tsc 0 error · 后端 tsc **0 error**
+`npm run build` 通过(5 步 · 两道类型检查门禁)并产出安装包 · smoke-test 22 passed / 0 failed
 
 ## [4.5.0-alpha] - 2026-08-06 (LlmAgentBrain v0.1 + MCP PoC + P0 安全,M1)
 
