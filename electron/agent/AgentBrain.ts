@@ -93,9 +93,26 @@ export class AgentBrainImpl {
       content: `[stub] think 收到 ${thinking.userMessage.slice(0, 30)}`,
     }
     this.history.push(step)
+    /**
+     * 【M4-H 诚实性修正】
+     *
+     * 旧实现回的是 `思考完成: <用户消息前 50 字>` ——
+     * **看起来像一个正常的 AI 答复,但其实什么都没处理**。
+     * 用户会以为模型想过了、答了,而实际上这是兜底占位实现。
+     *
+     * 这是本项目最在意的那类缺陷:「看起来在工作,其实没有」。
+     * 用户侧唯一能看到的就是这条回复,所以诚实必须写在这里。
+     */
     const decision: Decision = {
       action: 'reply',
-      payload: { text: `思考完成: ${thinking.userMessage.slice(0, 50)}` },
+      payload: {
+        text:
+          '⚠️ 未接入真实模型:当前运行的是兜底占位实现,**没有真正处理你的请求**。\n\n' +
+          '请检查「设置 → 模型管理」里是否配置了可用的 provider 与 API Key;' +
+          '若已配置,请查看主进程日志里 LlmAgentBrain 注册失败的报错。',
+        /** 【M4-H】占位标记 —— 让会话层能进一步标记这条消息(别让它看起来像正常答复) */
+        stub: true,
+      },
     }
 
     const durationMs = Date.now() - startMs

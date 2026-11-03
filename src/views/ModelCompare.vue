@@ -88,7 +88,39 @@
             </el-tag>
           </div>
           <p v-else class="muted">今天还没有成本记录</p>
+
+          <!--
+            【M4-H】定价设置 —— 没有这一步,不在默认表里的模型查表落空 →
+            成本恒 0 却看不出原因。用户得能给自己用的模型配单价。
+          -->
+          <div class="today-cost-actions">
+            <el-button size="small" text @click="openPricingDialog">定价设置</el-button>
+            <span v-if="pricingHint" class="pricing-hint">{{ pricingHint }}</span>
+          </div>
         </el-card>
+
+        <el-dialog v-model="showPricingDialog" title="模型定价(每 1k token 的美元价)" width="480px">
+          <el-form label-width="120px">
+            <el-form-item label="模型名">
+              <el-select v-model="pricingForm.model" filterable allow-create default-first-option style="width: 100%;" placeholder="选择或输入模型名">
+                <el-option v-for="p in pricingRows" :key="p.model" :label="p.model + (p.custom ? ' (自定义)' : '')" :value="p.model" />
+              </el-select>
+            </el-form-item>
+            <el-form-item label="输入单价">
+              <el-input-number v-model="pricingForm.inputPer1kUsd" :min="0" :step="0.001" :precision="6" style="width: 100%;" />
+            </el-form-item>
+            <el-form-item label="输出单价">
+              <el-input-number v-model="pricingForm.outputPer1kUsd" :min="0" :step="0.001" :precision="6" style="width: 100%;" />
+            </el-form-item>
+          </el-form>
+          <p class="muted">
+            留空或填 0 表示「本地模型 / 免费」—— 成本确实是 0,不是记账失败。
+          </p>
+          <template #footer>
+            <el-button @click="showPricingDialog = false">取消</el-button>
+            <el-button type="primary" @click="savePricing">保存</el-button>
+          </template>
+        </el-dialog>
 
         <div class="usage-summary">
           <el-statistic title="总调用次数" :value="usageTotal.totalCalls" />
@@ -288,6 +320,57 @@ const todayModelRows = computed(() =>
   Object.entries(todayCost.value.byModel || {}).map(([model, cost]) => ({ model, cost: Number(cost) }))
 );
 
+/**
+ * 【M4-H】定价设置 —— 让用户能给自己用的模型配单价。
+ * 之前 setPricing 零调用方且不落盘,等于不存在;而不在默认表里的模型
+ * 查表落空 → 成本恒 0 却看不出原因。
+ */
+const pricingRows = ref<any[]>([]);
+const showPricingDialog = ref(false);
+const pricingHint = ref('');
+const pricingForm = reactive({ model: '', inputPer1kUsd: 0, outputPer1kUsd: 0 });
+
+const loadPricing = async (): Promise<void> => {
+  try {
+    const res = await (window as any).electronAPI?.insight?.getPricing?.();
+    if (res?.success && Array.isArray(res.data)) pricingRows.value = res.data;
+  } catch (e) {
+    console.warn('loadPricing failed', e);
+  }
+};
+
+const openPricingDialog = async (): Promise<void> => {
+  await loadPricing();
+  const first = pricingRows.value[0];
+  if (first && !pricingForm.model) {
+    pricingForm.model = first.model;
+    pricingForm.inputPer1kUsd = first.inputPer1kUsd;
+    pricingForm.outputPer1kUsd = first.outputPer1kUsd;
+  }
+  showPricingDialog.value = true;
+};
+
+const savePricing = async (): Promise<void> => {
+  if (!pricingForm.model.trim()) {
+    ElMessage.warning('模型名不能为空');
+    return;
+  }
+  const res = await (window as any).electronAPI?.insight?.setPricing?.({
+    model: pricingForm.model.trim(),
+    inputPer1kUsd: pricingForm.inputPer1kUsd,
+    outputPer1kUsd: pricingForm.outputPer1kUsd,
+  });
+  if (res?.success) {
+    ElMessage.success('定价已保存');
+    showPricingDialog.value = false;
+    pricingHint.value = `已为 ${pricingForm.model.trim()} 设置定价`;
+    await loadPricing();
+    await loadTodayCost();
+  } else {
+    ElMessage.error(res?.error || '保存失败');
+  }
+};
+
 async function loadTodayCost(): Promise<void> {
   try {
     const res = await (window as any).electronAPI?.insight?.costToday?.();
@@ -315,6 +398,7 @@ onMounted(() => {
   loadMyRatings()
   loadUsage()
   loadTodayCost()
+  loadPricing()
 })
 </script>
 
@@ -376,5 +460,17 @@ onMounted(() => {
 
 .today-cost-models {
   margin-top: var(--space-sm);
+}
+
+.today-cost-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  margin-top: var(--space-xs);
+}
+
+.pricing-hint {
+  font-size: var(--font-size-caption);
+  color: var(--text-secondary);
 }
 </style>

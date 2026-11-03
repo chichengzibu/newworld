@@ -49,12 +49,20 @@ export class CostTracker {
     this.storePath = path.join(getHost().getPath('userData'), 'cost-log.json')
     this.loadFromDisk()
     this.seedDefaultPricing()
+    // 【M4-H】加载用户自定义定价(叠加在默认表之上)
+    this.loadPricing()
   }
 
   public static getInstance(): CostTracker {
     if (!CostTracker.instance) CostTracker.instance = new CostTracker()
     return CostTracker.instance
   }
+
+  /** 默认定价表的模型名集合(用于区分「默认」与「用户自定义」) */
+  private static readonly DEFAULT_PRICING_MODELS = [
+    'gpt-4o', 'gpt-4o-mini', 'claude-sonnet-4', 'ollama-llama3',
+    'ollama-qwen3.5', 'ollama-bge-m3', 'ollama-qwen3.8', 'zhipu-glm-4',
+  ]
 
   private seedDefaultPricing(): void {
     this.pricing.set('gpt-4o', { inputPer1kUsd: 0.005, outputPer1kUsd: 0.015 })
@@ -69,8 +77,28 @@ export class CostTracker {
     this.pricing.set('zhipu-glm-4', { inputPer1kUsd: 0.001, outputPer1kUsd: 0.001 })
   }
 
+  /**
+   * 【M4-H】设置某个模型的定价 —— 现**持久化**。
+   *
+   * 【为什么以前是死的】`setPricing` 此前只改内存里的 Map,**不落盘** →
+   * 重启即丢。加上零调用方,等于完全不存在。
+   * 而用户自己的模型(比如某个 API 中转站的模型名)不在默认表里 →
+   * 查表落空 → 成本恒 0 → 「成本面板永远是 0」却看不出原因。
+   */
   setPricing(model: string, p: ModelPricing): void {
     this.pricing.set(model, p)
+    this.persistPricing()
+  }
+
+  /** 列出全部已知定价(默认表 + 用户自定义) */
+  listPricing(): Array<{ model: string; inputPer1kUsd: number; outputPer1kUsd: number; custom: boolean }> {
+    const defaults = new Set(CostTracker.DEFAULT_PRICING_MODELS)
+    return [...this.pricing.entries()].map(([model, p]) => ({
+      model,
+      inputPer1kUsd: p.inputPer1kUsd,
+      outputPer1kUsd: p.outputPer1kUsd,
+      custom: !defaults.has(model),
+    }))
   }
 
   getPricing(model: string): ModelPricing | undefined {
@@ -183,6 +211,46 @@ export class CostTracker {
       fs.writeFileSync(this.storePath, JSON.stringify(this.usages))
     } catch (e) {
       this.log.warn('CostTracker: persist failed', e)
+    }
+  }
+
+  /**
+   * 【M4-H】定价持久化 —— 与用量记录**分开**存。
+   *
+   * 用量是频繁追加的(每次 LLM 调用一条),定价是极少变的(用户手动配一次)。
+   * 放同一个文件会让「改一次定价」重写整个用量数组。
+   */
+  private pricingPath(): string {
+    return path.join(path.dirname(this.storePath), 'cost-pricing.json')
+  }
+
+  private loadPricing(): void {
+    try {
+      const p = this.pricingPath()
+      if (!fs.existsSync(p)) return
+      const raw = JSON.parse(fs.readFileSync(p, 'utf-8')) as Record<string, ModelPricing>
+      for (const [model, price] of Object.entries(raw ?? {})) {
+        if (price && typeof price.inputPer1kUsd === 'number' && typeof price.outputPer1kUsd === 'number') {
+          this.pricing.set(model, price)
+        }
+      }
+      this.log.info('CostTracker: 自定义定价已加载', { count: Object.keys(raw ?? {}).length })
+    } catch (e) {
+      this.log.warn('CostTracker: 定价加载失败', e)
+    }
+  }
+
+  private persistPricing(): void {
+    try {
+      // 只存自定义的(默认表每次启动重新 seed,不必落盘)
+      const defaults = new Set(CostTracker.DEFAULT_PRICING_MODELS)
+      const custom: Record<string, ModelPricing> = {}
+      for (const [model, price] of this.pricing) {
+        if (!defaults.has(model)) custom[model] = price
+      }
+      fs.writeFileSync(this.pricingPath(), JSON.stringify(custom, null, 2))
+    } catch (e) {
+      this.log.warn('CostTracker: 定价保存失败', e)
     }
   }
 }

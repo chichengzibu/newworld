@@ -287,6 +287,9 @@ const IpcChannels = {
   INSIGHT_TRACE_START: 'insight:trace:start',
   INSIGHT_TRACE_END: 'insight:trace:end',
   INSIGHT_COST_TODAY: 'insight:cost:today',
+  // 【M4-H】模型定价(用户可维护自己的模型单价)
+  INSIGHT_GET_PRICING: 'insight:getPricing',
+  INSIGHT_SET_PRICING: 'insight:setPricing',
 
   // ========== W7.0.2: D5 录屏转技能 IPC ==========
   D5_RUN: 'd5:run',
@@ -1297,7 +1300,15 @@ const electronAPI = {
       recent: any[]
       stub: boolean
     }>> =>
-      ipcRenderer.invoke(IpcChannels.INSIGHT_COST_TODAY)
+      ipcRenderer.invoke(IpcChannels.INSIGHT_COST_TODAY),
+
+    /** 【M4-H】已知定价(默认表 + 用户自定义) */
+    getPricing: (): Promise<IpcResponse<any[]>> =>
+      ipcRenderer.invoke(IpcChannels.INSIGHT_GET_PRICING),
+
+    /** 【M4-H】给自己用的模型配单价(每 1k token 的美元价) */
+    setPricing: (payload: { model: string; inputPer1kUsd: number; outputPer1kUsd: number }): Promise<IpcResponse<any>> =>
+      ipcRenderer.invoke(IpcChannels.INSIGHT_SET_PRICING, payload),
   },
 
   // ========== W7.0.2: D5 录屏转技能 IPC ==========

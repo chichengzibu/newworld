@@ -26,7 +26,7 @@ import { normalizeTaskCategory } from '../learning/TaskCategory';
 import { CostTracker } from '../insight/CostTracker';
 import { ConfigStore } from '../core/ConfigStore';
 import { AgentEventRelayBus, type AgentRunEvent } from '../agent/AgentEventRelay';
-import type { Conversation, ChatMessage, ChatSettings, MessageRole, StreamChunk } from './ChatTypes';
+import type { Conversation, ChatMessage, ChatSettings, MessageRole, MessageStatus, StreamChunk } from './ChatTypes';
 import type { AgentBrain, Disposable } from '../contracts/types';
 
 /** agent 派发结果 —— handled=false 时调用方须回落旧管道 */
@@ -1255,6 +1255,8 @@ export class ChatManager {
         /** 【M3-E】分项 token —— 此前只取 total,输入/输出混在一栏 */
         promptTokens?: number
         completionTokens?: number
+        /** 【M4-H】来自兜底占位实现(未接入真实模型) */
+        stub?: boolean
       };
       const text = payload.text ?? '';
       const totalTokens = payload.totalTokens ?? 0;
@@ -1290,8 +1292,16 @@ export class ChatManager {
         }
       }
 
-      this.config.updateMessage(conversationId, placeholderId, { content: text, status: 'sent' });
-      this.broadcastMessage(conversationId, { ...placeholder, content: text, status: 'sent' });
+      /**
+       * 【M4-H】占位回复要**在消息上留痕**,不能只靠正文里的一句话。
+       *
+       * 兜底实现的正文已经写明「未接入真实模型」,但如果它混在正常答复里,
+       * 用户扫一眼很容易当成正常答复划过去。消息状态标成 'stub',
+       * 让「这条是占位答复」成为**结构化事实**而不只是一段文字。
+       */
+      const msgStatus: MessageStatus = payload.stub === true ? 'stub' : 'sent';
+      this.config.updateMessage(conversationId, placeholderId, { content: text, status: msgStatus });
+      this.broadcastMessage(conversationId, { ...placeholder, content: text, status: msgStatus });
 
       this.log.info(
         `[ChatManager] [${traceId}] agent loop 完成: ${payload.iterations ?? 0} 轮, ` +

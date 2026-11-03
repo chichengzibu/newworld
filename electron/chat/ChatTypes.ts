@@ -3,7 +3,15 @@
  */
 
 export type MessageRole = 'user' | 'assistant' | 'system';
-export type MessageStatus = 'sending' | 'streaming' | 'sent' | 'error';
+/**
+ * 【M4-H】新增 'stub' —— 来自兜底占位实现的回复。
+ *
+ * 渲染层对 'streaming'/'sending'/'error' 有专门样式,'stub' 会落到普通文本分支;
+ * 但它带 ⚠️ 前缀 + 正文写明「未接入真实模型」,一眼可辨。
+ * 加这个状态值是为了让消息**带上结构化的性质**,而不只是正文里的一句话 ——
+ * 将来要统计「有多少次是兜底答复」时,不用去猜正文。
+ */
+export type MessageStatus = 'sending' | 'streaming' | 'sent' | 'error' | 'stub';
 export type ConversationStatus = 'active' | 'archived';
 
 export interface ChatMessage {

@@ -1,0 +1,40 @@
+fix(m4-h): 诚实性与定价可维护 — 两处「看起来在工作,其实没有」
+
+兜底占位实现不再装作答了(DEV-101/102)
+  main.ts 先注册脚手架 stub(永远成功)、再试真实 brain(失败则保留 stub)
+  → 真实 brain 注册失败时用户面对 stub。而 stub 旧实现回的是
+  「思考完成: <用户消息前 50 字>」—— 看起来像一个正常 AI 答复,
+  但其实什么都没处理。主进程有 warn 日志,但用户永远看不到。
+  现:回复明说「⚠️ 未接入真实模型:当前运行的是兜底占位实现,没有真正处理
+  你的请求」+ 给出可操作的下一步(去哪配 provider / 看哪条日志);
+  载荷带 stub:true → 消息状态标成 'stub'(MessageStatus 新增该值)——
+  「这条是占位答复」应是可查询的事实,将来统计不用去猜正文。
+
+定价终于可维护(DEV-103/104)
+  CostTracker.setPricing 此前是双重死代码:零调用方 + 只改内存不落盘(重启即丢)。
+  而用户自己的模型(API 中转站/私有部署的模型名)不在默认表里
+  → 查表落空 → 成本恒 0 → 面板永远是 $0.0000 却看不出原因
+  (既可能没花钱,也可能没配价,界面上长得一模一样)。
+  现:定价落盘(cost-pricing.json,与用量记录分开存 —— 用量频繁追加、定价极少变,
+  同文件会让改一次定价重写整个用量数组) + insight:getPricing/setPricing IPC
+  (校验模型名非空、单价非负) + listPricing() 区分默认/自定义
+  + 「模型对比 → 使用量排行」页「今日成本」卡片的「定价设置」对话框。
+  默认表补本地模型条目(ollama-qwen3.5 / bge-m3 / qwen3.8)——
+  本地模型成本确实是 0(事实,不是记账失败),但要有条目才能归到「本地」这一类,
+  而不是落到「未知」。
+
+回归钉
+  tests/unit/stub-honesty-m4h.test.ts(3 例)
+    断言回复不以「思考完成」开头(那是旧的不诚实措辞)、含「未接入真实模型」、
+    含可操作提示、带 stub 标记
+  tests/unit/pricing-and-stub-m4h.test.ts(7 例)
+    设价后成本不再恒 0 · 定价落盘 · 重启后仍在 · 默认表不落盘 ·
+    区分默认/自定义 · 改价不影响已记录的用量
+
+验证
+  vitest 119 files / 1403 passed | 14 skipped / 0 FAIL
+  后端 tsc 0 error · vue-tsc 0 error
+
+台账 DEV-101 ~ DEV-104 · 设计文档 docs/NOVA-#009-m4h-honesty-and-pricing-design.md
+
+Co-Authored-By: Claude <noreply@anthropic.com>

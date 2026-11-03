@@ -485,6 +485,40 @@ export class IpcServer {
      * 此前 SkillEffectivenessTracker 收集了调用与成败,但【零读取方】——
      * 数据进了 skill-stats.json 就再没人看过。本通道是它的第一个读取方。
      */
+    /**
+     * 【M4-H】设置模型定价 —— 让用户能给自己用的模型配价。
+     * 没有这一步,不在默认表里的模型查表落空 → 成本恒 0 却看不出原因。
+     */
+    ipcMain.handle('insight:setPricing', async (_, payload: { model: string; inputPer1kUsd: number; outputPer1kUsd: number }) => {
+      try {
+        const { CostTracker } = await import('../insight/CostTracker');
+        const model = String(payload?.model ?? '').trim();
+        if (!model) return { success: false, error: '模型名不能为空' };
+        const inputPer1kUsd = Number(payload?.inputPer1kUsd);
+        const outputPer1kUsd = Number(payload?.outputPer1kUsd);
+        if (!Number.isFinite(inputPer1kUsd) || !Number.isFinite(outputPer1kUsd) || inputPer1kUsd < 0 || outputPer1kUsd < 0) {
+          return { success: false, error: '单价必须是非负数(每 1k token 的美元价)' };
+        }
+        const tracker = CostTracker.getInstance();
+        tracker.setPricing(model, { inputPer1kUsd, outputPer1kUsd });
+        return { success: true, data: { model, inputPer1kUsd, outputPer1kUsd } };
+      } catch (error) {
+        this.log.error('insight:setPricing 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    /** 列出已知定价(默认表 + 用户自定义) */
+    ipcMain.handle('insight:getPricing', async () => {
+      try {
+        const { CostTracker } = await import('../insight/CostTracker');
+        return { success: true, data: CostTracker.getInstance().listPricing() };
+      } catch (error) {
+        this.log.error('insight:getPricing 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
     ipcMain.handle('skills:getEffectiveness', async () => {
       try {
         const tracker = SkillEffectivenessTracker.getInstance();
