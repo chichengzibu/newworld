@@ -47,10 +47,29 @@
 
 **设计文档**：[NOVA #009 M3-A](../NOVA-#009-m3a-real-vectors-design.md) · [M3-B](../NOVA-#009-m3b-hybrid-retrieval-design.md) · [M3-C](../NOVA-#009-m3c-process-sandbox-design.md)
 
+### M3/M4 后续补做（2026-11-02）
+
+路线图 M3 完成之后，又扫出并修掉了几处**「看起来在工作，其实没有」**的缺陷：
+
+| 批次 | 内容 | 文档 |
+|---|---|---|
+| M3-D | 技能目录（补上 preload 承诺但**全仓无 handler** 的 6 个通道） | `NOVA-#009-m3d-skill-directories-design.md` |
+| M3-E | 成本记账（`insight:cost:today` 此前是**硬编码 0 的 stub**） | `NOVA-#009-m3e-cost-accounting-design.md` |
+| **M3-F** | **构建修复 —— 应用此前根本打不出包**（4 条断链让主进程构建失败；构建**不做类型检查**） | `NOVA-#009-m3f-build-repair-design.md` |
+| M4-G | 架构收敛（删掉没接入主线的平行架构：actor / conversation / SkillManager CRUD） | `NOVA-#009-m4g-architecture-convergence-design.md` |
+| M4-H | 诚实性与定价可维护（兜底实现不再装作答了；定价表不再是双重死代码） | `NOVA-#009-m4h-honesty-and-pricing-design.md` |
+
+**构建门禁**（M3-F 引入，此后每批都守着）：
+`[1/5] 主进程 typecheck → [2/5] 渲染进程 typecheck → [3/5] vite build → [4/5] electron-builder → [5/5] build-report`
+—— 前两步任一不过，**构建直接中止**。外加 `tests/unit/import-integrity.test.ts`
+扫全仓相对 import 能否解析（「模块被删但 import 还在」会让构建失败）。
+
 **下一步（未排期，按价值排序）**
-1. **M4-E 技能效用的受控对照** —— 现状是观察性对比（有混杂），需同批任务随机带/不带各跑一遍
+1. **M4-E 技能效用的受控对照** —— 现状是观察性对比（有混杂），需同批任务随机带/不带各跑一遍；
+   前提是先有一个**可验证的成功信号**（当前只有「工具调用是否全成功」这个弱代理）
 2. **Job Object / cgroup 资源限额** —— 需原生模块，作为可选增强而非硬依赖
-3. **rerank** —— 需另接 cross-encoder 服务
+3. **rerank** —— 需另接 cross-encoder 服务（本机 ollama 0.40.11 无 `/api/rerank`，实测 404）
+4. **sqlite-vss** —— 当前向量库上限 200 条，桌面应用够用；是规模问题不是正确性问题
 
 ## 节点 + ship 对象
 
