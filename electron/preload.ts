@@ -177,6 +177,9 @@ const IpcChannels = {
   HERMES_EMBEDDING_SET: 'hermes:embedding:set',
   HERMES_EMBEDDING_DETECT: 'hermes:embedding:detect',
   HERMES_EMBEDDING_TEST: 'hermes:embedding:test',
+  // 【M4-F】用户接受度信号
+  LEARNING_RECORD_ACCEPTANCE: 'learning:recordAcceptance',
+  LEARNING_GET_ACCEPTANCE: 'learning:getAcceptance',
 
   // Phase 2: 任务预览与确认
   TASK_TRACE: 'task:trace',
@@ -1167,6 +1170,18 @@ const electronAPI = {
 
   // ========== Hermes 学习统计 ==========
   learning: {
+    /**
+     * 【M4-F】上报用户对某条助手答复的接受度。
+     * 用户点了「重新生成」= 明确不要;下一条消息含纠正词 = 不满意;
+     * 含认可词 = 满意;都没命中 = unknown(**不猜**)。
+     */
+    recordAcceptance: (payload: { conversationId: string; messageId: string; verdict: 'accepted' | 'rejected' | 'unknown'; reason?: string }): Promise<IpcResponse<any>> =>
+      ipcRenderer.invoke(IpcChannels.LEARNING_RECORD_ACCEPTANCE, payload),
+
+    /** 【M4-F】按技能查接受度 */
+    getAcceptance: (skillId?: string): Promise<IpcResponse<any>> =>
+      ipcRenderer.invoke(IpcChannels.LEARNING_GET_ACCEPTANCE, skillId),
+
     getStats: (): Promise<IpcResponse<Record<string, number>>> =>
       ipcRenderer.invoke(IpcChannels.LEARNING_GET_STATS),
 

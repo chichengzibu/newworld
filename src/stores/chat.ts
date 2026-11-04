@@ -10,6 +10,7 @@
 import { defineStore } from 'pinia';
 import { ref, computed, watch } from 'vue';
 import { ElMessage } from "element-plus/es/components/message/index";
+import { classifyAcceptance } from '@/utils/acceptanceSignal';
 
 // ========== 类型定义 ==========
 
@@ -745,6 +746,26 @@ export const useChatStore = defineStore('chat', () => {
     const conv = currentConversation.value!;
     const effectiveProviderId = providerId || lastProviderId.value || conv.providerId;
     const effectiveModelId = modelId || lastModelId.value || conv.modelId;
+
+    // 【M4-F】采集用户对**上一条**答复的态度。
+    //   用户的新消息是唯一自然信号:以纠正词开头 = 不满意,以认可词开头 = 满意。
+    //   都没命中就不报 —— 「用户没再说话」不等于满意,不猜。
+    try {
+      const prev = [...conv.messages].reverse().find(m => m.role === 'assistant' && m.content);
+      if (prev) {
+        const signal = classifyAcceptance(content);
+        if (signal.verdict !== 'unknown') {
+          void (window as any).electronAPI?.learning?.recordAcceptance?.({
+            conversationId: conv.id,
+            messageId: prev.id,
+            verdict: signal.verdict,
+            reason: signal.reason,
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('[ChatStore] 上报接受度信号失败', e);
+    }
 
     // Step 1: 立即添加用户消息到本地
     const userMsgId = `msg_${Date.now()}_user`;

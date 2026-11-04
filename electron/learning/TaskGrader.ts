@@ -1,3 +1,5 @@
+import type { RunJudge } from './RunJudge'
+
 /**
  * PiPiClaw — 任务评分器（M4-E）
  * ═══════════════════════════════════════════════════════════════
@@ -69,7 +71,7 @@ export interface TaskExpectation {
 
 /** 单层的判定结果 */
 export interface GradeLayer {
-  name: 'hard_signal' | 'structural' | 'similarity';
+  name: 'hard_signal' | 'structural' | 'similarity' | 'llm_judge';
   /** 该层是否通过(不适用时为 undefined) */
   passed?: boolean;
   /** 该层的可读说明 */
@@ -195,4 +197,41 @@ export function gradeRun(run: GradableRun, expectation: TaskExpectation = {}): G
     layers,
     ...(passed ? {} : { failedReason: hard.passed === false ? hard.detail : structural.detail }),
   };
+}
+
+/**
+ * 【M4-F】带 LLM 裁判的评分(异步)。
+ *
+ * 【为什么单独一个函数而不是把 gradeRun 改成 async】
+ * 确定性层是**同步纯函数**,单测可以穷举、CI 里毫秒级跑完。
+ * 把裁判塞进去会让它变成异步 —— 那一层就会拖慢所有不关心裁判的调用方。
+ * 故:确定性层保持同步原样,裁判层作为**可选的第四层**另开一个入口。
+ *
+ * 【裁判层不参与成败判定】
+ * 业界共识:judge drift 真实存在(换模型/换提示词/换顺序都改结果),
+ * 裁判还偏爱长答案。所以裁判的结论:
+ *   - 进综合分与说明,**不改** pass/fail
+ *   - 裁判样本量不足时,整体仍按「样本不足」处理
+ */
+export async function gradeRunWithJudge(
+  run: GradableRun,
+  expectation: TaskExpectation = {},
+  judge?: RunJudge,
+): Promise<GradeResult> {
+  const base = gradeRun(run, expectation);
+  if (!judge) return base;
+
+  const verdict = await judge(run, expectation);
+  const layers: GradeLayer[] = [
+    ...base.layers,
+    {
+      name: 'llm_judge',
+      // 【口径】裁判不参与 pass/fail —— 单独作为参考
+      passed: undefined,
+      detail: `裁判: ${verdict.passed ? '认为达成目标' : '认为未达成目标'} —— ${verdict.reason}`,
+      score: verdict.score ?? (verdict.passed ? 1 : 0),
+    },
+  ];
+  const score = layers.reduce((s, l) => s + l.score, 0) / layers.length;
+  return { ...base, score, layers };
 }

@@ -24,6 +24,7 @@ import { SkillEffectivenessTracker } from '../learning/SkillEffectivenessTracker
 import { classifyFailure } from '../learning/FailureClassifier';
 import { normalizeTaskCategory } from '../learning/TaskCategory';
 import { runSkillTrial, type TrialExecutor, type TrialResult, type TrialTask } from '../learning/SkillTrial';
+import { AcceptanceLog } from '../learning/AcceptanceLog';
 import type { GradableRun } from '../learning/TaskGrader';
 import { CostTracker } from '../insight/CostTracker';
 import { ConfigStore } from '../core/ConfigStore';
@@ -289,6 +290,27 @@ export class ChatManager {
            * TaskExecutor 管道有观察端。这是最重要的能力路径,却是盲区。
            */
           this.recordAgentOutcome(conversationId, content, agentResult);
+
+          /**
+           * 【M4-F】登记这次运行,等用户给出接受度信号。
+           *
+           * 用户信号是**事后**才有的(看到答复才可能点「重新生成」或纠正),
+           * 所以必须先登记运行,信号来了才对得上号。
+           */
+          try {
+            if (agentResult.messageId) {
+              AcceptanceLog.getInstance().registerRun({
+                conversationId,
+                messageId: agentResult.messageId,
+                skills: agentResult.appliedSkills ?? [],
+                category: this.normalizeTaskCategory(content),
+                ts: Date.now(),
+              });
+            }
+          } catch (e) {
+            this.log.warn('[ChatManager] 接受度登记失败(不阻塞)', e);
+          }
+
           this.broadcastConversationUpdate(conversationId);
           const done = agentResult.messageId
             ? this.config.getMessage(conversationId, agentResult.messageId)

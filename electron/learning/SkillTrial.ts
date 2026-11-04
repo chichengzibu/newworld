@@ -26,7 +26,15 @@
  * ③ 本模块**不做自动处置**:负贡献只报告,不自动禁用技能
  *    (自动处置需要更多样本 + 用户的知情同意)。
  */
-import { gradeRun, type GradableRun, type GradeResult, type TaskExpectation } from './TaskGrader'
+import {
+  gradeRun, gradeRunWithJudge,
+  type GradableRun, type GradeResult, type TaskExpectation,
+} from './TaskGrader'
+import {
+  createJudgeSampler, JUDGE_MIN_SAMPLES,
+  DEFAULT_JUDGE_SAMPLE_RATE,
+  type RunJudge,
+} from './RunJudge'
 
 /** 对照实验里的一个任务 */
 export interface TrialTask {
@@ -35,6 +43,24 @@ export interface TrialTask {
   instruction: string;
   /** 结构化期望(替代 golden answer) */
   expectation?: TaskExpectation;
+}
+
+/**
+ * 对照实验的附加选项。
+ */
+export interface TrialOptions {
+  /**
+   * 【M4-F】LLM 裁判 —— 可选,不传就只用确定性层。
+   *
+   * 【默认不跑】裁判是一次模型调用,且 judge drift 真实存在
+   * (换模型/换提示词/换顺序都会改结果)。要跑就显式传。
+   */
+  judge?: RunJudge;
+  /**
+   * 裁判采样率(默认 0.05 —— 业界建议的 2~5%)。
+   * 只有被采样到的样本才跑裁判。
+   */
+  judgeSampleRate?: number;
 }
 
 /**
@@ -121,10 +147,13 @@ export async function runSkillTrial(
   skillId: string,
   tasks: TrialTask[],
   executor: TrialExecutor,
+  opts: TrialOptions = {},
 ): Promise<TrialResult> {
   const pairs: TrialTaskPair[] = [];
+  const sampler = createJudgeSampler(opts.judgeSampleRate ?? DEFAULT_JUDGE_SAMPLE_RATE);
+  let judgeRuns = 0;
 
-  for (const task of tasks) {
+  for (const [taskIndex, task] of tasks.entries()) {
     let withRun: GradableRun | null = null;
     let withoutRun: GradableRun | null = null;
     try {
@@ -135,8 +164,15 @@ export async function runSkillTrial(
     } catch { /* 同上 */ }
     if (!withRun || !withoutRun) continue;
 
-    const withGrade = gradeRun(withRun, task.expectation ?? {});
-    const withoutGrade = gradeRun(withoutRun, task.expectation ?? {});
+    // 【M4-F】裁判按采样率跑(默认 5%)—— 裁判是一次模型调用,不能全量跑
+    const useJudge = !!opts.judge && sampler(taskIndex);
+    const withGrade = useJudge
+      ? await gradeRunWithJudge(withRun, task.expectation ?? {}, opts.judge)
+      : gradeRun(withRun, task.expectation ?? {});
+    const withoutGrade = useJudge
+      ? await gradeRunWithJudge(withoutRun, task.expectation ?? {}, opts.judge)
+      : gradeRun(withoutRun, task.expectation ?? {});
+    if (useJudge) judgeRuns++;
 
     pairs.push({
       task,
@@ -146,10 +182,16 @@ export async function runSkillTrial(
     });
   }
 
+  const summary = summarize(pairs.length, pairs);
+  // 【M4-F】裁判样本量不足 → 裁判结论不给(与主结论同样的口径)
+  if (judgeRuns > 0 && judgeRuns < JUDGE_MIN_SAMPLES) {
+    summary.note += `;裁判只跑了 ${judgeRuns} 个样本(至少 ${JUDGE_MIN_SAMPLES} 个)—— 裁判结论仅供参考`;
+  }
+
   return {
     skillId,
     pairs,
-    summary: summarize(pairs.length, pairs),
+    summary,
     finishedAt: Date.now(),
   };
 }

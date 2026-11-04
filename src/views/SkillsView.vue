@@ -236,11 +236,22 @@
               </el-tag>
             </template>
           </el-table-column>
+          <el-table-column label="用户接受度" width="120">
+            <template #default="{ row }">
+              <el-tag v-if="acceptanceOf(row.skillName) === undefined" size="small" type="info">无信号</el-tag>
+              <el-tag v-else size="small" :type="acceptanceOf(row.skillName)! >= 0.8 ? 'success' : 'warning'">
+                {{ Math.round(acceptanceOf(row.skillName)! * 100) }}%
+              </el-tag>
+            </template>
+          </el-table-column>
         </el-table>
         <p class="effectiveness-note">
           说明:「同类别不带」= 同类任务下、但没有应用该技能的运行。
           这是<span class="note-strong">观察性对比而非受控实验</span> —— 用户可能在任务变难时才想起用技能,
-          所以差值可能低估技能的贡献。样本不足时不给结论,也不会自动禁用任何技能。
+          所以差值可能低估技能的贡献。样本不足时不给结论,也不会自动禁用任何技能。<br/>
+          「用户接受度」= 用户对含该技能的答复的真实反应(点了「重新生成」= 不满意;
+          下一条消息以纠正词开头 = 不满意;以认可词开头 = 满意)。
+          「用户没再说话」<b>不算满意</b> —— 宁可少判,不要让效用统计偏乐观。
         </p>
       </el-collapse-item>
     </el-collapse>
@@ -612,6 +623,30 @@ const removeSkillDirectory = async (dir: string): Promise<void> => {
 
 const utilityRows = ref<any[]>([]);
 
+/**
+ * 【M4-F】用户接受度 —— 比「工具是否全成功」硬得多的信号。
+ * key = 技能 id;value = 接受率(只算有明确信号的)。
+ */
+const acceptanceMap = ref<Record<string, number>>({});
+const acceptanceOf = (skillId: string): number | undefined => acceptanceMap.value[skillId];
+
+const loadAcceptance = async (): Promise<void> => {
+  try {
+    const res = await (window as any).electronAPI?.learning?.getAcceptance?.();
+    if (res?.success && Array.isArray(res.data)) {
+      const map: Record<string, number> = {};
+      for (const row of res.data) {
+        if (row && typeof row.skillId === 'string' && typeof row.rate === 'number') {
+          map[row.skillId] = row.rate;
+        }
+      }
+      acceptanceMap.value = map;
+    }
+  } catch (e) {
+    console.warn('加载接受度失败', e);
+  }
+};
+
 // ══════════ 【M4-E】技能验证(受控对照) ══════════
 const trialSkillId = ref('');
 const trialTasksText = ref('');
@@ -839,6 +874,7 @@ let unsubscribeProposal: (() => void) | null = null;
 onMounted(() => {
   loadSkills();
   loadStorageInfo();
+  loadAcceptance();
 
   const api = (window as any).electronAPI;
   if (api?.learning?.onNewProposal) {

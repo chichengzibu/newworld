@@ -540,6 +540,58 @@ export class IpcServer {
       }
     });
 
+    /**
+     * 【M4-F】上报用户接受度信号。
+     *
+     * 用户对某条助手答复的反应:点了「重新生成」= 明确不要;下一条消息含
+     * 纠正词 = 不满意;含认可词 = 满意;都没命中 = unknown(**不猜**)。
+     */
+    ipcMain.handle('learning:recordAcceptance', async (_, payload: {
+      conversationId: string; messageId: string; verdict: 'accepted' | 'rejected' | 'unknown'; reason?: string;
+    }) => {
+      try {
+        const { AcceptanceLog } = await import('../learning/AcceptanceLog');
+        const messageId = String(payload?.messageId ?? '').trim();
+        if (!messageId) return { success: false, error: 'messageId 不能为空' };
+        const verdict = payload?.verdict;
+        if (verdict !== 'accepted' && verdict !== 'rejected' && verdict !== 'unknown') {
+          return { success: false, error: 'verdict 必须是 accepted / rejected / unknown' };
+        }
+        AcceptanceLog.getInstance().recordVerdict(
+          String(payload?.conversationId ?? ''),
+          messageId,
+          verdict,
+          payload?.reason,
+        );
+        return { success: true };
+      } catch (error) {
+        this.log.error('learning:recordAcceptance 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    /**
+     * 查接受度。
+     *   给了 skillId → 该技能的汇总
+     *   没给        → **全部技能的汇总**(界面要的是这个形态)
+     */
+    ipcMain.handle('learning:getAcceptance', async (_, skillId?: string) => {
+      try {
+        const { AcceptanceLog } = await import('../learning/AcceptanceLog');
+        const log = AcceptanceLog.getInstance();
+        if (skillId) {
+          return { success: true, data: log.skillAcceptance(skillId) };
+        }
+        // 汇总每个出现过的技能
+        const ids = new Set<string>();
+        for (const r of log.list()) for (const s of r.skills) ids.add(s);
+        return { success: true, data: [...ids].map(id => log.skillAcceptance(id)) };
+      } catch (error) {
+        this.log.error('learning:getAcceptance 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
     ipcMain.handle('skills:getEffectiveness', async () => {
       try {
         const tracker = SkillEffectivenessTracker.getInstance();

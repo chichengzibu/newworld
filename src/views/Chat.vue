@@ -1075,6 +1075,22 @@ async function handleRegenerate(messageId: string): Promise<void> {
   const conv = chatStore.currentConversation;
   if (!conv) return;
 
+  /**
+   * 【M4-F】用户点「重新生成」= 明确不要上一条答复。
+   * 这是可采集的**最强负面信号**(比任何关键词判断都硬)——
+   * 用户主动花了一次 token 来换答案,就是不满意。
+   */
+  try {
+    void (window as any).electronAPI?.learning?.recordAcceptance?.({
+      conversationId: conv.id,
+      messageId,
+      verdict: 'rejected',
+      reason: '用户点击了「重新生成」',
+    });
+  } catch (e) {
+    console.warn('[Chat] 上报接受度信号失败', e);
+  }
+
   // 执行前校验并启动网关
   await gatewayStore.ensureRunning();
 
