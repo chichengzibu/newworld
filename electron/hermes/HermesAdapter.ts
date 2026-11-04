@@ -201,11 +201,32 @@ export class HermesAdapter implements HermesMemoryInterface {
       .map(m => ({ id: m.id, content: m.content, score: m.score, createdAt: m.createdAt }))
   }
 
+  /**
+   * 存一条记忆(文本记忆层 + 向量层)。
+   *
+   * 【M4-I 修 id 不一致】
+   * 旧实现:记忆库的 id 是 `addExperienceMemory` **内部**生成的
+   * (`mem_<ts>_<rand>`),调用方给的 id 被无视 → 两边 id 对不上:
+   *   ① 召回时候选来自记忆库(真实 id)→ 在向量库里查不到 → **每次召回
+   *      都重新嵌入一遍**,向量检索完全没起到缓存作用
+   *   ② 调用方那个 id 的条目成了永远匹配不上的**孤儿**,白占索引容量
+   *
+   * 现:把调用方的 id 传下去当**记录 id**(它是 #006.5 W1 定的幂等键:
+   * `chat-<sha256(conversationId|content)>`),两边用同一个 id →
+   * 幂等(同 id 覆盖)与召回命中(同 id 查得到)同时成立。
+   */
   async store(memory: Memory): Promise<void> {
-    this.legacy.addExperienceMemory(memory.content, [])
+    // 【M4-I】把调用方的 id 传下去 —— 它是幂等键,不是随手给的
+    const saved = this.legacy.addExperienceMemory(memory.content, [], memory.id)
     const model = this.embeddingModel()
-    const vec = await this.embedder.embedText(memory.content, { model })
-    await this.vectorStore.upsert(memory, vec, model)
+    const canonical: Memory = {
+      id: saved.id,
+      content: saved.content,
+      score: saved.importance,
+      createdAt: saved.timestamp,
+    }
+    const vec = await this.embedder.embedText(canonical.content, { model })
+    await this.vectorStore.upsert(canonical, vec, model)
   }
 
   /**

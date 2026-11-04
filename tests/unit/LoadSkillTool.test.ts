@@ -120,6 +120,52 @@ description: 演示技能
     expect(r.appliedEntity).toBeUndefined()
   })
 
+  /**
+   * 【M4-E】对照实验的抑制机制。
+   *
+   * 「这个技能有没有用」要靠**配对对照**回答:同一个任务跑两遍,
+   * 一遍允许用它、一遍禁止用。若「禁止」不真的生效,模型照样会调 load_skill
+   * —— 对照组就废了,测出来的差值恒为 0(两个变体其实一样)。
+   */
+  it('被抑制的技能 → 拒绝加载,并说清原因', async () => {
+    writeSkill('demo', `---
+name: demo
+description: 演示技能
+---
+## 操作步骤
+1. 做点事
+`)
+    const { LoadSkillTool } = await import('../../electron/agent/tools/LoadSkillTool')
+    const { SkillLoader } = await import('../../electron/skill/SkillLoader')
+    ;(SkillLoader as any).instance = null
+    SkillLoader.getInstance().loadAllSkills()
+
+    const tool = new LoadSkillTool()
+    const r = await tool.execute({ skill_id: 'demo' }, { contextKind: 'ui', suppressedSkills: ['demo'] } as any)
+    expect(r.ok).toBe(false)
+    // 错误要说清是"被禁用",不是"工具坏了" —— 否则模型会反复重试,把对照做脏
+    expect(r.error).toContain('禁用')
+    expect(r.error).toContain('demo')
+  })
+
+  it('未被抑制的技能 → 正常加载(抑制不能误伤)', async () => {
+    writeSkill('demo', `---
+name: demo
+description: 演示技能
+---
+## 操作步骤
+1. 做点事
+`)
+    const { LoadSkillTool } = await import('../../electron/agent/tools/LoadSkillTool')
+    const { SkillLoader } = await import('../../electron/skill/SkillLoader')
+    ;(SkillLoader as any).instance = null
+    SkillLoader.getInstance().loadAllSkills()
+
+    const tool = new LoadSkillTool()
+    const r = await tool.execute({ skill_id: 'demo' }, { contextKind: 'ui', suppressedSkills: ['other'] } as any)
+    expect(r.ok).toBe(true)
+  })
+
   it('工具描述说明"先加载再执行" —— 引导模型正确使用', async () => {
     const { LoadSkillToolMetadata } = await import('../../electron/agent/tools/LoadSkillTool')
     // 依据 Anthropic 规范:description 是路由规则,必须写清"何时用"

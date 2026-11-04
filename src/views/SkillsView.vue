@@ -245,6 +245,72 @@
       </el-collapse-item>
     </el-collapse>
 
+    <!--
+      【M4-E】技能验证 —— 受控对照实验。
+      边际效用面板给的是【观察性对比】(有混杂);这里做的是**配对对照**:
+      同一个任务跑两遍,一遍允许用该技能、一遍禁止用(load_skill 会真的拒绝)。
+      两遍的差别只剩「有没有这个技能」—— 这才是干净的因果对比。
+
+      【成本必须先告知】每个任务跑两遍 → token 翻倍。跑之前弹确认说清楚。
+    -->
+    <el-card class="skills-trial-card">
+      <div class="dir-header">
+        <h3>技能验证（对照实验）</h3>
+      </div>
+      <p class="dir-empty">
+        选一个技能，给出要验证的任务。每个任务会<b>跑两遍</b>（一遍带技能、一遍禁技能），
+        据此判断这个技能到底有没有用。<b>token 成本翻倍。</b>
+      </p>
+
+      <el-form label-width="100px">
+        <el-form-item label="技能">
+          <el-select v-model="trialSkillId" filterable style="width: 320px;" placeholder="选择要验证的技能">
+            <el-option v-for="s in skills" :key="s.id" :label="s.name" :value="s.id" />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="任务">
+          <el-input
+            v-model="trialTasksText"
+            type="textarea"
+            :rows="4"
+            placeholder="每行一个任务，例如：&#10;把桌面上的 PDF 归档到 D:/Documents/PDF&#10;整理下载文件夹里的压缩包"
+          />
+          <div class="dir-empty">建议至少 5 个任务 —— 少于 5 个配对任务时，差值不可靠，系统会明确说「样本不足」而不是给结论。</div>
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" :loading="trialRunning" @click="runTrial">开始验证</el-button>
+        </el-form-item>
+      </el-form>
+
+      <div v-if="trialResult" class="trial-result">
+        <el-alert
+          :type="trialVerdictType"
+          :closable="false"
+          show-icon
+          :title="trialResult.summary.note"
+        />
+        <el-table :data="trialResult.pairs" size="small" style="width: 100%; margin-top: var(--space-sm);">
+          <el-table-column label="任务" min-width="220">
+            <template #default="{ row }">{{ row.task.instruction }}</template>
+          </el-table-column>
+          <el-table-column label="带技能" width="100">
+            <template #default="{ row }">
+              <el-tag size="small" :type="row.withSkill.grade.passed ? 'success' : 'danger'">
+                {{ row.withSkill.grade.passed ? '成功' : '失败' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+          <el-table-column label="不带技能" width="110">
+            <template #default="{ row }">
+              <el-tag size="small" :type="row.withoutSkill.grade.passed ? 'success' : 'danger'">
+                {{ row.withoutSkill.grade.passed ? '成功' : '失败' }}
+              </el-tag>
+            </template>
+          </el-table-column>
+        </el-table>
+      </div>
+    </el-card>
+
     <SkillImportDialog
       v-model="showImportDialog"
       @success="handleImportSuccess"
@@ -545,6 +611,67 @@ const removeSkillDirectory = async (dir: string): Promise<void> => {
 };
 
 const utilityRows = ref<any[]>([]);
+
+// ══════════ 【M4-E】技能验证(受控对照) ══════════
+const trialSkillId = ref('');
+const trialTasksText = ref('');
+const trialRunning = ref(false);
+const trialResult = ref<any>(null);
+
+const trialVerdictType = computed(() => {
+  const v = trialResult.value?.summary?.verdict;
+  if (v === 'positive') return 'success';
+  if (v === 'negative') return 'danger';
+  if (v === 'insufficient_data') return 'warning';
+  return 'info';
+});
+
+const runTrial = async (): Promise<void> => {
+  if (!trialSkillId.value) {
+    ElMessage.warning('先选一个要验证的技能');
+    return;
+  }
+  const tasks = trialTasksText.value
+    .split('\n')
+    .map(t => t.trim())
+    .filter(Boolean)
+    .map((t, i) => ({ id: `t${i}`, instruction: t }));
+
+  if (tasks.length === 0) {
+    ElMessage.warning('至少给一个任务');
+    return;
+  }
+
+  // 成本提示 —— 每个任务跑两遍,token 翻倍
+  try {
+    await ElMessageBox.confirm(
+      `将跑 ${tasks.length} 个任务，每个任务两遍（带技能 / 禁技能），共 ${tasks.length * 2} 次模型调用。\n\ntoken 成本大约翻倍。`,
+      '开始技能验证？',
+      { confirmButtonText: '开始', cancelButtonText: '取消', type: 'warning' },
+    );
+  } catch {
+    return;
+  }
+
+  trialRunning.value = true;
+  trialResult.value = null;
+  try {
+    const res = await (window as any).electronAPI?.skills?.runUtilityTrial?.({
+      skillId: trialSkillId.value,
+      tasks,
+    });
+    if (res?.success) {
+      trialResult.value = res.data;
+    } else {
+      ElMessage.error(res?.error || '验证失败');
+    }
+  } catch (e) {
+    console.error('runTrial failed', e);
+    ElMessage.error('验证失败');
+  } finally {
+    trialRunning.value = false;
+  }
+};
 
 const loadUtility = async () => {
   try {
@@ -939,6 +1066,14 @@ onUnmounted(() => {
 /* 【M3-D】技能目录 */
 .skills-dir-card {
   margin-top: var(--space-md);
+}
+
+.skills-trial-card {
+  margin-top: var(--space-md);
+}
+
+.trial-result {
+  margin-top: var(--space-sm);
 }
 
 .dir-header {

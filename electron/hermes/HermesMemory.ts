@@ -118,19 +118,49 @@ export class HermesMemory {
   /**
    * 添加经验记忆
    */
-  public addExperienceMemory(content: string, tags?: string[]): void {
+  /**
+   * 追加一条经验记忆。
+   *
+   * 【M4-I】两处改动:
+   *
+   * ① **接受可选的 id**,并以它为准(不再总是自己生成)。
+   *    为什么:调用方给的 id 不是随便的 —— ChatManager 用的是
+   *    `chat-<sha256(conversationId|content)>`,即 #006.5 W1 定的**幂等键**:
+   *    「同 conversationId+content → 同 id → 覆盖,不重复」。
+   *    而本方法此前**无视**调用方的 id、自己另生成一个 →
+   *      - 记忆库里的 id ≠ 调用方的 id
+   *      - 召回时候选来自记忆库(真实 id)→ 向量库里按调用方 id 建的条目查不到
+   *        → **每次召回都重新嵌入一遍**,且留下一条永远匹配不上的**孤儿**
+   *    现:调用方给了 id 就用它 → 记忆库与向量库同一个 id → 幂等与召回同时成立。
+   *
+   * ② **返回创建的条目**(此前返回 void)。调用方据此拿到真实 id,
+   *    写向量库时用同一个 id。
+   *
+   * 【兼容性】id 与返回值都是可选的 —— 既有用法(`addExperienceMemory(content, tags)`)
+   * 行为完全不变:仍然自生成 id、仍然返回条目(忽略返回值即可)。
+   */
+  public addExperienceMemory(content: string, tags?: string[], id?: string): MemoryItem {
+    // 幂等:同一 id 已存在 → 不重复追加,返回既有条目
+    if (id) {
+      const existing = this.memories.find(m => m.id === id);
+      if (existing) {
+        this.log.info('[HermesMemory] 经验记忆已存在(幂等),跳过重复追加', { id });
+        return existing;
+      }
+    }
+
     const item: MemoryItem = {
-      id: `mem_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      id: id ?? `mem_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       type: 'experience',
       content,
       timestamp: Date.now(),
       tags,
       importance: 50
     };
-    
+
     this.memories.push(item);
     this.saveMemories();
-    
+
     // 追加到经验记忆文件
     try {
       const entry = `## ${new Date().toLocaleString('zh-CN')}\n\n${content}\n\n`;
@@ -138,8 +168,9 @@ export class HermesMemory {
     } catch (error) {
       this.log.error('[HermesMemory] 追加经验记忆失败', error);
     }
-    
+
     this.log.info('[HermesMemory] 经验记忆已添加', item);
+    return item;
   }
 
   /**

@@ -282,6 +282,11 @@ export class LlmAgentBrain implements AgentBrain {
      * fail-safe"而废弃 —— 安全边界不能建立在约定上。
      */
     preApprovedToolConfirm?: boolean
+    /**
+     * 【M4-E】本次运行禁用的技能 id(配对对照的「不带技能」变体用)。
+     * 由工具层(load_skill)自己拒绝 —— 模型自己调是禁不住的。
+     */
+    suppressedSkills?: string[]
   } = {}): Promise<{ runId: string; content: string; iterations: number; totalDurationMs: number; totalTokens: number; promptTokens: number; completionTokens: number; model: string; toolCalls: Array<{ name: string; ok: boolean; durationMs: number; entity?: { kind: string; id: string } }>; appliedSkills: string[] }> {
     const runId = opts.runId ?? `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     const controller = new AbortController()
@@ -488,6 +493,8 @@ export class LlmAgentBrain implements AgentBrain {
           const toolCtx = {
             contextKind: opts.contextKind ?? this.spawnCtx?.contextKind ?? 'headless',
             signal: state.controller.signal,
+            // 【M4-E】配对对照用:本次运行禁用哪些技能(随 run 传,不做全局态)
+            ...(opts.suppressedSkills?.length ? { suppressedSkills: opts.suppressedSkills } : {}),
           }
           /**
            * 【M2-B】工具权限门 —— 修安全洞: EditTool 标注 requiresPermission:true
@@ -656,6 +663,11 @@ export class LlmAgentBrain implements AgentBrain {
       // 【M2-B】权限确认桥透传:缺省 = 权限门对写操作一律拒绝(fail-safe)
       const confirmBridge = (ctx as { requestToolConfirmation?: (tool: string, prompt: string) => Promise<boolean> }).requestToolConfirmation
       if (typeof confirmBridge === 'function') runOpts.requestToolConfirmation = confirmBridge
+      // 【M4-E】配对对照:本次运行禁用哪些技能(透传到 run 的 toolCtx)
+      const suppressed = (ctx as { suppressedSkills?: string[] }).suppressedSkills;
+      if (Array.isArray(suppressed) && suppressed.length > 0) {
+        runOpts.suppressedSkills = suppressed;
+      }
       // 【M2-B】预授权标记透传(与确认桥同模式,显式注入)
       if ((ctx as { preApprovedToolConfirm?: boolean }).preApprovedToolConfirm === true) {
         runOpts.preApprovedToolConfirm = true

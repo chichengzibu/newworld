@@ -23,6 +23,8 @@ import { SelfLearner } from '../learning/SelfLearner';
 import { SkillEffectivenessTracker } from '../learning/SkillEffectivenessTracker';
 import { classifyFailure } from '../learning/FailureClassifier';
 import { normalizeTaskCategory } from '../learning/TaskCategory';
+import { runSkillTrial, type TrialExecutor, type TrialResult, type TrialTask } from '../learning/SkillTrial';
+import type { GradableRun } from '../learning/TaskGrader';
 import { CostTracker } from '../insight/CostTracker';
 import { ConfigStore } from '../core/ConfigStore';
 import { AgentEventRelayBus, type AgentRunEvent } from '../agent/AgentEventRelay';
@@ -1187,6 +1189,8 @@ export class ChatManager {
     conversationId: string,
     content: string,
     contextKind: 'ui' | 'headless' | 'im_inbound' | 'scheduler' = 'ui',
+    /** 【M4-E】本次运行禁用的技能 id(配对对照的「不带技能」变体) */
+    suppressedSkills: string[] = [],
   ): Promise<AgentDispatchResult> {
     if (!this.registeredAgent) {
       this.log.debug('[ChatManager] dispatchToAgent: 未注册 agent,跳过');
@@ -1240,6 +1244,8 @@ export class ChatManager {
         contextKind,
         history: history.map(m => ({ role: m.role, content: m.content })),
         ...(memoryContext ? { memoryContext } : {}),
+        // 【M4-E】配对对照:禁用的技能随 ctx 下传,由 load_skill 工具层拒绝
+        ...(suppressedSkills.length > 0 ? { suppressedSkills } : {}),
       } as never);
 
       const payload = (decision?.payload ?? {}) as {
@@ -1341,6 +1347,59 @@ export class ChatManager {
         w.webContents.send('agent:onEvent', { conversationId, event });
       }
     });
+  }
+
+  /**
+   * 【M4-E】跑一次技能效用对照实验的**单个变体**。
+   *
+   * 【为什么在主进程做】
+   * 对照实验要真跑 agent(带/不带技能各一遍),而 agent 只在主进程里。
+   * 渲染层只负责发起与展示。
+   *
+   * 【变体如何生效】
+   * `suppressedSkills` 随 AgentContext 下传到工具层,`load_skill` 会拒绝该技能 ——
+   * 这是「不带技能」变体唯一靠得住的做法:光把技能从提示词里摘掉不够,
+   * 模型仍可能凭记忆用同样的做法。
+   */
+  private async runTrialVariant(
+    conversationId: string,
+    instruction: string,
+    suppressedSkills: string[],
+  ): Promise<GradableRun> {
+    const content = instruction;
+    this.config.addMessage(conversationId, {
+      id: `user_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      role: 'user',
+      content,
+      timestamp: Date.now(),
+      status: 'sent',
+    });
+
+    const result = await this.dispatchToAgent(conversationId, content, 'ui', suppressedSkills);
+    const toolCalls = result.toolCalls ?? [];
+    return {
+      instruction,
+      answer: result.content,
+      toolsUsed: toolCalls.map(c => c.name),
+      hadToolFailure: toolCalls.some(c => !c.ok),
+      hadError: !result.handled,
+      producedAnswer: !!result.content && result.content.length > 0,
+    };
+  }
+
+  /**
+   * 【M4-E】跑一次技能效用对照实验。
+   *
+   * 【成本提示】每个任务跑两遍 → token 翻倍。界面必须先告知用户。
+   */
+  public async runSkillUtilityTrial(
+    skillId: string,
+    tasks: TrialTask[],
+  ): Promise<TrialResult> {
+    const conversationId = this.config.createConversation({ title: `技能验证:${skillId}` }).id;
+    const executor: TrialExecutor = async (task, opts) =>
+      this.runTrialVariant(conversationId, task.instruction, opts.suppressedSkills);
+    return await runSkillTrial(skillId, tasks, executor);
   }
 
   /**

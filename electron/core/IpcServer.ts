@@ -519,6 +519,27 @@ export class IpcServer {
       }
     });
 
+    /**
+     * 【M4-E】跑一次技能效用对照实验。
+     *
+     * 【成本必须先告知用户】每个任务跑两遍(带/不带技能)→ token 翻倍。
+     * 界面在调用前会先说明。
+     */
+    ipcMain.handle('skills:runUtilityTrial', async (_, payload: { skillId: string; tasks: Array<{ id: string; instruction: string; expectation?: any }> }) => {
+      try {
+        const skillId = String(payload?.skillId ?? '').trim();
+        if (!skillId) return { success: false, error: '技能 id 不能为空' };
+        const tasks = Array.isArray(payload?.tasks) ? payload.tasks : [];
+        if (tasks.length === 0) return { success: false, error: '至少要有一个任务' };
+        const { ChatManager } = await import('../chat/ChatManager');
+        const result = await ChatManager.getInstance().runSkillUtilityTrial(skillId, tasks as any);
+        return { success: true, data: result };
+      } catch (error) {
+        this.log.error('skills:runUtilityTrial 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
     ipcMain.handle('skills:getEffectiveness', async () => {
       try {
         const tracker = SkillEffectivenessTracker.getInstance();

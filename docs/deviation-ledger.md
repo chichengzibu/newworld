@@ -1061,3 +1061,43 @@
   - 后端 tsc（tsconfig.node.json）: 0 error
   - vue-tsc: 0 error
 - **新增测试**：`tests/unit/stub-honesty-m4h.test.ts`（3 例）· `tests/unit/pricing-and-stub-m4h.test.ts`（7 例）
+
+---
+
+## W5 接线批偏差登记 · M4-I 记忆 id 对齐 + M4-E 受控对照（2026-11-02）
+
+> 编号自 DEV-106 起。M4-I 是修既有洞，M4-E 是补学习闭环的最后一环。
+> 完整设计见 `docs/NOVA-#009-m4i-memory-id-alignment-design.md` 与 `docs/NOVA-#009-m4e-controlled-skill-validation-design.md`。
+
+| ID | 状态 | 摘要 |
+|---|---|---|
+| DEV-106 | 已修 | 记忆库/向量库 id 对不上 → **每次召回都在重嵌** · `HermesMemory.addExperienceMemory` **内部**生成 id(`mem_<ts>_<rand>`)、**无视**调用方给的 id → 召回候选来自记忆库(真实 id)、向量库却按调用方 id 建 → **每次召回把全部记忆重新嵌入一遍**,且留下一条永远匹配不上的**孤儿**。结果**看起来是对的**(召回照样返回正确记忆),只有「记忆被重复嵌入几次」这个计数能暴露 |
+| DEV-107 | 已修 | 调用方给的 id 是**幂等键**,记忆库却不认 · ChatManager 传的是 `chat-<sha256(conversationId\|content)>` = #006.5 W1 定的幂等键(「同 conversationId+content → 同 id → 覆盖」)。而记忆库自己另生成 id → **幂等从一开始就没真正生效**(只是碰巧在同一层覆盖)。现 `addExperienceMemory(content, tags, id?)` 接受可选 id 并**以它为准**;同 id 已存在 → 不重复追加、返回既有条目。id 与返回值都可选,既有用法行为不变 |
+| DEV-108 | 已修 | 我第一版修错了(两处,已写进注释当护栏) · ①`return item` 插在 `saveMemories()` 之后、`appendFileSync(MEMORY.md)` 之前 → **跳过了经验记忆落盘**(hermes-memory 测试当场抓到) ②测「不再重复嵌入」时把**查询向量**的嵌入也算进去了 —— 每次召回都要嵌查询,那是必须的,要盯的是**记忆**被重复嵌入 |
+| DEV-109 | 已修 | 「禁止用该技能」禁不住 · 配对对照要求「不带技能」变体真的没有该技能。若只是把技能从提示词摘掉,模型仍可能凭记忆用同样做法 → 对照组废掉、差值恒 0。实现:`RuntimeToolContext.suppressedSkills` 随 run 传(不做全局态 —— 全局集会串味,两个会话同时跑会互相禁技能)→ brain 透传 → `LoadSkillTool` 命中即拒绝,且说清「被禁用(对照实验分组)」而不是「工具坏了」(否则模型反复重试,把对照做脏) |
+| DEV-110 | 已修 | 「这次任务成功了没有」没有判定口径 · 桌面助手的任务**没有唯一正确答案** → 不能用「答案等于参考答案」判成败。实现 `TaskGrader` **分层**:①`hard_signal`(无工具失败/无 run 错误/有最终答复,**必须过**)②`structural`(must_call / must_not_call / must_contain,**替代 golden answer**)③`similarity`(**只作参考分,单独不决定成败** —— 话术像但没做成不能算成功)。①②③ 全确定性(离线可跑、零 judge drift) |
+| DEV-111 | 已修 | 配对对照没有统计口径与准入门 · 实现 `SkillTrial`:每个任务跑两遍 → 逐对打分 → 汇总 `delta = 带 - 不带`。**样本 < 5 个配对任务 → 明确报「样本不足」而不是给结论**(3 次运行得出的差值一次翻转就是 ±33%);差值门槛 ±0.1(FlowEvo 的有害阈值);**执行故障的任务不计入统计**(实验故障 ≠ 任务失败) |
+| DEV-112 | 已修 | 对照实验无入口 · `ChatManager.runSkillUtilityTrial()` 建专用会话逐任务跑两遍 → IPC `skills:runUtilityTrial` → UI「技能验证(对照实验)」卡片。**跑之前弹确认说清 token 翻倍**(每个任务两次模型调用) |
+| DEV-113 | 已修 | 调研没落地成设计 · 本批的设计直接来自 GitHub 高活跃项目对比(见设计文档 §二):OpenAI 的 Eval=(Dataset,Runner,Grader) 与分层 grader · LangSmith 的「结构约束替代 golden answer」与「pairwise 比绝对打分可靠」· ACE 官方的 helpful/harmful 计数 · **ACE 社区验证门**「a bullet is committed only when it raises held-out reward」与官方自承「noisy reflector silently pollutes the playbook with **no gate**」· FlowEvo 的 ±0.1 阈值 · 以及「judge drift → 确定性层优先、裁判层留接口、只对少量样本跑裁判」 |
+
+### DEV-106~108 明细（记忆 id 对齐，2026-11-02）
+
+- **改法**:`HermesMemory.addExperienceMemory(content, tags?, id?)` 接受可选 id 并以它为准;同 id 已存在 → 不重复追加、返回既有条目。`HermesAdapter.store()` 把 id 传下去 → 记忆库与向量库同一个 id → **幂等(覆盖)与召回命中(查得到)同时成立**
+- **回归钉**(`tests/unit/memory-store-id-m4i.test.ts`,5 例):两边 id 对齐 · **调用方 id 是幂等键**(同 id 两次 store 只净增一条)· **第二次召回不再重复嵌入【记忆】**(记忆只嵌 1 次;查询每次 1 次,那是必须的)· 召回仍能命中(修 id 不能把功能修坏)· `addExperienceMemory` 返回创建的条目
+- **保持绿的既有测试**:`memory-consumption-006-5`(W1/W1b 幂等、R-2 召回命中、Q1 管线往返)· `hermes-memory`(MEMORY.md 落盘)
+
+### DEV-109~113 明细（受控对照，2026-11-02）
+
+- **抑制机制**:`RuntimeToolContext.suppressedSkills` → brain 透传 → `LoadSkillTool` 拒绝
+- **评分器**(`electron/learning/TaskGrader.ts`):`hard_signal` / `structural` / `similarity` 三层
+- **运行器**(`electron/learning/SkillTrial.ts`):配对对照 + 汇总 + 准入门
+- **回归钉**:`tests/unit/skill-trial-m4e.test.ts`(17 例)· `tests/unit/LoadSkillTool.test.ts`(+2 例:被抑制的技能拒绝且说清原因 / 未被抑制正常加载 —— 抑制不能误伤)
+
+### 关单（W5 接线批 · M4-I + M4-E，2026-11-02）
+
+- **范围**：DEV-106 ~ DEV-113（8 条）
+- **验证**：
+  - vitest: Test Files 121 passed (121) / Tests 1427 passed | 14 skipped (1441) / 0 FAIL
+  - 后端 tsc（tsconfig.node.json）: 0 error
+  - vue-tsc: 0 error
+  - `npm run build`: 通过（5 步，含两道类型检查门禁）并产出安装包

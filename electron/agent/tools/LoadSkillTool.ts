@@ -50,11 +50,28 @@ export class LoadSkillTool implements PiPiTool {
 
   async execute(
     args: Record<string, unknown>,
-    _ctx?: RuntimeToolContext,
+    ctx?: RuntimeToolContext,
   ): Promise<ToolExecResult> {
     const skillId = typeof args.skill_id === 'string' ? args.skill_id.trim() : ''
     if (!skillId) {
       return { ok: false, result: '', error: '缺少参数 skill_id' }
+    }
+    /**
+     * 【M4-E】对照实验的抑制检查。
+     *
+     * 「这个技能有没有用」要靠**配对对照**回答:同一个任务跑两遍,
+     * 一遍允许用它、一遍禁止用。若不禁止,模型照样会调 load_skill ——
+     * 对照组就废了,测出来的差值恒为 0(两个变体其实一样)。
+     *
+     * 拒绝时要说清原因:模型需要知道「这个技能不可用」而不是「工具坏了」,
+     * 否则它会反复重试或改走别的路径,把对照做脏。
+     */
+    if (ctx?.suppressedSkills?.includes(skillId)) {
+      return {
+        ok: false,
+        result: '',
+        error: `技能 "${skillId}" 在本次运行中被禁用(对照实验分组),请直接完成任务`,
+      }
     }
     try {
       const body = SkillLoader.getInstance().getSkillBody(skillId)
