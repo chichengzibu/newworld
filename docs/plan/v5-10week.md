@@ -58,6 +58,8 @@
 | **M3-F** | **构建修复 —— 应用此前根本打不出包**（4 条断链让主进程构建失败；构建**不做类型检查**） | `NOVA-#009-m3f-build-repair-design.md` |
 | M4-G | 架构收敛（删掉没接入主线的平行架构：actor / conversation / SkillManager CRUD） | `NOVA-#009-m4g-architecture-convergence-design.md` |
 | M4-H | 诚实性与定价可维护（兜底实现不再装作答了；定价表不再是双重死代码） | `NOVA-#009-m4h-honesty-and-pricing-design.md` |
+| M4-I | 记忆库/向量库 id 对齐（此前**每次召回都在重嵌全部记忆**，且幂等键从未生效） | `NOVA-#009-m4i-memory-id-alignment-design.md` |
+| **M4-E** | **技能效用的受控对照**（配对 A/B + 分层评分器 + 准入门；「禁止用技能」必须真的禁止） | `NOVA-#009-m4e-controlled-skill-validation-design.md` |
 
 **构建门禁**（M3-F 引入，此后每批都守着）：
 `[1/5] 主进程 typecheck → [2/5] 渲染进程 typecheck → [3/5] vite build → [4/5] electron-builder → [5/5] build-report`
@@ -65,8 +67,9 @@
 扫全仓相对 import 能否解析（「模块被删但 import 还在」会让构建失败）。
 
 **下一步（未排期，按价值排序）**
-1. **M4-E 技能效用的受控对照** —— 现状是观察性对比（有混杂），需同批任务随机带/不带各跑一遍；
-   前提是先有一个**可验证的成功信号**（当前只有「工具调用是否全成功」这个弱代理）
+1. **用户接受度作为成功信号** —— M4-E 的「成功」目前是弱代理（工具调用全成功 + 有最终答复）。
+   真正的信号是**用户是否接受**（没有立刻纠正/重跑）—— 需渲染层采集。
+   配套：LLM 裁判层（用本地 ollama 小模型，只对 2~5% 样本跑，定期校准防 judge drift）
 2. **Job Object / cgroup 资源限额** —— 需原生模块，作为可选增强而非硬依赖
 3. **rerank** —— 需另接 cross-encoder 服务（本机 ollama 0.40.11 无 `/api/rerank`，实测 404）
 4. **sqlite-vss** —— 当前向量库上限 200 条，桌面应用够用；是规模问题不是正确性问题
