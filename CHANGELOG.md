@@ -367,9 +367,24 @@ M4-E 判的是**过程**(工具全成功/有答复/结构约束),不是「用户
 - **仓库卫生** — `release.bak-*`(近 1GB 构建产物曾入仓)、`.tmp-nova-shots/*.png`、
   临时脚本,全部移出索引并补 .gitignore
 
+### 🧪 面板渲染测试(M4-H)
+
+本批新增的 6 个 UI 面板此前只过了 typecheck 与构建 ——
+**typecheck 通过 ≠ 模板能渲染 ≠ 数据能落到界面上**。
+人工实跑确实抓到了问题(i18n 缺 key、flaky 断言),但**人工截图不可回归**。
+
+- **新增 18 例组件测试** — 用**真 Element Plus** 渲染(不用 stub):
+  SkillsView 的 4 个面板 + 设置页嵌入后端卡片 + 模型对比页今日成本卡片
+- **守的是「用户能不能看到该看到的东西」** — 数据为空时**不该占位**(空卡片比没卡片更糟);
+  有数据时关键字段必须在 DOM 里;判定的**中文标签**必须正确(用户看不懂 `insufficient_data`)
+- **诚实标注是重点** — 伪向量时必须说「召回是噪声」;没有成本记录时不能说「今日花费 $0.00」
+- **顺带钉住 handler 与组件的形状约定** — `insight:cost:today` 返回扁平结构;
+  我第一版 mock 写成了嵌套 → 组件读不到 → 「按模型分布」那栏测不出来。
+  **生产代码是对的**,是 mock 没照契约写。已对齐 —— 今后谁改形状都会红
+
 ### 📊 验证
 
-vitest 124 files / 1452 passed / 0 FAIL · vue-tsc 0 error · 后端 tsc **0 error**
+vitest 126 files / 1470 passed / 0 FAIL · vue-tsc 0 error · 后端 tsc **0 error**
 `npm run build` 通过(5 步 · 两道类型检查门禁)并产出安装包 · smoke-test 22 passed / 0 failed
 **实跑**:应用启动正常,控制台警告 **33 条 → 1 条**(剩下那条是 Electron 的 CSP 开发提示)
 

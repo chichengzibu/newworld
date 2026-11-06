@@ -62,6 +62,7 @@
 | **M4-E** | **技能效用的受控对照**（配对 A/B + 分层评分器 + 准入门；「禁止用技能」必须真的禁止） | `NOVA-#009-m4e-controlled-skill-validation-design.md` |
 | M4-F | 用户接受度信号 + LLM 裁判层（成功信号从「过程」升级到「用户满不满意」） | `NOVA-#009-m4f-acceptance-and-judge-design.md` |
 | M4-G | 实跑验证（第一次把应用跑起来看 —— 抓出 3 个 i18n 缺失 key + 1 个 flaky 墙钟断言 + 仓库卫生） | `NOVA-#009-m4g-runtime-verification-design.md` |
+| M4-H | 面板渲染测试（typecheck 通过 ≠ 界面正常 —— 6 个新面板钉成 18 例组件测试） | `NOVA-#009-m4h-panel-render-tests-design.md` |
 
 **构建门禁**（M3-F 引入，此后每批都守着）：
 `[1/5] 主进程 typecheck → [2/5] 渲染进程 typecheck → [3/5] vite build → [4/5] electron-builder → [5/5] build-report`
