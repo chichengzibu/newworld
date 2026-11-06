@@ -1,0 +1,43 @@
+fix(m4-g): 实跑验证 — 把应用跑起来看,抓出 i18n 缺失 + flaky 断言 + 仓库卫生
+
+前几批加了 5 个新 UI 面板(嵌入后端配置 / 技能目录 / 效果统计 / 边际效用 /
+技能验证)+ 成本卡片 + 接受度列,但**一次都没真的渲染过** ——
+typecheck 通过 ≠ 界面正常。本批第一次把应用跑起来看。
+
+i18n key 缺失(实跑发现)
+  控制台 33 条警告全是 `Not found 'nav.search' / 'nav.voice' / 'common.ok' key`
+  → 侧边栏「搜索」「语音」两个图标**没有文案**(tooltip 与 aria-label 为空)。
+  路由存在(/search→Search.vue、/voice→Voice.vue)、图标画得出,唯独文案是空的。
+
+为什么这类问题特别难发现
+  ① 不报错、不崩 —— 只是少一行文案
+  ② **动态 key 扫不出来** —— SideNav 用 `t(item.titleKey)`,字面量 grep 看不见
+  ③ 语言包是嵌套对象 —— 扁平比对全是假警报
+  ④ 缺「源码用的 key ⊆ 语言包有的 key」这条断言
+
+我自己的审计脚本也骗了我两次:第一次扁平比对报「360 个缺失」全是假警报;
+第二次修好嵌套解析仍误报「nav.chat 缺失」(它明明存在)。最终用 **import 语言包模块**
+拿真实结构才得到准数:zh 缺 3 个、en 缺 3 个、两语言 key 集合完全一致(各 540 个)。
+这个过程本身说明:**审计工具本身也要被验证** → 故测试里有一条专门断言
+「审计能抓到确实缺 key 的情况」。
+
+修一个 flaky 测试
+  FileOrganizer 断言 `durationMs < 1000` —— 实测在应用占 CPU 时变红、单独跑必绿。
+  墙钟断言**测的是机器负载不是代码**。现:核心断言保持功能性(10 个文件全部归位),
+  时间上限放宽到 5000ms(实测 ~100ms,50 倍余量)仍能捕获病态回归。
+
+仓库卫生
+  - release.bak-*(build.mjs 的 moveAside 产物)此前**近 1GB 构建产物进了仓库**
+  - .tmp-nova-shots/*.png 开发期截图,全仓无引用
+  - scripts/.tmp-*.py 临时脚本误入仓
+  全部移出索引并补 .gitignore
+
+验证
+  vitest 124 files / 1452 passed | 14 skipped / 0 FAIL
+  后端 tsc 0 error · vue-tsc 0 error
+  实跑: 应用启动正常,控制台警告 **33 条 → 1 条**(剩下那条是 Electron 的 CSP 开发提示)
+
+台账 DEV-119 ~ DEV-122
+设计文档 docs/NOVA-#009-m4g-runtime-verification-design.md
+
+Co-Authored-By: Claude <noreply@anthropic.com>

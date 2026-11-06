@@ -32,6 +32,7 @@ export default {
     disable: '禁用',
     search: '搜索',
     filter: '筛选',
+    ok: '确定',
     back: '返回',
     loading: '加载中...',
     success: '成功',
@@ -72,6 +73,8 @@ export default {
     imManagement: 'IM 管理',
     clawhub: '技能市场',
     modelCompare: '模型对比',
+    search: '搜索',
+    voice: '语音',
     demo: {
       d1: 'D1 截屏',
       d2: 'D2 Prime',

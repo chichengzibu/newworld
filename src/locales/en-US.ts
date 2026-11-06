@@ -18,6 +18,7 @@ export default {
     disable: 'Disable',
     search: 'Search',
     filter: 'Filter',
+    ok: 'OK',
     back: 'Back',
     loading: 'Loading...',
     success: 'Success',
@@ -58,6 +59,8 @@ export default {
     imManagement: 'IM Management',
     clawhub: 'ClawHub',
     modelCompare: 'Model Compare',
+    search: 'Search',
+    voice: 'Voice',
     demo: {
       d1: 'D1 Screenshot',
       d2: 'D2 Prime',

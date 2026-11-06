@@ -1137,3 +1137,37 @@
   - 后端 tsc（tsconfig.node.json）: 0 error
   - vue-tsc: 0 error
 - **新增测试**：`tests/unit/acceptance-signal-m4f.test.ts`（11 例）· `tests/unit/run-judge-m4f.test.ts`（10 例）
+
+---
+
+## W5 接线批偏差登记 · M4-G 实跑验证（2026-11-06）
+
+> 前几批加了 5 个新 UI 面板但**一次都没真的渲染过**。本批第一次把应用跑起来看。
+> 编号自 DEV-119 起。完整设计见 `docs/NOVA-#009-m4g-runtime-verification-design.md`。
+
+| ID | 状态 | 摘要 |
+|---|---|---|
+| DEV-119 | 已修 | i18n key 缺失(实跑发现) · 控制台 33 条警告全是 `Not found 'nav.search' / 'nav.voice' / 'common.ok' key` → 侧边栏「搜索」「语音」两个图标**没有文案**(tooltip 与 aria-label 为空)。路由存在(`/search`→Search.vue、`/voice`→Voice.vue)、图标画得出,唯独文案是空的 |
+| DEV-120 | 已修 | 缺 i18n 审计测试 · 这类问题不报错不崩、**动态 key 扫不出来**(SideNav 用 `t(item.titleKey)`)、语言包是嵌套对象(扁平比对全是假警报)、且没有「源码用的 key ⊆ 语言包有的 key」这条断言。现新增 `tests/unit/i18n-key-audit.test.ts`:字面量 + 动态取值两类都收集,中英文各查一遍,两语言 key 集合须一致;并有一条**断言审计本身有效**(用真实存在过的缺失 key 做对照) |
+| DEV-121 | 已修 | flaky 墙钟断言 · `FileOrganizer.test.ts` 断言 `durationMs < 1000` —— 实测在应用占 CPU 时变红、单独跑必绿。墙钟断言**测的是机器负载不是代码**。现:核心断言保持功能性(10 个文件全部归位),时间上限放宽到 5000ms(实测 ~100ms,50 倍余量)仍能捕获病态回归 |
+| DEV-122 | 已修 | 仓库卫生 · ①`release.bak-*`(build.mjs 的 moveAside() 产物)此前**近 1GB 构建产物进了仓库**(gitignore 只覆盖了 dist/dist-electron 的 bak)②`.tmp-nova-shots/*.png` 开发期截图,全仓无引用 ③`scripts/.tmp-*.py` 临时脚本误入仓 |
+
+### DEV-119~120 明细（i18n，2026-11-06）
+
+- **补的 key**:`nav.search` / `nav.voice` / `common.ok` —— 中英文各一份
+- **审计方法(两次自我修正值得记)**:
+  - 第一次:按扁平字符串比对 → 报「360 个 key 缺失」,**全是假警报**(语言包是嵌套对象)
+  - 第二次:修好嵌套解析 → 仍报「nav.chat 缺失」,而它明明存在(解析器在嵌套对象上路径拼错)
+  - 最终:**用 `import` 语言包模块拿真实结构**才得到准数 —— zh 缺 3 个、en 缺 3 个、两语言 key 集合完全一致(各 540 个)
+- **这个过程本身说明**:审计工具本身也要被验证 → 故测试里有一条专门断言「审计能抓到确实缺 key 的情况」
+- **实跑效果**:控制台警告 **33 条 → 1 条**(剩下那条是 Electron 的 CSP 开发提示,与本项目无关)
+
+### 关单（W5 接线批 · M4-G 实跑验证，2026-11-06）
+
+- **范围**：DEV-119 ~ DEV-122（4 条）
+- **验证**：
+  - vitest: Test Files 124 passed (124) / Tests 1452 passed | 14 skipped (1466) / 0 FAIL
+  - 后端 tsc（tsconfig.node.json）: 0 error
+  - vue-tsc: 0 error
+  - **实跑**：应用启动正常,控制台警告 33 → 1
+- **新增测试**：`tests/unit/i18n-key-audit.test.ts`（4 例）

@@ -347,10 +347,31 @@ M4-E 判的是**过程**(工具全成功/有答复/结构约束),不是「用户
   **确定性采样**(默认 5%,业界建议 2~5%)、解析容错。
   **它不参与 pass/fail** —— judge drift 真实存在,让它改结论就是让结论随裁判模型漂移
 
+### 🏃 实跑验证(M4-G)
+
+前几批加了 5 个新 UI 面板但**一次都没真的渲染过** —— typecheck 通过 ≠ 界面正常。
+本批第一次把应用跑起来看。
+
+- **i18n key 缺失(实跑发现)** — 控制台 33 条警告全是
+  `Not found 'nav.search' / 'nav.voice' / 'common.ok' key`
+  → 侧边栏「搜索」「语音」两个图标**没有文案**(tooltip 与 aria-label 为空)。
+  路由存在、图标画得出,唯独文案是空的
+- **为什么这类问题特别难发现** — 不报错不崩;**动态 key 扫不出来**
+  (SideNav 用 `t(item.titleKey)`,字面量 grep 看不见);语言包是嵌套对象
+  (扁平比对全是假警报);且缺「源码用的 key ⊆ 语言包有的 key」这条断言
+- **新增 i18n 审计测试** — 字面量 + 动态取值两类都收集,中英文各查一遍,
+  两语言 key 集合须一致;并有一条**断言审计本身有效**(用真实存在过的缺失 key 做对照)
+- **修一个 flaky 测试** — `FileOrganizer` 断言 `durationMs < 1000`,
+  实测在应用占 CPU 时变红、单独跑必绿。墙钟断言**测的是机器负载不是代码**:
+  核心断言保持功能性,时间上限放宽到 5000ms(实测 ~100ms,50 倍余量)
+- **仓库卫生** — `release.bak-*`(近 1GB 构建产物曾入仓)、`.tmp-nova-shots/*.png`、
+  临时脚本,全部移出索引并补 .gitignore
+
 ### 📊 验证
 
-vitest 123 files / 1448 passed / 0 FAIL · vue-tsc 0 error · 后端 tsc **0 error**
+vitest 124 files / 1452 passed / 0 FAIL · vue-tsc 0 error · 后端 tsc **0 error**
 `npm run build` 通过(5 步 · 两道类型检查门禁)并产出安装包 · smoke-test 22 passed / 0 failed
+**实跑**:应用启动正常,控制台警告 **33 条 → 1 条**(剩下那条是 Electron 的 CSP 开发提示)
 
 ## [4.5.0-alpha] - 2026-08-06 (LlmAgentBrain v0.1 + MCP PoC + P0 安全,M1)
 
