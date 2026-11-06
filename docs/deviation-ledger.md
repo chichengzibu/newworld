@@ -1201,3 +1201,52 @@
   - 后端 tsc（tsconfig.node.json）: 0 error
   - vue-tsc: 0 error
 - **新增测试**：18 例（`skills-m4-panels.test.ts` 10 + `m4-panels-settings-cost.test.ts` 8）
+
+---
+
+## W5 接线批偏差登记 · M4-I 轨迹签名聚类（2026-11-06）
+
+> 编号自 DEV-127 起。完整设计见 `docs/NOVA-#009-m4i-trajectory-clustering-design.md`。
+
+| ID | 状态 | 摘要 |
+|---|---|---|
+| DEV-127 | 已修 | 学习闭环只认**字面相同**的指令 · 旧聚类键是归一化后的指令文本 → 「整理一下桌面」与「收拾下桌面」**做的是同一套动作**却分成两簇,各自够不到支持度门槛 → **永远不提提案**。而「同一件事的不同说法」恰恰是最值得学的模式 —— 用户不会每次都一样措辞。现改为按**轨迹签名**(工具序列)聚类 |
+| DEV-128 | 已修 | 缺 IDF 加权 → 聚类会塌成一个 blob · 原始工具计数被**胶水工具**主导(Read/Bash/Glob 几乎每条轨迹都有),不加权 → 所有轨迹看着都一样。业界配方是「比较前先给向量加权」。现用 IDF 权重 + 加权 Jaccard |
+| DEV-129 | 已修 | 裸 IDF 在小语料下退化(实现期踩到) · 裸 IDF `log(N/df)`:出现在**全部**轨迹里的工具权重为 0。而学习闭环的分析窗口常常只有几条 —— 语料一少,**每个工具**都在所有轨迹里 → 权重全 0 → 相似度恒 0 → **一条都聚不到**(实测:2 条相同动作的轨迹聚不成簇)。现用**平滑 IDF** `log((1+N)/(1+df))+1`:权重恒 ≥ 1,任何规模都能算;罕见工具权重仍显著高于胶水工具(N=4 时 2.22 vs 1.0) |
+| DEV-130 | 已修 | 聚类改成结构信号后,指令文本不能白扔 · 提案的 name/description/triggerCondition 要用**用户自己的话**才贴切。现:聚类键换成轨迹签名,但簇的**代表指令**取簇内最高频的那条;没有轨迹的老数据(M4-C 之前落盘)退回按指令分组,**不被丢掉** |
+
+### DEV-127~130 明细（轨迹签名聚类，2026-11-06）
+
+- **业界依据（四个独立工作收敛到同一结论）**:
+  - **TraceGraph**（arXiv:2605.31308）:每步编码成稀疏可观察键（动作/工具类型、观察模式、上下文线索）,
+    相似度用**键重叠**算,**不依赖提示词文本** —— 明确指出按提示词聚类会丢掉有区分度的那个维度
+  - **Hierarchical Clustering of Agent Traces**(2026-05):对 agent 轨迹存在**结构行为信号**
+    (`tool_call_sequence` = 去重后的有序工具名、`distinct_tools_invoked`、`tool_error_count`…),
+    而 chat 日志没有这些 —— 按提示词聚类等于扔掉区分维度
+  - **AgentTrails**(arXiv:2607.18816):把日志转成数据流图后**跨运行对齐**,
+    高支持度的簇被提议用来播种可复用技能库
+  - **Microsoft context-intelligence-gds**:Session→Tool 二部图 + `nodeSimilarity`(Jaccard)/
+    `fastRP`/`node2vec` 找「角色等价但邻居不完全相同」的会话;
+    并警告**比较前必须加权**,否则被胶水工具主导
+- **实现**:`electron/learning/TrajectorySignature.ts`
+  - `toolOf(step)` 认三种形状(agent loop 的 `name` / TaskExecutor 的 `type`·`action` / 旧的 `description`)
+  - `signatureOf(traj)` 有序去重的工具序列
+  - `computeIdf(trajectories)` **平滑 IDF**
+  - `similarity(a,b)` 加权 Jaccard(`Σmin / Σmax`,权重必须参与两侧)
+  - `clusterBySignature(items, idf, threshold)` **贪心**聚类(轨迹量级只有几十~几百,
+    层次聚类的 O(n²) 没必要;贪心结果**可解释**:能说清「这条和哪几条归到了一起」;
+    且**确定性** —— 同一批观察两次聚类结果相同,才能做回归对比)
+- **端到端验收**:`tests/unit/trajectory-clustering-m4i.test.ts` 12 例
+  - 模块级 9 例:三种步骤形状 / 签名去重保序 / IDF 相对降权 / 只共享胶水工具相似度远低于阈值 /
+    **小语料不退化** / 不同措辞同一动作归一簇 / 动作不同分开 / 确定性 / 空签名不参与
+  - 闭环级 3 例:**「整理一下桌面」+「收拾下桌面」→ 合成一个支持度 2 的模式** /
+    动作不同 → 各 1 支持度 → 门槛拦下(不给提案) / 老数据无轨迹 → 退回按指令分组不被丢掉
+
+### 关单（W5 接线批 · M4-I 轨迹签名聚类，2026-11-06）
+
+- **范围**：DEV-127 ~ DEV-130（4 条）
+- **验证**：
+  - vitest: Test Files 127 passed (127) / Tests 1482 passed | 14 skipped (1496) / 0 FAIL
+  - 后端 tsc（tsconfig.node.json）: 0 error
+  - vue-tsc: 0 error
+- **新增测试**：`tests/unit/trajectory-clustering-m4i.test.ts`（12 例）

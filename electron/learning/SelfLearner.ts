@@ -30,6 +30,10 @@ import { LogManager } from '../core/LogManager';
 import { ConfigStore } from '../core/ConfigStore';
 import { SkillLoader } from '../skill/SkillLoader';
 import { normalizeTaskCategory } from './TaskCategory';
+import {
+  clusterBySignature, computeIdf, signatureOf, toolOf,
+  type ToolSignature,
+} from './TrajectorySignature';
 import { SkillManager } from '../skill/SkillManager';
 import { ModelManager } from '../models/ModelManager';
 
@@ -524,25 +528,120 @@ export class SelfLearner {
    * 【口径】成功率门槛是【必要条件】,不是"这个技能有用"的结论 ——
    * 边际效用需要带/不带该技能的对照实验,那是更后面的事。
    */
-  private selectCandidatePattern(observations: Observation[]): CandidatePattern | null {
-    // ── 1. 按归一化指令聚类 ──
-    const groups = new Map<string, Observation[]>();
+  /**
+   * 【M4-I】算出观察池的 IDF 权重表。
+   *
+   * 口径:N = **轨迹**条数(不是观察条数 —— 一个观察可能含多次执行,
+   * 每次都是一份证据);df(t) = 含工具 t 的轨迹条数。
+   * 出现在全部轨迹里的工具(胶水工具)→ idf=0 → 权重为零 → 不影响相似度。
+   */
+  private computeTrajectoryIdf(observations: Observation[]): Map<string, number> {
+    const trajectories: TrajectorySummary[] = [];
     for (const obs of observations) {
+      for (const traj of obs.trajectories ?? []) {
+        if (signatureOf(traj).length > 0) trajectories.push(traj);
+      }
+    }
+    // 全部观察都没有轨迹(老数据)→ 没有 IDF 可算 → 空表(权重全 0)
+    // → 所有签名相似度都是 0 → 每个观察自成一簇(退化成旧的"按指令分组"以下的行为)
+    if (trajectories.length === 0) return new Map();
+    return computeIdf(trajectories);
+  }
+
+  /**
+   * 【M4-I】一个观察的工具签名 = 它全部轨迹的**工具并集**。
+   *
+   * 用并集而非单条轨迹:一个观察代表「这类动作」,
+   * 多次执行用到的工具合起来才是这类动作的完整面貌。
+   */
+  private observationSignature(obs: Observation): ToolSignature {
+    const out = new Set<string>();
+    for (const traj of obs.trajectories ?? []) {
+      for (const t of signatureOf(traj)) out.add(t);
+    }
+    return [...out];
+  }
+
+  /**
+   * 【M4-I】簇的代表指令 = 簇内**最高频**的那条(按出现次数,其次按最早)。
+   *
+   * 为什么用用户的原话:提案的 name/description/triggerCondition 来自它 ——
+   * 用户自己的措辞比 LLM 润色的更贴切,也更可信。
+   */
+  private pickRepresentativeInstruction(group: Observation[]): string {
+    const counts = new Map<string, { count: number; first: number; text: string }>();
+    group.forEach((obs, i) => {
+      const key = this.normalizeInstruction(obs.instruction);
+      const cur = counts.get(key);
+      if (!cur) {
+        counts.set(key, { count: obs.occurrences ?? 1, first: i, text: obs.instruction });
+      } else {
+        cur.count += obs.occurrences ?? 1;
+        if (i < cur.first) { cur.first = i; cur.text = obs.instruction; }
+      }
+    });
+    const best = [...counts.values()].sort((a, b) => b.count - a.count || a.first - b.first)[0];
+    return best?.text ?? group[0].instruction;
+  }
+
+  private selectCandidatePattern(observations: Observation[]): CandidatePattern | null {
+    /**
+     * ── 1. 按【轨迹签名】聚类(M4-I),不是按归一化指令 ──
+     *
+     * 旧实现要求指令**字面几乎相同**才算同一个模式。于是
+     *   「整理一下桌面」×2 + 「收拾下桌面」×2
+     * 这两件**做的是同一套动作**的事分成两簇,各自够不到支持度门槛 → 永远不提提案。
+     * 而「同一件事的不同说法」恰恰是最值得学的模式 —— 用户不会每次都一样措辞。
+     *
+     * 业界三个独立工作收敛到同一结论(详见 TrajectorySignature.ts 的依据):
+     * 轨迹的**结构行为信号**(工具序列)才是有区分度的维度,
+     * 按提示词聚类等于把它扔掉。
+     *
+     * 指令文本没有白扔 —— 它仍是簇的**代表**(提案的措辞来自簇内最高频的指令)。
+     */
+    const idf = this.computeTrajectoryIdf(observations);
+
+    // 有轨迹的观察 → 按【轨迹签名】聚类
+    const withTraj = observations.filter(obs => this.observationSignature(obs).length > 0);
+    const items = withTraj.map(obs => ({
+      obs,
+      // 一个观察代表「这类动作」→ 用它全部轨迹的工具并集做签名
+      signature: this.observationSignature(obs),
+    }));
+    const clusters = clusterBySignature(items, idf);
+
+    // ── 兜底:没有轨迹的观察(M4-C 之前落盘的老数据)→ 退回按指令分组 ──
+    // 它们没有结构信号可用,只能靠文本;但**不能被丢掉**(那会让老数据永远学不到)
+    const legacy = observations.filter(obs => this.observationSignature(obs).length === 0);
+    const legacyGroups = new Map<string, Observation[]>();
+    for (const obs of legacy) {
       const key = this.normalizeInstruction(obs.instruction);
       if (!key) continue;
-      const bucket = groups.get(key);
+      const bucket = legacyGroups.get(key);
       if (bucket) bucket.push(obs);
-      else groups.set(key, [obs]);
+      else legacyGroups.set(key, [obs]);
     }
 
-    // ── 2. 每组算证据,按支持度排序 ──
+    // ── 2. 每簇算证据,按支持度排序 ──
     const candidates: CandidatePattern[] = [];
-    for (const [key, group] of groups) {
+    for (const cluster of clusters) {
+      const group = cluster.members.map(m => m.obs);
+      const evidence = this.buildEvidence(group);
+      if (!evidence) continue;
+      candidates.push({
+        key: this.normalizeInstruction(group[0].instruction),
+        // 代表指令 = 簇内最高频的那条(用户自己的话最贴切)
+        instruction: this.pickRepresentativeInstruction(group),
+        observations: group,
+        evidence,
+      });
+    }
+    for (const [key, group] of legacyGroups) {
       const evidence = this.buildEvidence(group);
       if (!evidence) continue;
       candidates.push({
         key,
-        instruction: group[0].instruction,
+        instruction: this.pickRepresentativeInstruction(group),
         observations: group,
         evidence,
       });
