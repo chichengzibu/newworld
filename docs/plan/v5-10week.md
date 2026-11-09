@@ -64,6 +64,7 @@
 | M4-G | 实跑验证（第一次把应用跑起来看 —— 抓出 3 个 i18n 缺失 key + 1 个 flaky 墙钟断言 + 仓库卫生） | `NOVA-#009-m4g-runtime-verification-design.md` |
 | M4-H | 面板渲染测试（typecheck 通过 ≠ 界面正常 —— 6 个新面板钉成 18 例组件测试） | `NOVA-#009-m4h-panel-render-tests-design.md` |
 | M4-I | 轨迹签名聚类（学习闭环不再只认字面相同的指令 —— 按工具序列分组 + IDF 加权） | `NOVA-#009-m4i-trajectory-clustering-design.md` |
+| **M4-J** | **裁判校准**（M4-F 遗留的最后一环：接两套公开人工标注集 + κ/偏置探针 + 诚实结论；顺带修产品级 bug「ollama thinking 吞 token → 裁判等于没跑」） | `NOVA-#009-m4j-judge-calibration-design.md` |
 
 **构建门禁**（M3-F 引入，此后每批都守着）：
 `[1/5] 主进程 typecheck → [2/5] 渲染进程 typecheck → [3/5] vite build → [4/5] electron-builder → [5/5] build-report`
@@ -71,15 +72,16 @@
 扫全仓相对 import 能否解析（「模块被删但 import 还在」会让构建失败）。
 
 **下一步（未排期，按价值排序）**
-1. **裁判校准** —— M4-F 的裁判层已实现（可注入、确定性采样、默认 5%），
-   但**尚未校准**：业界要求先在人工标注样本上校准 judge 与人的一致度再放量。
-   本项目还没有人工标注集 —— 这是 M4-E/M4-F 这条链上最后一块
+1. **裁判校准** —— ✅ **已完成（M4-J, 2026-11-09）**：接两套公开人工标注集
+   （panel EMNLP2026 / MT-Bench），建零依赖校准模块（κ / 原始一致率 / Wilson CI /
+   位置偏置探针 / 冗长偏置探针），并实跑两个本地裁判模型出结论。
+   **结论：当前默认裁判模型未达可信门槛 → 裁判保持默认关闭**（详见设计文档第四节）
 2. **Job Object / cgroup 资源限额** —— 需原生模块，作为可选增强而非硬依赖
 3. **rerank** —— 需另接 cross-encoder 服务（本机 ollama 0.40.11 无 `/api/rerank`，实测 404）
 4. **sqlite-vss** —— 当前向量库上限 200 条，桌面应用够用；是规模问题不是正确性问题
-2. **Job Object / cgroup 资源限额** —— 需原生模块，作为可选增强而非硬依赖
-3. **rerank** —— 需另接 cross-encoder 服务（本机 ollama 0.40.11 无 `/api/rerank`，实测 404）
-4. **sqlite-vss** —— 当前向量库上限 200 条，桌面应用够用；是规模问题不是正确性问题
+5. **裁判提示词迭代** —— M4-J 实测显示本地小模型裁判的位置敏感度极高
+   （换序改口率实测 60%+），下一轮可试：更明确的 rubric 锚点 / 参考答案对比 /
+   多次投票取多数（成本换稳定性）
 
 ## 节点 + ship 对象
 

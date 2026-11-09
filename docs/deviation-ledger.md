@@ -1250,3 +1250,119 @@
   - 后端 tsc（tsconfig.node.json）: 0 error
   - vue-tsc: 0 error
 - **新增测试**：`tests/unit/trajectory-clustering-m4i.test.ts`（12 例）
+
+---
+
+## W5 接线批偏差登记 · M4-J 裁判校准（2026-11-09）
+
+> M4-F 交付时留了一句遗留:「裁判未做校准 —— 业界要求先在人工标注样本上校准
+> judge 与人的一致度,再放量。本项目还没有人工标注集」。本批是那句遗留的兑现。
+> 编号自 DEV-131 起。完整设计见 `docs/NOVA-#009-m4j-judge-calibration-design.md`。
+
+| ID | 状态 | 摘要 |
+|---|---|---|
+| DEV-131 | 已修 | **裁判从未被校准过** · M4-F 实现了裁判层(可注入/确定性采样/默认 5%),但**从未与人工判断对过账** —— 裁判的分数不是数据,是噪声。业界硬要求:κ 不达标就不许放量(LangSmith Align Evals / DIAL / openevals 一致)。本批:接两套公开人工标注集 + 建零依赖校准模块(κ / 原始一致率 / Wilson CI / 混淆 / 位置偏置 / 冗长偏置)+ 出诚实结论 |
+| DEV-132 | 已修 | **裁判形态缺 pairwise** · M4-E 的「带技能 vs 不带技能」对照此前用**两个点式打分再比大小**;而业界一致认为 pointwise 分数会挤在高分区间、需额外量表校准,**pairwise 比绝对打分稳定得多**。人工标注集也全是 pairwise 标注 —— 点式裁判根本没法直接对账。故:RunJudge 增 pairwise 形态 + 提示词(注入防御/反位置偏置/反冗长偏置/允许平局) |
+| DEV-133 | 已修 | **ollama 经 openai-compat 时 `think:false` 失效** ★ 产品级 · 实测(ollama 0.40.14 / qwen3.5:9b):`/v1/chat/completions` **不认** `think` 字段(只在原生 `/api/chat` 认)→ 模型照旧 thinking → `max_tokens` 全被吃掉 → `content` **为空**。后果不是"慢一点":裁判只要一行结论,拿不到结论 = 裁判等于没跑(M4-F 点式裁判 maxTokens 300 同样中招)。修:适配器对 ollama 端点改发 `reasoning_effort:"none"`(实测 reasoning 长度 0、58 token 出内容,单条裁决 22s → 1.4s) |
+| DEV-134 | 已修 | **裁判输出解析把 thinking 散文当成了结论** · 第一版用「全文第一个独立词 a/b/tie」。实跑时模型输出 "Thinking Process: …" 而结论被 `max_tokens` 截断 → 宽松匹配在散文里抓到孤立字母 → 12 次裁决全判成"第二位赢",**看着像位置偏置、实则是解析假象**。修:解析锚定输出契约 —— 从最后一行往前找**行首**就是 winner 的行,且 winner 后不得紧跟「. 」(排除枚举式伪匹配) |
+| DEV-135 | 已修 | **harness 的大小写映射错 → 指标全错** · 裁判解析出的 winner 是小写 `'a'/'b'`,而校准 harness 按大写 `'A'/'B'` 比对 → 全部落进 `'second'` → 指标显示"换序改口率 100%"。**那是 harness 的错,不是模型的偏置。** 教训:指标异常时先看原始输出,别先信指标(与 DEV-036「自证不算证」同向) |
+| DEV-136 | 已修 | **「不可测」被说成「没有关系」** · Pearson 在任一序列恒定时无定义(0/0)。裁判永远选 A → 「是否选 A」全是 1 → 冗长偏置相关性算不出来;若只报 `correlation=0`,读的人会以为"测过了、没有冗长偏置",实际是"测不出来"。修:探针增 `defined` 标志,**算不出来 ≠ 没有**,报告里分开说 |
+| DEV-137 | 已修 | **提示词占位符被模型原样抄回 + 可抄示例诱发字母偏置** · 输出契约写成 `<winner> <confidence>`,模型回抄成 "<winner> b" → 解析不到;改成给具体示例 "a 4" 后,模型**照抄示例**(12 次里 11 次答 'a')—— 那是抄示例,不是判内容。修:提示词改为**描述格式不給可抄示例** + 解析器吸收占位符回抄 |
+| DEV-138 | 已修 | **标注集 id 撞号 → 有样本对着错的题算了一致度** · MT-Bench 同一 (question_id, turn) 下有多个模型对(6 模型两两组合 → 同一题最多 15 对),id 只用 `qid:turn` → 撞号(实测 240 条只有 185 个唯一 id)。校准侧 `itemById` 取到的是**另一对**的样本 → 那几条对着错的题算一致度,而报告看不出来。修:id 加模型对 + 载入后强制查重,撞号直接报错 |
+| DEV-139 | 已修 | **模型 tag 写错 → 基础设施故障被伪装成「裁判质量差」** · 本机 tag 是 `qwen3.8-27b-q4km:latest`,写成 `qwen3.8:27b-q4km` → 每次调用 "model not found" → content 空 → 240 次全 unknown,报告只写「计入 0 条」,**看不出是模型名错了**。修:跑前查 `/api/tags` + 裁判区分「调用失败」与「输出无法解析」+ 裁决留 reason 归类 + 大半 unknown 直接判基础设施故障并中止 |
+
+### DEV-131~132 明细（校准与 pairwise 裁判，2026-11-09）
+
+- **标注集（两套，许可不同，各自的取舍）**:
+  - `EstellaCheng42/panel` —— EMNLP 2026《Panel: A Human Pairwise-Preference Benchmark
+    for Open-Ended Dialogue》，**专为评测 LLM 裁判而造**，1800 对人工 pairwise 共识标注
+    (msc/esconv/dream 各 600)。许可 **CC-BY-NC-4.0(非商用)** → **不入仓**,
+    只在开发期拉到 `.tmp-calibration/`(已 gitignore)
+  - `lmsys/mt_bench_human_judgments` —— 3355 条**多标注者**投票(CC-BY-4.0)→ 按多数票聚成
+    一条标签,人类内部分歧(票数分散)标 `ambiguous` 不进严格指标;许可宽松 →
+    **派生 40 条入仓** `tests/fixtures/judge-calibration/`(含署名)
+  - 网络现实:本机 `huggingface.co` 直连超时(实测 21s),`hf-mirror.com` 可用 →
+    拉取脚本对两个域名都试
+- **校准模块** `electron/learning/JudgeCalibration.ts`(零新 npm 依赖,统计量全部手写):
+  Cohen's κ / 原始一致率 / Wilson 95% CI / Pearson / 混淆矩阵 / Landis-Koch 分带 /
+  位置偏置探针(换序改口率)/ 冗长偏置探针(长度相关性 + 不可测标志)/ 分类别结果 /
+  诚实结论(κ 门槛 + 样本量门槛 + 偏置门槛,全部可见)
+- **口径(每条都写进报告,因为"悄悄换口径"是校准里最常见的自欺)**:
+  人工平局**不进** pairwise 一致率(人都不分胜负,裁判凭什么分)· 人工歧义不进 ·
+  裁判无法解析**单独计数不冒充平局** · κ 用三分类(A/B/tie)算,比只算二分类严
+- **不碰任何结论**:校准**不改任何 pass/fail**,只回答"这个裁判和人有几成一致、在哪些范围内可信"
+  —— 与 M4-F「裁判不改结论」同一条红线
+
+### DEV-133 明细（ollama thinking 吞 token，产品级）
+
+- **现象**:裁判经 LlmClient → openai-compatible → `/v1/chat/completions` 调 ollama 时,
+  传了 `think:false` 但模型**照旧 thinking**;`max_tokens`(120/300)全被 thinking 吃掉 →
+  `content` 为空 → 解析失败 → 裁判记 unknown。实跑证据:12 次裁决全 unknown,
+  且 raw 输出是 "Thinking Process:\n\n1. **Analyze the Request:** …"
+- **实测四组对照(同一模型同一请求,ollama 0.40.14 / qwen3.5:9b)**:
+  | 端点 | 字段 | reasoning 长度 | 出内容 | completion tokens |
+  |---|---|---|---|---|
+  | `/v1/chat/completions` | `think:false` | 1073 字符 | ✗ 空 | 300(打满) |
+  | `/v1/chat/completions` | `enable_thinking:false` | 1073 字符 | ✗ 空 | 300(打满) |
+  | `/v1/chat/completions` | `reasoning_effort:"none"` | **0** | ✓ | 58 |
+  | `/api/chat`(原生) | `think:false` | **0** | ✓ | 58 |
+- **修法**:适配器对 ollama 端点(baseUrl 端口 11434)改发 `reasoning_effort:"none"` 并删掉
+  `think`;**非 ollama 端点不动**(该字段是 ollama 对 OpenAI 标准的扩展取值,乱发给别的
+  provider 可能被拒)
+- **效果**:单条裁决(含两次调用)22~26s → **1.3~2.1s**;且第一次就有可解析结论
+- **回归钉**:`tests/unit/llm/openai-compatible-thinking.test.ts`(4 例)
+
+### DEV-134~137 明细（实跑期踩到的四个坑）
+
+- **三个坑都是"指标看起来像结论、实际是自己的错"** —— 与 M4-G「typecheck 通过 ≠ 界面正常」、
+  M4-H「面板只过了类型没验过渲染」同一族:**没实跑就不知道**
+- **共同教训**:① 指标异常时**先看原始输出**,别先信指标(DEV-135);
+  ② 解析器面对的是**有契约的结构化输出**,不是自由散文(DEV-134);
+  ③ 提示词里**任何可被照抄的具体示例**都会变成偏置来源(DEV-137);
+  ④ 「算不出来」与「没有关系」必须分开说(DEV-136)
+
+### DEV-138~139 明细（第二轮实跑抓到的两个坑）
+
+### DEV-138 — 标注集 id 撞号 → 有样本对着错的题算了一致度
+- **现象**:第二轮实跑的报告里,同一个 id 出现 10 次(`mt_bench:100:1` …)。实测:240 条记录只有 **185 个唯一 id**。
+- **根因**:MT-Bench 的聚合键是 (question_id, turn, model_a, model_b) —— **同一题有多个模型对**(6 个模型两两组合 → 同一题最多 15 对),而 id 只用了 `qid:turn` → 撞号。
+- **后果(为什么这不是"报告不好看"而已)**:校准侧用 `itemById` 把裁决映射回样本,撞号后**取到的是另一对**的样本 → 那几条等于**对着错的题**算一致度,而报告里完全看不出来(数字照样有模有样)。
+- **修法**:id 加上模型对(`mt_bench:{qid}:{turn}:{ma}_vs_{mb}`);载入后**强制查重**,撞号直接报错(`findDuplicateIds` + 执行器断言)—— 宁可报错也不要静默算错。
+
+### DEV-139 — 模型 tag 写错 → 基础设施故障被伪装成「裁判质量差」
+- **现象**:第二轮跑 27b 模型时,240 次裁决全部 unknown,报告只写「计入 0 条」。
+- **根因**:本机装的 tag 是 `qwen3.8-27b-q4km:latest`,我写成 `qwen3.8:27b-q4km` → 每次调用都返回 "model not found" → content 空 → 解析失败 → 全记 unknown。
+- **后果**:报告本身是诚实的(说了"计入 0 条"),但**看不出是模型名写错了** —— 读的人会以为是"这个模型当裁判不行"。**基础设施故障与裁判能力差,含义完全相反。**
+- **修法**:
+  1. 执行器跑之前查 `/api/tags`,tag 不在就报错并列出可用 tag
+  2. 裁判区分「调用失败」(`res.ok === false` → 带真实错误信息)与「输出无法解析」
+  3. 裁决记录留 `reason`,报告里按原因归类(**无法解析 ≠ 平局**)
+  4. 大半裁决无法解析(>50%)时**直接判为基础设施故障并中止**,不出质量结论
+
+### 关单（W5 接线批 · M4-J 裁判校准，2026-11-09）
+
+- **范围**：DEV-131 ~ DEV-139（9 条）
+- **验证**:
+  - vitest: Test Files **130 passed (130)** / Tests **1516 passed | 15 skipped (1531)** / **0 FAIL**
+  - 后端 tsc（tsconfig.node.json）: **0 error**（实测 `--listFiles` 覆盖
+    `JudgeCalibration.ts` / `RunJudge.ts` / `openai-compatible.ts` 三个改动文件）
+  - vue-tsc: **0**
+  - **实跑校准**（240 条样本 × 2 次换序 = 480 次裁判调用 / 每模型）:
+    | 指标 | qwen3.5:9b（默认裁判模型） | qwen3.8-27b-q4km:latest | 门槛 |
+    |---|---|---|---|
+    | 计入样本 | 220 | 220 | n ≥ 30 |
+    | 原始一致率 | 70.9%（CI 64.6~76.5%） | 71.8%（CI 65.5~77.3%） | — |
+    | **Cohen's κ** | **0.411** | **0.467** | ≥ 0.6 |
+    | 位置偏置·换序改口率 | **67.9%**（161/237） | **79.5%**（167/210） | ≤ 10% |
+    | 冗长偏置·长度相关性 | **0.257** | **0.412** | ≤ ±0.2 |
+    | 裁判无法解析 | 0 | 0 | — |
+    | 唯一达标的类别 | 无 | panel-dream（κ=0.623） | — |
+    | **结论** | **不达标** | **不达标** | → 裁判保持默认关闭 |
+
+    **judge drift 实测**:换更大的模型,一致度只微涨（κ +0.056）,
+    **偏置反而更大**（改口率 +11.6pp、冗长相关性 +0.155）——
+    **偏置不是容量问题,是提示词与采样口径问题**
+  - 完整报告见 `docs/NOVA-#009-m4j-judge-calibration-design.md` 第四节
+- **新增测试**:`tests/unit/judge-calibration-m4j.test.ts`(30 例)·
+  `tests/unit/llm/openai-compatible-thinking.test.ts`(4 例)·
+  `tests/integration/judge-calibration-live.test.ts`(实跑,默认 SKIP)

@@ -109,3 +109,11 @@ scripts/clawhub-dev-ed25519.key
 # ── 本地开发杂物(保留在磁盘,不入仓;见 2026-10-08 用户指示)──
 dev/
 .workbuddy/
+
+# 【M4-J 补】裁判校准工作区 ——
+# 标注集(panel 3MB + mt_bench parquet 700KB)与裁决记录都是**下载产物/中间产物**:
+#   · panel 是 CC-BY-NC-4.0(非商用)—— 明确不入仓
+#   · 裁决记录含大段模型输出,体积随校准次数增长,不入仓
+# 仓里只保留 tests/fixtures/judge-calibration/ 下的 MT-Bench 派生样本(CC-BY-4.0,许可干净)
+.tmp-calibration/
+
