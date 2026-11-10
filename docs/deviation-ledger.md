@@ -1366,3 +1366,92 @@
 - **新增测试**:`tests/unit/judge-calibration-m4j.test.ts`(30 例)·
   `tests/unit/llm/openai-compatible-thinking.test.ts`(4 例)·
   `tests/integration/judge-calibration-live.test.ts`(实跑,默认 SKIP)
+
+---
+
+## W5 接线批偏差登记 · M4-K 真机验证清单自动化（2026-11-09）
+
+> 承接上一轮排序:裁判校准做完之后,**「声称已支持」必须变成可勾选的证据**。
+> 本批把 `docs/VERIFICATION.md` 的 D/E 段(人工肉眼确认)逐条自动化,并在过程中
+> 挖出一个**带在 master 上一个月的 P0**。
+> 编号自 DEV-140 起。完整设计见 `docs/NOVA-#009-m4k-verification-automation-design.md`。
+
+| ID | 状态 | 摘要 |
+|---|---|---|
+| DEV-140 | 已修 | **Chat 虚拟列表 P0 —— 打开任何有消息的会话就红屏** ★ · `useVirtualizer` 返回的是 **`Ref<Virtualizer>`**,不是 Virtualizer 实例。模板里写 `virtualizer.getTotalSize()` **没事**(Vue 模板自动解包顶层 ref),脚本里写 `virtualizer.getVirtualItems()` **必炸** → `getVirtualItems is not a function` → `paintFatalError` 盖一层全屏红框 → **聊天界面不可用**。自 `91a9093`(2026-10-09 平台解耦)引入,一直带在 master 上;`300ddfa`(类型清零)又用 `as unknown as Virtualizer` 断言把类型错误一并吞掉 → **typecheck 一直绿**。为什么没人发现:实跑只覆盖了首屏空状态(M4-G 遗留 #4 自己写着"实跑只覆盖了首屏"),打开有消息的会话才会触发 |
+| DEV-141 | 已修 | **e2e 的 userData 隔离从未生效** · fixture 传了 `userDataDir` 给 `electron.launch()`,但 **Playwright 的 `_electron.launch()` 不支持这个选项**(只有 `launchPersistentContext` 有)→ 被**静默忽略** → 应用一直写真实 `%APPDATA%/pipiclaw`。后果:① e2e 污染开发者真实数据(P0-T0.4「每次测试用全新 userData」从未生效)② 测试互相污染 —— 实测侧栏累积到 **192 个会话**,一次渲染 192 项 → DOM 持续重渲染 → Playwright 动作性检查超时 → 「…」下拉等交互点不动(popper 数恒为 0)。修:显式传 `--user-data-dir=<临时目录>` |
+| DEV-142 | 已修 | **首次启动引导挡住整个界面** · 4 步 el-dialog,`close-on-click-modal` / `close-on-press-escape` / `show-close` **全关** → 只能一步步走完,走完之前整个界面被遮罩挡住,任何点击都超时。走完后弹的「欢迎使用 PiPiClaw!」toast **正好盖在侧栏「新建」按钮上** → 之后的点击被 toast 吃掉(随机失败)。修:共享 fixture 增加 `completeFirstLaunchGuide()`(走完 4 步 + 等 toast 消失) |
+| DEV-143 | 已修 | **侧栏不响应外部会话变更** · 通过 IPC `chat.createConversation` 建的会话,**侧栏不刷新**(store 只在挂载时拉一次 + 响应自己的 action)→ 菜单无从点。修:验证用例改走 UI「新建」按钮(与真实用户同一条路径);侧栏对外部变更不刷新这一点**留作已知边界**,不在本批扩 |
+
+### DEV-140 明细（P0，2026-11-09）
+
+- **现象**:新用户点侧栏「新建」→ Chat 视图整屏红框:
+  ```
+  [PiPiClaw render error]
+  source: Vue https://vuejs.org/error-reference/#runtime-1
+  Me.getVirtualItems is not a function
+  ```
+  红框是 `paintFatalError` 追加的 `position:fixed; inset:0; z-index:99999` 盒子 ——
+  **应用还在下面,但被完全盖住**,用户看到的是"应用打不开"。
+- **根因**:`useVirtualizer` 返回 `Ref<Virtualizer>`(实测 `node_modules/@tanstack/vue-virtual/dist/esm/index.js`:
+  `const state = shallowRef(virtualizer); ... return state`)。
+  模板访问顶层 setup 绑定时 Vue 会自动解包 ref → **模板对、脚本错**;
+  而 `virtualRows` 是个 `computed`,只在**脚本**里访问 → 必炸。
+- **为什么 typecheck 一直是绿的**:`300ddfa`(类型清零)加了
+  `as unknown as Virtualizer<HTMLElement, Element>` —— 断言把类型错误一并吞了。
+  那次提交的注释还写着「运行期不劣于原实现」,**这句话是错的**。
+  → 教训:**断言能骗过 tsc,骗不过运行期**;凡是用 `as unknown as` 压掉的类型,
+  都要去查它是不是在掩盖一个真 bug。
+- **修法**(三处一起):
+  1. 脚本内改用 `virtualizer.value.getVirtualItems()` / `.measureElement()` / `.scrollToIndex()`
+  2. **删掉 `as unknown as Virtualizer` 断言** → 让类型系统继续守这条线(vue-tsc 通过)
+  3. 顺手修掉原注释里的已知限制:`count` 之前是**初始长度快照**
+     (options 是普通对象 → vue-virtual 只监听 options 的**对象引用**)→
+     会话消息增减时 count 不重算 → 新消息可能不渲染。
+     正确用法是把整个 options 作为响应式源:`useVirtualizer(computed(() => ({...})))`
+- **回归钉**:`tests/e2e/verification-chat-virtual.spec.ts` 第一条断言就是「不出现红屏」
+
+### DEV-141~143 明细
+
+- **e2e 隔离**:修好后 fresh profile 里 `conversations()` 返回空、侧栏 0 项 —— 隔离真的生效了
+- **首次启动引导**:`completeFirstLaunchGuide()` 放进共享 fixture 的 `window` fixture,
+  **34 个既有 e2e 全部受益**(它们此前依赖被污染的 profile 才能跑通)
+- **已知边界**:侧栏不订阅外部会话变更 → 本批只让验证用例走 UI 路径,不改产品
+
+### 既有 e2e 套件的现状（必须如实说：本批没有让它们变红，也没让它们变绿）
+
+- **全量跑**:`E2E_ELECTRON=1 npx playwright test` → **79 passed / 51 failed**（39.5 分钟）
+- **基线对照**（关键一步）:把 fixture 改动**回退**（`git stash`），
+  用**同一批 5 个 spec**（ui-smoke / theme-toggle / user-journey / i18n-switch /
+  keyboard-shortcuts）再跑一遍 → **14 failed / 26 passed**；
+  恢复修复版 fixture 后跑**同一批** → **14 failed / 26 passed**。
+  **数字完全一致 → 本批的 fixture 改动零回归。**
+- **那 51 个失败是既有问题**,两类:
+  ① **选择器过期** —— UI 改版后没跟上(如 `a.nav-item` × 14 → 现为 `nav-icon` × 7)
+  ② **老 spec 依赖"脏 profile"** —— 它们假设侧栏已有会话/首启引导已关过,
+     在**真·干净 profile** 下自然不成立
+- 涉及文件（13 个):auto-updater / chat-agent / chat-long-conversation / clawhub-browse /
+  diag-sidenav / error-recovery / file-drag-drop / i18n-switch / keyboard-shortcuts /
+  models-crud / network-failure / settings-p7 / theme-toggle / ui-smoke / user-journey
+- **本批不动它们**(不在范围内,且改动它们需要逐个对齐新 UI 语义)。
+  但**修复隔离后这些失败从"被脏数据掩盖"变成"显式暴露"** ——
+  这本身就是本批的一个产出:**问题清单从隐性变成显性**。
+
+### 关单（W5 接线批 · M4-K 真机验证清单自动化，2026-11-09）
+
+- **范围**：DEV-140 ~ DEV-143（4 条）
+- **验证**:
+  - **本批新增 e2e 全绿**:`E2E_ELECTRON=1 npx playwright test tests/e2e/verification-checklist.spec.ts
+    tests/e2e/verification-chat-virtual.spec.ts tests/e2e/verification-proxy.spec.ts`
+    → **8 passed**(D1 D2 D3 D4 D6 E2 + D5 + E1)
+  - **既有 e2e 套件**:**79 passed / 51 failed**;基线对照证明**与本批改动无关**
+    (回退 fixture 跑同一批 spec:14 failed / 26 passed —— 修复版同样 14 failed / 26 passed)
+  - **F1/F2 实跑**:`node scripts/build-report.mjs --ci` → EXIT=0(全部通过);
+    人为把 `dist/assets/vendor-element-plus-*.css` 砍到 200KB → **EXIT=1**,
+    报错明确(element-plus CSS = 195.3 KB < 250KB 下限)→ 随后还原并复验 EXIT=0
+  - vue-tsc: **0**(且是**删掉 `as unknown as` 断言之后**的 0)
+  - 后端 tsc(tsconfig.node.json): 0 error
+- **产物**:`tests/e2e/verification-checklist.spec.ts`(6 例)·
+  `tests/e2e/verification-chat-virtual.spec.ts`(1 例)·
+  `tests/e2e/verification-proxy.spec.ts`(1 例)·
+  `docs/VERIFICATION.md` 新增「二点五、自动化对照表」

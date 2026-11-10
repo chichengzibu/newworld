@@ -5,6 +5,57 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 /**
+ * 走完首次启动引导（4 步 el-dialog）。
+ *
+ * 【为什么必须走】首次启动引导是 `close-on-click-modal=false` +
+ * `close-on-press-escape=false` + `show-close=false` —— **没有任何快捷关闭方式**,
+ * 只能一步步走完。用户不点完,整个界面(侧栏/标题栏/输入区)都被遮罩挡住,
+ * 任何点击都会超时。
+ *
+ * 【为什么现在才遇到】userData 隔离修好之前(e2e 一直写真实 %APPDATA%),
+ * 引导早就被手动关过了 —— 于是"新用户第一次打开"这条路径**从未被测过**。
+ *
+ * @returns 是否真的走过引导(false = 没出现,已跳过)
+ */
+export async function completeFirstLaunchGuide(window: Page): Promise<boolean> {
+  const guide = window.locator('.first-launch-guide')
+  const visible = await guide.isVisible().catch(() => false)
+  if (!visible) return false
+
+  // 步骤 0(欢迎) → 下一步
+  const nextBtn = window.getByRole('button', { name: /下一步/ })
+  if (await nextBtn.count()) await nextBtn.first().click().catch(() => {})
+  await window.waitForTimeout(400)
+
+  // 步骤 1(选模型) → 先选一张卡片,「下一步」才会出现
+  const modelCard = window.locator('.model-option')
+  if (await modelCard.count()) await modelCard.first().click().catch(() => {})
+  await window.waitForTimeout(400)
+  if (await nextBtn.count()) await nextBtn.first().click().catch(() => {})
+  await window.waitForTimeout(400)
+
+  // 步骤 2(权限) → 完成配置
+  const finishCfg = window.getByRole('button', { name: /完成配置/ })
+  if (await finishCfg.count()) await finishCfg.first().click().catch(() => {})
+  await window.waitForTimeout(400)
+
+  // 步骤 3(完成) → 开始使用
+  const start = window.getByRole('button', { name: /开始使用/ })
+  if (await start.count()) await start.first().click().catch(() => {})
+  await window.waitForTimeout(600)
+
+  // 【关键】引导结束后会弹一个「欢迎使用 PiPiClaw!」的 toast,
+  // 它**正好盖在侧栏「新建」按钮上**(实测截图)→ 之后的点击被 toast 吃掉,
+  // 表现为"点了新建但会话没建出来",且**随机**(取决于 toast 是否还在)。
+  // 故:等 toast 消失再放行。
+  await window.locator('.el-message').first()
+    .waitFor({ state: 'detached', timeout: 10_000 })
+    .catch(() => {})
+  await window.waitForTimeout(200)
+  return true
+}
+
+/**
  * 共享 Electron Fixture
  *
  * 用法:
@@ -56,10 +107,16 @@ export const test = base.extend<{
     }
 
     const app = await electron.launch({
-      args: [mainEntry, '--no-sandbox'],
+      // 【M4-K 实测发现】`--user-data-dir` 必须**显式**放进 args ——
+      // Playwright 的 `_electron.launch()` **不支持** `userDataDir` 选项
+      // (只有 `launchPersistentContext` 有),之前 fixture 传的那个字段被**静默忽略** →
+      // 应用一直写真实的 %APPDATA%/pipiclaw,于是:
+      //   ① e2e 污染开发者的真实数据(P0-T0.4「每次测试用全新 userData」从未生效)
+      //   ② 测试之间互相污染 —— 实测侧栏累积到 **192 个会话**,
+      //      侧栏一次渲染 192 项 → DOM 持续重渲染 → Playwright 动作性检查超时 →
+      //      「…」下拉菜单等交互点不动(实测 popper 数恒为 0)
+      args: [mainEntry, '--no-sandbox', `--user-data-dir=${sharedUserDataDir}`],
       cwd: repoRoot,
-      // P0-T0.4: userData 用临时目录,跨 spec 隔离,localStorage 干净
-      userDataDir: sharedUserDataDir,
       env: {
         ...process.env,
         // 强制 WindowManager 走 prod 路径(loadFile dist/index.html),
@@ -86,6 +143,8 @@ export const test = base.extend<{
     await window.waitForSelector('#app', { timeout: 15_000 })
     // 默认跳到 /dashboard。给 router 一拍时间切到目标
     await window.waitForTimeout(500)
+    // fresh profile 下首次启动引导会遮住整个界面 → 先走完它
+    await completeFirstLaunchGuide(window)
     await use(window)
   },
 })

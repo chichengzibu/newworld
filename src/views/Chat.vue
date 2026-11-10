@@ -486,7 +486,7 @@
 
 <script setup lang="ts">
 import { ref, computed, reactive, onMounted, watch, nextTick, onUnmounted } from 'vue';
-import { useVirtualizer, type Virtualizer } from '@tanstack/vue-virtual';
+import { useVirtualizer } from '@tanstack/vue-virtual';
 import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { ElMessage } from "element-plus/es/components/message/index"
@@ -701,32 +701,40 @@ const messagesContainer = ref<HTMLElement | null>(null);
 // ============ 虚拟滚动 (大厂 Chat 体感优化) ============
 // 长对话只渲染可视区 + overscan 缓冲,避免全量 DOM 导致滚动卡顿。
 const messages = computed(() => chatStore.currentConversation?.messages ?? []);
-// 类型清零 (v3 Step A)：@tanstack/vue-virtual d.ts 声明 options.count: number,
-// 且 virtual-core 不 import unref/toValue (不内部解包 count 字段)——
-// 原写法 `count: computed(() => length)` 会把 ComputedRef 塞进 core,
-// `this.options.count - 1` 得 NaN。这里解包成 number,类型正确、运行期不劣于原实现。
+// 【M4-K 修复 —— 这是个藏了 36 天的 P0】
+// `useVirtualizer` 返回的是 **Ref<Virtualizer>**,不是 Virtualizer 实例。
+//   · 模板里写 `virtualizer.getTotalSize()` **没事** —— Vue 模板会自动解包顶层 ref
+//   · 脚本里写 `virtualizer.getVirtualItems()` **必炸** —— 脚本不解包
+// 实测症状:打开任何**有消息的会话** → `getVirtualItems is not a function` →
+// paintFatalError 盖一层全屏红框 → **整个聊天界面不可用**(2026-10-09 引入,
+// 一直带在 master 上;之前没人发现,是因为实跑只覆盖了首屏空状态)。
 //
-// ⚠️ 已知限制 (非本轮引入, 列 backlog)：count 是初始长度快照,
-//   会话消息动态增减时 virtualizer 的 count 不自动重算 (vue-virtual 的
-//   watch 监听 options 对象引用, 不追踪 count 字段值)。彻底修需把整个
-//   options 作为响应式源 (computed 包裹 useVirtualizer 入参)——属行为重构,
-//   超出"类型清零"范围, 留后续批处理。
-const virtualizer = useVirtualizer({
+// 为什么 typecheck 一直是绿的:上一版用 `as unknown as Virtualizer<...>`
+// 断言把类型错误一并吞了。**断言能骗过 tsc,骗不过运行期** —— 现已删掉断言,
+// 让类型系统继续守着这条线。
+//
+// 【顺手修掉原注释里的已知限制】count 之前是**初始长度快照**
+// (options 是普通对象 → vue-virtual 只监听 options 的**对象引用**,不追踪 count 字段)
+// → 会话消息动态增减时 count 不重算 → 新消息可能不渲染。
+// vue-virtual 的正确用法是**把整个 options 作为响应式源**:
+//   useVirtualizer(computed(() => ({...})))
+// 它的 watch(() => unref(options)) 会在 options 变化时 setOptions → count 跟上。
+const virtualizer = useVirtualizer(computed(() => ({
   count: messages.value.length,
   getScrollElement: () => messagesContainer.value,
   estimateSize: () => 140,
   overscan: 8,
   getItemKey: (index) => messages.value[index]?.id ?? index,
-}) as unknown as Virtualizer<HTMLElement, Element>;
+})));
 // 模板 ref 回调的 el 类型偏宽 (Element | ComponentPublicInstance | null),
 // measureElement 只要 Element | null —— 收窄包装 (el 为 null 时返回 null, 组件实例丢弃)
 const measureRow = (el: unknown): void => {
   const node = (el instanceof Element ? el : null) as Element | null
-  virtualizer.measureElement(node)
+  virtualizer.value.measureElement(node)
 }
 // 把每条消息对象挂到虚拟行上,模板用 row.message 访问
 const virtualRows = computed(() =>
-  virtualizer.getVirtualItems().map((vi) => ({
+  virtualizer.value.getVirtualItems().map((vi) => ({
     ...vi,
     message: messages.value[vi.index],
   }))
@@ -974,7 +982,7 @@ function scrollToBottom(force = false, instant = false): void {
       return;
     }
     // 虚拟滚动:滚动到最后一条(对齐底部),流式输出时持续跟随
-    virtualizer.scrollToIndex(len - 1, {
+    virtualizer.value.scrollToIndex(len - 1, {
       align: 'end',
       behavior: instant ? 'auto' : 'smooth',
     });

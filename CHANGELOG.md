@@ -453,6 +453,45 @@ judge 与人的一致度,再放量。本项目还没有人工标注集」。本�
 ④ 模型 tag 写错 → 240 次全失败却只看得出"计入 0 条"。
 共同教训:**指标异常时先看原始输出,别先信指标**;**「算不出来」与「没有关系」必须分开说**
 
+### ✅ 真机验证清单自动化(M4-K)
+
+`docs/VERIFICATION.md` 标着「最近更新 2026-08-12」—— **过期近三个月**,
+D/E 段 10 项全是**人工肉眼确认**。人工确认有两个硬伤:不可回归(M4-H 教训)、
+且只覆盖看得见的(M4-G 遗留 #4 原文「实跑只覆盖了首屏」)。
+
+- **D/E 段逐条自动化** ——
+  `tests/e2e/verification-checklist.spec.ts`(D1 D2 D3 D4 D6 E2)·
+  `tests/e2e/verification-chat-virtual.spec.ts`(D5:55 条消息 + 虚拟滚动)·
+  `tests/e2e/verification-proxy.spec.ts`(E1:代理指向死端口 → 不白屏)
+- **断言对着用户能看到的东西** —— D1 断「每个图标都有非空文案」(M4-G 抓到过的缺陷)·
+  D2 断「窗口控制可见**且有尺寸**」· D3 断「端口号是数字 + running 时圆点真的是绿的」·
+  E2 断「红屏兜底出现**且带着原始错误信息**」
+- **F 段实跑验证** ——
+  F1:`build-report --ci` → EXIT=0;F2:人为把 element-plus CSS 砍到 200KB → **EXIT=1**
+  并报「element-plus CSS = 195.3 KB < 250KB 下限」→ 还原后复验 EXIT=0
+
+**过程中挖出一个带在 master 上一个月的 P0**:
+
+- **P0 · Chat 虚拟列表** ——
+  `useVirtualizer` 返回的是 **`Ref<Virtualizer>`**,不是实例。
+  模板里写 `virtualizer.getTotalSize()` **没事**(Vue 模板自动解包顶层 ref),
+  脚本里写 `virtualizer.getVirtualItems()` **必炸** → `getVirtualItems is not a function`
+  → `paintFatalError` 盖一层全屏红框 → **打开任何有消息的会话,聊天界面就不可用**。
+  自 2026-10-09「平台解耦」那次引入,一直在 master 上;
+  之后的「类型清零」又用 `as unknown as Virtualizer` 断言把类型错误一并吞掉 → **typecheck 一直绿**。
+  没人发现,是因为所有实跑都只停在**首屏空状态**。
+  修:脚本改用 `.value` + **删掉那个断言**(让类型系统继续守)+ 顺手修掉
+  `count` 快照导致的新消息不渲染(把整个 options 作为响应式源)
+- **e2e 的 userData 隔离从未生效** ——
+  Playwright 的 `_electron.launch()` **不支持** `userDataDir` 选项(只有
+  `launchPersistentContext` 有)→ 被静默忽略 → 应用一直写真实 `%APPDATA%` →
+  e2e 污染开发者数据,且测试互相污染(实测侧栏累积 **192 个会话** → DOM 持续重渲染
+  → 交互点不动)。修:显式传 `--user-data-dir`
+- **首次启动引导挡住整个界面** ——
+  4 步 el-dialog,关闭/ESC/遮罩**全关**只能一步步走完;走完后的 toast 还**正好盖住
+  侧栏「新建」按钮** → 之后的点击被吃掉,表现为随机失败。
+  修:共享 fixture 增加 `completeFirstLaunchGuide()`(走完 + 等 toast 消失),34 个既有 e2e 全部受益
+
 ### 📊 验证
 
 vitest 127 files / 1482 passed / 0 FAIL · vue-tsc 0 error · 后端 tsc **0 error**

@@ -65,6 +65,7 @@
 | M4-H | 面板渲染测试（typecheck 通过 ≠ 界面正常 —— 6 个新面板钉成 18 例组件测试） | `NOVA-#009-m4h-panel-render-tests-design.md` |
 | M4-I | 轨迹签名聚类（学习闭环不再只认字面相同的指令 —— 按工具序列分组 + IDF 加权） | `NOVA-#009-m4i-trajectory-clustering-design.md` |
 | **M4-J** | **裁判校准**（M4-F 遗留的最后一环：接两套公开人工标注集 + κ/偏置探针 + 诚实结论；顺带修产品级 bug「ollama thinking 吞 token → 裁判等于没跑」） | `NOVA-#009-m4j-judge-calibration-design.md` |
+| **M4-K** | **真机验证清单自动化**（把 VERIFICATION.md 的 D/E 段人工肉眼项逐条变成 e2e 断言；过程中挖出**带在 master 上一个月的 P0**：打开任何有消息的会话 → Chat 视图整屏红框（`useVirtualizer` 返回 Ref，脚本漏 `.value`；且被 `as unknown as` 断言吞掉，typecheck 一直绿）） | `NOVA-#009-m4k-verification-automation-design.md` |
 
 **构建门禁**（M3-F 引入，此后每批都守着）：
 `[1/5] 主进程 typecheck → [2/5] 渲染进程 typecheck → [3/5] vite build → [4/5] electron-builder → [5/5] build-report`
