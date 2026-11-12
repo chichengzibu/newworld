@@ -26,7 +26,7 @@ test.describe('A5 Computer Use', () => {
   test.skip(!isDev, '/a5-demo is dev-only, skipped in production e2e')
 
   test('A5 demo page renders with instruction input and run button', async ({ window }) => {
-    await window.click('a.nav-item[href$="#/d5-demo"]')
+    await window.click('nav.sidenav a.nav-icon[href$="#/d5-demo"]')
     await window.waitForURL(/#\/d5-demo/)
     // 真正的 A5 demo 在 d5 路由下(项目路由约定)
     // 找页面标题或 demo 容器
@@ -52,7 +52,7 @@ test.describe('A5 Computer Use', () => {
 
   test('A5 sandbox mode runs without auto-execute and shows recorded step', async ({ window }) => {
     test.setTimeout(60_000)
-    await window.click('a.nav-item[href$="#/d5-demo"]')
+    await window.click('nav.sidenav a.nav-icon[href$="#/d5-demo"]')
     await window.waitForURL(/#\/d5-demo/)
 
     // 确保 autoExecute 开关是关闭状态(中英文)
@@ -89,7 +89,7 @@ test.describe('A5 Computer Use', () => {
   })
 
   test('A5 instruction field accepts custom text', async ({ window }) => {
-    await window.click('a.nav-item[href$="#/d5-demo"]')
+    await window.click('nav.sidenav a.nav-icon[href$="#/d5-demo"]')
     await window.waitForURL(/#\/d5-demo/)
 
     const input = window.locator(

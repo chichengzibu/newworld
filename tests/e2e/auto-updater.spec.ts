@@ -53,7 +53,7 @@ test.describe('T+510 Auto-updater 事件流', () => {
   })
 
   test('AU3: About 页显示当前版本', async ({ window }) => {
-    await window.click('a.nav-item[href$="#/settings"]')
+    await window.click('nav.sidenav a.nav-icon[href$="#/settings"]')
     await window.waitForURL(/#\/settings/)
     await window.waitForTimeout(800)
 

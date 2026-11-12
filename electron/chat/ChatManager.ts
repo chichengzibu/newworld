@@ -14,6 +14,7 @@ import { BrowserWindow } from 'electron';
 import { LogManager } from '../core/LogManager';
 import { ChatConfig } from './ChatConfig';
 import { ModelManager } from '../models/ModelManager';
+import { toLlmProviderConfig } from '../models/ModelProvider';
 import { HermesMemory } from '../hermes/HermesMemory';
 import { HermesAdapter, RECALL_CHAT_MIN_SCORE } from '../hermes/HermesAdapter';
 import { TaskExecutor } from '../task/TaskExecutor';
@@ -1222,6 +1223,23 @@ export class ChatManager {
     const conv = this.config.getConversation(conversationId);
     const history = HistoryAssembler.buildHistory(conv?.messages ?? [], '');
 
+    /**
+     * 【M4-L】把会话选中的 provider 解析成 agent 可用的配置。
+     *
+     * 背景:用户自建的 provider 存在 **ModelManager**(设置 → 模型管理),
+     * 而 agent 路径走 **LlmClient** —— 它只认 **LlmConfigStore**,
+     * 且设置页**没有**后者的入口(`/settings/llm-config` 是孤岛路由)。
+     * 两张表不同步 → agent 每次都拿不到 provider →
+     * "no LLM provider configured" → 回落旧管道(每条消息先失败一次)。
+     *
+     * 这里按**会话**把用户选中的那个 provider 翻译成内联配置带下去,
+     * 不写全局表(全局表按类型索引,同类型的多个用户 provider 会互相覆盖)。
+     */
+    const providerId = conv?.providerId ?? undefined;
+    const modelId = conv?.modelId ?? undefined;
+    const mp = providerId ? this.modelManager.getProvider(providerId) : undefined;
+    const inlineProvider = mp ? toLlmProviderConfig(mp) : undefined;
+
     // 记忆上下文:管线召回(无 embedding 配置时 HermesAdapter 返空数组,此处不阻塞主链路)
     let memoryContext = '';
     try {
@@ -1266,6 +1284,9 @@ export class ChatManager {
         contextKind,
         history: history.map(m => ({ role: m.role, content: m.content })),
         ...(memoryContext ? { memoryContext } : {}),
+        // 【M4-L】把会话选中的 provider / model 带进 agent
+        ...(inlineProvider ? { provider: inlineProvider.provider, config: inlineProvider } : {}),
+        ...(modelId ? { model: modelId } : {}),
         // 【M4-E】配对对照:禁用的技能随 ctx 下传,由 load_skill 工具层拒绝
         ...(suppressedSkills.length > 0 ? { suppressedSkills } : {}),
       } as never);

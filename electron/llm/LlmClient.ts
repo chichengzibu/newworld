@@ -16,7 +16,7 @@ import { OpenAiAdapter } from './adapters/openai'
 import { OpenAiCompatibleAdapter } from './adapters/openai-compatible'
 import { AnthropicAdapter } from './adapters/anthropic'
 import { ZhipuAdapter } from './adapters/zhipu'
-import type { LlmRequest, LlmResponse, LlmProvider, LlmStreamChunk, LlmMessage } from './types'
+import type { LlmConfig, LlmRequest, LlmResponse, LlmProvider, LlmStreamChunk, LlmMessage } from './types'
 
 export class LlmClient {
   private static instance: LlmClient
@@ -40,13 +40,23 @@ export class LlmClient {
    * provider 字段值: openai / anthropic / zhipu / openai-compatible.
    */
   async chat(req: LlmRequest): Promise<LlmResponse> {
-    const provider = req.provider ?? this.configStore.getActive()?.provider
+    // 【M4-L】显式配置优先:用户自建的 provider 只存在于 ModelManager,
+    // LlmConfigStore 里没有 → 以前这里必然返回 "no LLM provider configured"。
+    const inline = req.config
+    const provider = inline?.provider ?? req.provider ?? this.configStore.getActive()?.provider
     if (!provider) {
       return { ok: false, provider: 'openai', content: '', model: req.model, durationMs: 0, error: 'no LLM provider configured (set via LlmConfig UI)' }
     }
-    const config = this.configStore.get(provider)
-    if (!config?.enabled || !config.apiKey) {
-      return { ok: false, provider, content: '', model: req.model, durationMs: 0, error: `provider ${provider} not enabled or apiKey missing` }
+    let config: LlmConfig;
+    if (inline) {
+      // 显式配置 = 用户已经配好了,不再要求 LlmConfigStore 里有同名 enabled 条目
+      config = { provider: inline.provider, apiKey: inline.apiKey ?? '', apiBaseUrl: inline.apiBaseUrl, enabled: true, updatedAt: Date.now() };
+    } else {
+      const stored = this.configStore.get(provider);
+      if (!stored?.enabled || !stored.apiKey) {
+        return { ok: false, provider, content: '', model: req.model, durationMs: 0, error: `provider ${provider} not enabled or apiKey missing` };
+      }
+      config = stored;
     }
     void this.bus.publish('llm:request', { provider, model: req.model, msgCount: req.messages.length })
     const response = provider === 'openai' ? await this.openai.chat(config, req)
@@ -62,12 +72,24 @@ export class LlmClient {
    * 当前只 openai / openai-compatible 支持 SSE 流式; anthropic / zhipu 暂走非流式 fallback.
    */
   async *streamChat(req: LlmRequest, signal?: AbortSignal): AsyncGenerator<LlmStreamChunk> {
-    const provider = req.provider ?? this.configStore.getActive()?.provider
+    // 【M4-L】同 chat():显式配置优先(用户自建 provider 的通道)
+    const inline = req.config
+    const provider = inline?.provider ?? req.provider ?? this.configStore.getActive()?.provider
     if (!provider) {
       yield { type: 'error', error: 'no LLM provider configured', provider: 'openai', model: req.model }
       return
     }
-    const config = this.configStore.get(provider)
+    let config: LlmConfig;
+    if (inline) {
+      config = { provider: inline.provider, apiKey: inline.apiKey ?? '', apiBaseUrl: inline.apiBaseUrl, enabled: true, updatedAt: Date.now() };
+    } else {
+      const stored = this.configStore.get(provider);
+      if (!stored?.enabled || !stored.apiKey) {
+        yield { type: 'error', error: `provider ${provider} not enabled or apiKey missing`, provider, model: req.model };
+        return;
+      }
+      config = stored;
+    }
     if (!config?.enabled || !config.apiKey) {
       yield { type: 'error', error: `provider ${provider} not enabled or apiKey missing`, provider, model: req.model }
       return

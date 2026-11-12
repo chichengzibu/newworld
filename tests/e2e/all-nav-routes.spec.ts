@@ -67,7 +67,7 @@ test.describe('All nav routes load without JS errors', () => {
 
       // 通过 SideNav 点击进入(测试 SideNav → router 完整链路)
       // 用正则匹配 nav text,因为可能是中英文
-      const navLink = window.locator(`a.nav-item[href$="${route.path}"]`)
+      const navLink = window.locator(`nav.sidenav a.nav-icon[href$="${route.path}"]`)
       await expect(navLink).toBeVisible({ timeout: 5_000 })
       await navLink.click()
       await window.waitForURL(new RegExp(route.path.replace('/', '\\/') + '$'))

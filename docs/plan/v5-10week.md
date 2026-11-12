@@ -2,7 +2,7 @@
 
 > **总目标**：Agent runtime 跟 ClaudeCode 对齐 + MCP 集成 + 知识库真向量 = 能力超越 ClaudeCode 起点
 > **现状**：v4.4.0 ship 完成（5 P0 安全 + 14 v4.4 视觉），总评 6.5/10
-> **差距**：MCP 0% / 知识库假向量 / Agent 死代码 / 沙箱 stub / LLM 精神分裂
+> **差距**：MCP 0% / 知识库假向量 / Agent 死代码 / 沙箱 stub / ~~LLM 精神分裂~~（M4-L 已修 agent 路径取不到用户 provider 这一半）
 
 ## M1 — v4.5.0-alpha（4 周）
 
@@ -66,6 +66,7 @@
 | M4-I | 轨迹签名聚类（学习闭环不再只认字面相同的指令 —— 按工具序列分组 + IDF 加权） | `NOVA-#009-m4i-trajectory-clustering-design.md` |
 | **M4-J** | **裁判校准**（M4-F 遗留的最后一环：接两套公开人工标注集 + κ/偏置探针 + 诚实结论；顺带修产品级 bug「ollama thinking 吞 token → 裁判等于没跑」） | `NOVA-#009-m4j-judge-calibration-design.md` |
 | **M4-K** | **真机验证清单自动化**（把 VERIFICATION.md 的 D/E 段人工肉眼项逐条变成 e2e 断言；过程中挖出**带在 master 上一个月的 P0**：打开任何有消息的会话 → Chat 视图整屏红框（`useVirtualizer` 返回 Ref，脚本漏 `.value`；且被 `as unknown as` 断言吞掉，typecheck 一直绿）） | `NOVA-#009-m4k-verification-automation-design.md` |
+| **M4-L** | **e2e 套件对齐**（把 M4-K 暴露的 51 个既有 e2e 失败逐条对齐到当前 UI；途中挖出**两个 P0**：悬浮命令按钮压住「发送」按钮（用户点发送点到的是命令按钮）、**LLM 精神分裂**（agent 路径拿不到用户配的 provider → 每条消息先失败一次再回落旧管道） | `NOVA-#009-m4l-e2e-alignment-design.md` |
 
 **构建门禁**（M3-F 引入，此后每批都守着）：
 `[1/5] 主进程 typecheck → [2/5] 渲染进程 typecheck → [3/5] vite build → [4/5] electron-builder → [5/5] build-report`
@@ -83,6 +84,9 @@
 5. **裁判提示词迭代** —— M4-J 实测显示本地小模型裁判的位置敏感度极高
    （换序改口率实测 60%+），下一轮可试：更明确的 rubric 锚点 / 参考答案对比 /
    多次投票取多数（成本换稳定性）
+6. **ClawHub / 模型对比要不要回侧栏**（需产品决策）—— v4.4 把侧栏收成 7 个固定
+   icon 时把这两个入口弄丢了，现在只能从命令面板（Ctrl+K）或 ModelCompare 页的
+   链接进。M4-L 的 e2e 已改成走路由，但**可达性**这件事本身没解决
 
 ## 节点 + ship 对象
 

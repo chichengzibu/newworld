@@ -492,7 +492,37 @@ D/E 段 10 项全是**人工肉眼确认**。人工确认有两个硬伤:不可�
   侧栏「新建」按钮** → 之后的点击被吃掉,表现为随机失败。
   修:共享 fixture 增加 `completeFirstLaunchGuide()`(走完 + 等 toast 消失),34 个既有 e2e 全部受益
 
+### ✅ e2e 套件对齐(M4-L)
+
+M4-K 把「51 个既有 e2e 失败」从隐性变成显性。本批逐条对齐到当前 UI ——
+**途中挖出两个 P0 产品缺陷**。
+
+**修法不是逐个 spec 手改选择器** —— 15 个 spec 各写一份侧栏选择器、各错一次,
+是这批失败的一半来源。改为在共享 fixture 里加 5 个 helper:
+`gotoBySideNav` / `gotoRoute`(侧栏没入口的页面走路由)/ `addProviderAndReload`
+(注入 provider **并刷新页面** —— Chat 只在 onMounted 拉 provider 列表,IPC 塞的不会推过去)/
+`createConversationViaUi` / `selectProviderAndModel`(选中后**验证生效**,不等盲猜)。
+
+- **P0 · 悬浮命令按钮压住「发送」按钮** —— 实测几何:悬浮按钮 x=1132~1256/y=732~776,
+  「发送」x=1176~1256/y=724~784 → **完全重叠**;`elementFromPoint` 命中的是它的
+  `<kbd>⌘K</kbd>`。**用户点发送,点到的是命令按钮。** 修:Chat 路由下把悬浮按钮抬到输入区之上
+- **P0 · LLM 精神分裂(落地版)** —— 用户在「设置 → 模型管理」配的 provider 存在
+  ModelManager,而 agent 路径走 LlmClient(只认 LlmConfigStore,设置页**没有**它的入口)
+  → agent 每次都报 "no LLM provider configured" → **每条消息先失败一次再回落旧管道**
+  (agent loop 实际上从没真正工作过)。修:`LlmRequest` 加显式配置通道,
+  `dispatchToAgent` 按会话把用户选中的 provider 带下去(不写全局表 —— 那按类型索引,会互相覆盖)
+- **浅色主题下 body 背景仍是深色** —— `boot-splash.css` 写死 `#0f1115` 且最后引入,
+  压过了 tokens.css 的 `var(--bg-base)` → 改走 token
+- **填完 prompt 输入框不聚焦** —— `.chat-input` 容器随 `ChatInput.vue` 抽取消失,
+  两处 `querySelector` 成死代码 → 改 `.input-area textarea`
+- **顺带收紧两处「假通过」** —— NW4 的 `deleted >= 2` 在只删 1 个时也会过 → 改 `=== 2`;
+  ui-smoke 的「14 个 nav-item」→ 改逐个入口断存在 + 断 aria-label 非空
+
+**既有 e2e 套件**:79 passed / 51 failed(39.5 分钟)→ **134 passed / 0 failed**(8.7 分钟)。
+耗时掉一半不是变快,是**不再每次渲染 192 个会话**(userData 隔离修好前的残留)。
+
 ### 📊 验证
+
 
 vitest 127 files / 1482 passed / 0 FAIL · vue-tsc 0 error · 后端 tsc **0 error**
 `npm run build` 通过(5 步 · 两道类型检查门禁)并产出安装包 · smoke-test 22 passed / 0 failed

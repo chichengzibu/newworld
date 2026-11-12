@@ -84,7 +84,7 @@ test.describe('T+90 Chat 真链路 send/receive', () => {
     console.log('R2 provider list:', JSON.stringify(providerList))
 
     // 进 Chat
-    await window.click('a.nav-item[href$="#/chat"]').catch(() => {})
+    await window.click('nav.sidenav a.nav-icon[href$="#/chat"]').catch(() => {})
     await window.waitForTimeout(1500)
 
     // 优先点 sidebar 已有的会话(用 .conversation-item 第一个,而不是 new-chat)
@@ -169,7 +169,7 @@ test.describe('T+90 Chat 真链路 send/receive', () => {
     await window.waitForSelector('#app', { timeout: 10_000 })
     await window.waitForTimeout(1200)
 
-    await window.click('a.nav-item[href$="#/chat"]').catch(() => {})
+    await window.click('nav.sidenav a.nav-icon[href$="#/chat"]').catch(() => {})
     await window.waitForTimeout(1500)
 
     // 点现有会话

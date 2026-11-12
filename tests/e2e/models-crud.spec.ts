@@ -25,13 +25,13 @@ test.describe('T+60 设置 → 模型管理 CRUD', () => {
   test.skip(!shouldRunElectronE2E, 'requires E2E_ELECTRON=1')
 
   test('M1: 进 Settings 页', async ({ window }) => {
-    await window.click('a.nav-item[href$="#/settings"]')
+    await window.click('nav.sidenav a.nav-icon[href$="#/settings"]')
     await window.waitForURL(/#\/settings/)
     await expect(window.locator('h1.page-title').first()).toBeVisible({ timeout: 10_000 })
   })
 
   test('M2: 切到模型管理 tab', async ({ window }) => {
-    await window.click('a.nav-item[href$="#/settings"]')
+    await window.click('nav.sidenav a.nav-icon[href$="#/settings"]')
     await window.waitForURL(/#\/settings/)
     const modelsTab = window.locator('.settings-nav__btn:has-text("模型管理"), .settings-nav__btn:has-text("Models")').first()
     await modelsTab.click()
@@ -42,7 +42,7 @@ test.describe('T+60 设置 → 模型管理 CRUD', () => {
   })
 
   test('M3: 点"添加提供商"按钮 → 打开对话框', async ({ window }) => {
-    await window.click('a.nav-item[href$="#/settings"]')
+    await window.click('nav.sidenav a.nav-icon[href$="#/settings"]')
     await window.waitForURL(/#\/settings/)
     const modelsTab = window.locator('.settings-nav__btn:has-text("模型管理"), .settings-nav__btn:has-text("Models")').first()
     await modelsTab.click()
@@ -56,7 +56,7 @@ test.describe('T+60 设置 → 模型管理 CRUD', () => {
   })
 
   test('M4: 对话框有完整的表单字段(名称 / 类型 / URL / API Key / 模型)', async ({ window }) => {
-    await window.click('a.nav-item[href$="#/settings"]')
+    await window.click('nav.sidenav a.nav-icon[href$="#/settings"]')
     await window.waitForURL(/#\/settings/)
     const modelsTab = window.locator('.settings-nav__btn:has-text("模型管理"), .settings-nav__btn:has-text("Models")').first()
     await modelsTab.click()
@@ -74,7 +74,7 @@ test.describe('T+60 设置 → 模型管理 CRUD', () => {
   })
 
   test('M5: 必填项为空时 → 提交按钮报错(或 dialog 不关闭)', async ({ window }) => {
-    await window.click('a.nav-item[href$="#/settings"]')
+    await window.click('nav.sidenav a.nav-icon[href$="#/settings"]')
     await window.waitForURL(/#\/settings/)
     const modelsTab = window.locator('.settings-nav__btn:has-text("模型管理"), .settings-nav__btn:has-text("Models")').first()
     await modelsTab.click()
@@ -93,7 +93,7 @@ test.describe('T+60 设置 → 模型管理 CRUD', () => {
   })
 
   test('M6: 关闭对话框 → 取消按钮工作', async ({ window }) => {
-    await window.click('a.nav-item[href$="#/settings"]')
+    await window.click('nav.sidenav a.nav-icon[href$="#/settings"]')
     await window.waitForURL(/#\/settings/)
     const modelsTab = window.locator('.settings-nav__btn:has-text("模型管理"), .settings-nav__btn:has-text("Models")').first()
     await modelsTab.click()
@@ -117,7 +117,7 @@ test.describe('T+60 设置 → 模型管理 CRUD', () => {
   })
 
   test('M7: 现有 provider 列表显示 enabled/disable 状态', async ({ window }) => {
-    await window.click('a.nav-item[href$="#/settings"]')
+    await window.click('nav.sidenav a.nav-icon[href$="#/settings"]')
     await window.waitForURL(/#\/settings/)
     const modelsTab = window.locator('.settings-nav__btn:has-text("模型管理"), .settings-nav__btn:has-text("Models")').first()
     await modelsTab.click()
@@ -129,7 +129,7 @@ test.describe('T+60 设置 → 模型管理 CRUD', () => {
   })
 
   test('M8: 现有 provider 有 toggle 开关', async ({ window }) => {
-    await window.click('a.nav-item[href$="#/settings"]')
+    await window.click('nav.sidenav a.nav-icon[href$="#/settings"]')
     await window.waitForURL(/#\/settings/)
     const modelsTab = window.locator('.settings-nav__btn:has-text("模型管理"), .settings-nav__btn:has-text("Models")').first()
     await modelsTab.click()

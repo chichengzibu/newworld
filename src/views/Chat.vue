@@ -635,7 +635,7 @@ async function handleQuickPrompt(p: { prompt: string }): Promise<void> {
     inputMessage.value = p.prompt
     ElMessage.success('已创建新对话,prompt 已填入')
     nextTick(() => {
-      const el = document.querySelector('.chat-input textarea') as HTMLTextAreaElement | null
+      const el = document.querySelector('.input-area textarea') as HTMLTextAreaElement | null
       el?.focus()
     })
   }
@@ -940,7 +940,7 @@ function handleFillChat(e: CustomEvent<{ text: string }>): void {
   const text = e.detail?.text || ''
   inputMessage.value = text
   nextTick(() => {
-    const el = document.querySelector('.chat-input textarea') as HTMLTextAreaElement | null
+    const el = document.querySelector('.input-area textarea') as HTMLTextAreaElement | null
     el?.focus()
   })
 }

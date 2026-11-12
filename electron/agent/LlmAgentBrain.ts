@@ -20,7 +20,7 @@ import { listMcpTools, syncMcpTools, MCP_NAME_SEPARATOR } from './McpToolAdapter
 import { RetryPolicy } from './RetryPolicy'
 import { SkillLoader } from '../skill/SkillLoader'
 import type { PiPiTool, ToolExecResult } from './tools'
-import type { LlmMessage, LlmToolCall, LlmStreamChunk } from '../llm/types'
+import type { InlineLlmConfig, LlmMessage, LlmToolCall, LlmStreamChunk } from '../llm/types'
 import type { AgentBrain, AgentContext, Decision, ToolCall, ToolResult, SubTask, SubAgent } from '../contracts/types'
 
 const MAX_ITERATIONS = 10
@@ -234,6 +234,9 @@ export class LlmAgentBrain implements AgentBrain {
     runId?: string
     model?: string
     provider?: 'openai' | 'openai-compatible' | 'anthropic' | 'zhipu'
+    /** 【M4-L】按会话带下来的 provider 配置(用户自建 provider 走 ModelManager,
+     *  LlmConfigStore 里没有 → 以前 agent 路径必然报 "no LLM provider configured") */
+    config?: InlineLlmConfig
     tools?: string[]
     maxIterations?: number
     systemPrompt?: string
@@ -441,6 +444,8 @@ export class LlmAgentBrain implements AgentBrain {
             llmSchema, iter, runId, controller.signal, {
               provider: opts.provider,
               model: opts.model ?? DEFAULT_MODEL,
+              // 【M4-L】把会话的 provider 配置一并带下去
+              ...(opts.config ? { config: opts.config } : {}),
             },
           ),
           `llm-call iter=${iter}`,
@@ -576,7 +581,7 @@ export class LlmAgentBrain implements AgentBrain {
     iter: number,
     runId: string,
     signal: AbortSignal,
-    opts: { provider?: 'openai' | 'openai-compatible' | 'anthropic' | 'zhipu'; model: string }
+    opts: { provider?: 'openai' | 'openai-compatible' | 'anthropic' | 'zhipu'; model: string; config?: InlineLlmConfig }
   ): Promise<{ content: string; reasoning: string; toolCalls: LlmToolCall[]; error?: string; totalTokens?: number; promptTokens?: number; completionTokens?: number }> {
     const req = {
       model: opts.model,
@@ -584,6 +589,8 @@ export class LlmAgentBrain implements AgentBrain {
       tools: llmSchema,
       toolChoice: 'auto' as const,
       provider: opts.provider,
+      // 【M4-L】显式配置优先于 provider 查表
+      ...(opts.config ? { config: opts.config } : {}),
     }
     let content = ''
     let reasoning = ''
@@ -648,6 +655,15 @@ export class LlmAgentBrain implements AgentBrain {
       const ckpt = (ctx as { checkpoint?: (ev: RunCheckpointEvent) => void }).checkpoint
       const runOpts: Parameters<typeof this.run>[1] = {}
       if (history) runOpts.history = history
+      // 【M4-L】会话层把「用户选中的 provider」透传下来:
+      // 用户自建的 provider 只在 ModelManager 里,agent 路径走 LlmClient
+      // (只认 LlmConfigStore)→ 以前这里永远拿不到 provider。
+      const ctxProvider = (ctx as { provider?: 'openai' | 'openai-compatible' | 'anthropic' | 'zhipu' }).provider
+      const ctxModel = (ctx as { model?: string }).model
+      const ctxConfig = (ctx as { config?: InlineLlmConfig }).config
+      if (ctxProvider) runOpts.provider = ctxProvider
+      if (ctxModel) runOpts.model = ctxModel
+      if (ctxConfig) runOpts.config = ctxConfig
       if (ckpt) runOpts.checkpoint = ckpt
       if (ctx.conversationId) runOpts.conversationId = String(ctx.conversationId)
       // 【W5 接线 · M1-C】会话层预分配的 runId:必须在 run() 生成默认 runId 之前透传,

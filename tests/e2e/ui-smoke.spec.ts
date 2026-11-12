@@ -33,42 +33,45 @@ test.describe('UI interaction smoke test', () => {
   })
 
   test('navigate through main pages', async ({ window }) => {
-    // 1. SideNav 应该有 14 个 nav-item(v4.2+ 列表)
-    const navItems = window.locator('a.nav-item')
-    await expect(navItems).toHaveCount(14, { timeout: 10_000 })
+    // 【v4.4 起】侧栏是 icon-only rail:`nav.sidenav > a.nav-icon`,
+    // 没有可见文字 —— 旧的 `a.nav-item` × 14 断言永远不成立。
+    // 改按**入口是否齐 + 每个入口有没有文案**来断(后者是 M4-G 实跑抓到的真实缺陷)。
+    const navItems = window.locator('nav.sidenav a.nav-icon')
+    await expect(navItems).toHaveCount(8, { timeout: 10_000 })
 
-    // 2. 验证每个 nav-item 的文本(英文) — v4.2+ SideNav 列表
-    const expectedNavTexts = [
-      'Dashboard', 'AI Chat', 'Skills', 'ClawHub', 'Models',
-      'Model Compare', 'IM Management', 'Automation Tasks', 'Schedule',
-      'Permissions', 'Plugin Market', 'Remote Control', 'Settings', 'Help',
+    // 2. 逐个入口都在 + 都有非空文案(aria-label 走 i18n)
+    const expectedPaths = [
+      '#/chat', '#/models', '#/skills', '#/im-management', '#/schedule',
+      '#/search', '#/voice', '#/settings',
     ]
-    for (const text of expectedNavTexts) {
-      const item = window.locator(`a.nav-item:has-text("${text}")`)
+    for (const p of expectedPaths) {
+      const item = window.locator(`nav.sidenav a.nav-icon[href$="${p}"]`)
+      await expect(item, `侧栏缺入口 ${p}`).toHaveCount(1)
       await expect(item).toBeVisible({ timeout: 5_000 })
+      await expect(item).toHaveAttribute('aria-label', /\S+/)
     }
 
     // 截图 SideNav
     await window.screenshot({ path: 'test-results/ui-smoke-sidenav.png' })
 
     // 3. 点击"Models",验证跳转
-    await window.click('a.nav-item:has-text("Models")')
+    await window.click('nav.sidenav a.nav-icon[href$="#/models"]')
     await window.waitForURL(/#\/models/, { timeout: 5_000 })
     await expect(window.locator('.models-page').first()).toBeVisible({ timeout: 5_000 })
 
     // 4. 点击"Settings"
-    await window.click('a.nav-item:has-text("Settings")')
+    await window.click('nav.sidenav a.nav-icon[href$="#/settings"]')
     await window.waitForURL(/#\/settings/, { timeout: 5_000 })
     await expect(window.locator('.settings-page, [class*="settings-view"]').first()).toBeVisible({ timeout: 5_000 })
 
     // 5. 回到 AI Chat
-    await window.click('a.nav-item:has-text("AI Chat")')
+    await window.click('nav.sidenav a.nav-icon[href$="#/chat"]')
     await window.waitForURL(/#\/chat/, { timeout: 5_000 })
   })
 
   test('chat flow: new conversation + type message', async ({ window }) => {
     // 通过 SideNav 导航到 /chat
-    await window.click('a.nav-item:has-text("AI Chat")')
+    await window.click('nav.sidenav a.nav-icon[href$="#/chat"]')
     await window.waitForURL(/#\/chat/, { timeout: 5_000 })
 
     // 找到"New Chat"按钮并点击
@@ -91,24 +94,23 @@ test.describe('UI interaction smoke test', () => {
   })
 
   test('language switcher in SideNav works', async ({ window }) => {
-    // 找到语言切换下拉框
-    const langSwitcher = window.locator('.lang-switcher').first()
-    await expect(langSwitcher).toBeVisible({ timeout: 5_000 })
+    // 【v4.4 起】语言切换器**不在侧栏了** —— 侧栏是 icon-only rail,
+    // 语言选择挪到了「设置 → 基本设置 → 界面语言」的 radio 组。
+    await window.click('nav.sidenav a.nav-icon[href$="#/settings"]')
+    await window.waitForTimeout(1000)
+
+    const langSwitcher = window.locator('.radio-group .radio').filter({ hasText: /English|中文/ }).first()
+    await expect(langSwitcher).toBeVisible({ timeout: 10_000 })
 
     // 截图切换前
     await window.screenshot({ path: 'test-results/ui-smoke-lang-zh.png' })
 
-    // 尝试切换到 English
-    const selectEl = window.locator('.lang-switcher select').first()
-    if (await selectEl.count() > 0) {
-      await selectEl.selectOption('en-US')
-    } else {
-      // Element Plus 下拉:点击 -> 选 option
-      await langSwitcher.click()
-      await window.waitForTimeout(300)
-      await window.locator('.el-select-dropdown__item:has-text("English")').first().click()
-    }
-    await window.waitForTimeout(500)
+    // 切到 English
+    await window.locator('.radio-group .radio:has-text("English")').first().click()
+    await window.waitForTimeout(800)
+
+    // 切完侧栏图标文案应变英文(icon-only 侧栏的 i18n 信号在 aria-label)
+    await expect(window.locator('nav.sidenav a.nav-icon[aria-label="AI Chat"]')).toHaveCount(1)
 
     // 截图切换后
     await window.screenshot({ path: 'test-results/ui-smoke-lang-en.png' })

@@ -1,7 +1,14 @@
 /* 启动骨架屏:基础 reset + boot-spin 旋转动画
    独立文件,避免 vite 6.4.x 的 html-inline-proxy plugin 在 <style> 块上挂掉 */
 
-html, body { margin: 0; padding: 0; height: 100%; background: #0f1115; }
+/* 【M4-L 修】背景色改成走主题 token。
+   原来写死 `background: #0f1115`,而本文件在 main.ts 里**最后引入**
+   (reset → global(含 tokens) → boot-splash)→ 它压过了 tokens.css 的
+   `body { background: var(--bg-base) }` → **浅色主题下 body 仍是深色**
+   (实测 rgb(15,17,21),与主题无关)。
+   改用 token 后:浅色 → #ffffff / 深色 → #000000 / 跟随系统 → 跟随 OS。
+   保留 #0f1115 作 fallback:token 未定义时(极早期首帧)不至于透明。 */
+html, body { margin: 0; padding: 0; height: 100%; background: var(--bg-base, #0f1115); }
 #app { height: 100%; }
 
 .boot-spinner {

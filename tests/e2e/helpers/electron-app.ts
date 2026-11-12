@@ -71,13 +71,137 @@ export async function completeFirstLaunchGuide(window: Page): Promise<boolean> {
  * - 工作目录为仓库根(相对 __dirname 解析)
  * - 启动时加 --no-sandbox,Windows / Linux CI 容器需要
  * - 超时 30s(electron 冷启动 5-15s,首窗加载再加 3-5s)
- * - P0-T0.4: 默认 fresh=true,每次测试用全新 userData 目录,
- *   避免 localStorage / ConfigStore 跨测试污染
+ * - userData 走临时目录(见下方 `--user-data-dir` 说明),跨 spec 隔离
  *
  * 跳过策略:
  * - E2E_ELECTRON=1 才跑(默认 CI 不跑,本地手动跑)
  * - 必须先 build:`npm run build` 生成 dist-electron/main.js
  */
+
+/**
+ * 侧栏导航 —— v4.4 改版后侧栏是 **icon-only rail**:
+ *   `nav.sidenav > a.nav-icon`(不再是旧版的 `a.nav-item` 文本列表)
+ * 统一走这个 helper,免得每个 spec 各写一份选择器、各错一次。
+ */
+export async function gotoBySideNav(window: Page, path: string): Promise<void> {
+  const link = window.locator(`nav.sidenav a.nav-icon[href$="#${path}"]`).first()
+  await link.waitFor({ state: 'visible', timeout: 15_000 })
+  await link.click()
+  await window.waitForURL(new RegExp(`#${path.replace('/', '\\/')}`), { timeout: 10_000 })
+}
+
+/**
+ * 直接跳路由 —— 用于**侧栏没有入口**的页面(如 /clawhub 只在命令面板与
+ * ModelCompare 里有入口)。比点不存在的导航项诚实。
+ */
+export async function gotoRoute(window: Page, path: string): Promise<void> {
+  await window.evaluate((p: string) => { window.location.hash = p }, path)
+  await window.waitForURL(new RegExp(`#${path.replace('/', '\\/')}`), { timeout: 10_000 })
+  await window.waitForTimeout(600)
+}
+
+/**
+ * 注入 provider 并让渲染层拿到它。
+ *
+ * 【为什么必须 reload】
+ * `Chat.vue` 只在 `onMounted` 调 `modelsStore.fetchProviders()`。
+ * 通过 IPC 加的 provider **不会**推给渲染层 → 模型选择器里没有可选项 →
+ * `el-select` 一直是 disabled → 点击等到超时(实测整个用例 60s 超时,
+ * 报错却是 "browser has been closed" —— 那是超时被中断的后果,不是根因)。
+ * 真实用户路径不受影响(他在 Settings 页加,同一个 store 会刷新)。
+ * 故:e2e 里加完 provider **必须刷新页面**让 store 重新拉。
+ */
+export async function addProviderAndReload(window: Page, provider: {
+  name: string
+  type?: string
+  baseUrl: string
+  apiKey?: string
+  timeout?: number
+  models?: Array<{ id: string; name: string; capabilities?: string[] }>
+}): Promise<string> {
+  const id = await window.evaluate(async (p) => {
+    const api = (window as any).electronAPI
+    const list = await api.models.list()
+    for (const old of list?.data || []) {
+      if (old.name === p.name) await api.models.delete(old.id)
+    }
+    const r = await api.models.add({
+      name: p.name,
+      type: p.type || 'openai',
+      baseUrl: p.baseUrl,
+      apiKey: p.apiKey || 'no-key',
+      enabled: true,
+      timeout: p.timeout ?? 10_000,
+      models: p.models ?? [{ id: 'fake-model', name: 'fake-model', capabilities: ['chat'] }],
+    })
+    return r?.data?.id ?? null
+  }, provider)
+  if (!id) throw new Error(`注入 provider 失败:${provider.name}`)
+  // 让渲染层重新拉 provider 列表
+  await window.reload({ waitUntil: 'domcontentloaded' })
+  await window.waitForSelector('#app', { timeout: 15_000 })
+  await window.waitForTimeout(800)
+  return id
+}
+
+/**
+ * 建一个会话(走 UI 的「新建」按钮 —— 与真实用户同一条路径)。
+ *
+ * 【为什么不用 IPC 建】
+ * 通过 IPC `chat.createConversation` 建的会话**侧栏不刷新**
+ * (store 只在挂载时拉一次 + 响应自己的 action)→ 侧栏看不到新会话。
+ */
+export async function createConversationViaUi(window: Page): Promise<void> {
+  const btn = window.locator('button.new-chat-btn')
+  await btn.waitFor({ state: 'visible', timeout: 15_000 })
+  await btn.click()
+  await window.waitForTimeout(1000)
+}
+
+/**
+ * 在模型选择器里选 provider + model(两个 el-select,第一个是 provider)。
+ */
+export async function selectProviderAndModel(
+  window: Page,
+  providerText: string,
+  modelText: string,
+): Promise<void> {
+  const providerSelect = window.locator('.model-selector .el-select').first()
+  await providerSelect.click()
+  await window.waitForTimeout(500)
+  const providerOpt = window.locator(`.el-select-dropdown__item:has-text("${providerText}")`).first()
+  await providerOpt.click()
+
+  // 【必须验证选中生效,不能盲等】选 provider 会走 `setCurrentModel(provider, '')`,
+  // 它先把 `lastProviderId` 同步设上、再 **await** 会话更新 —— 期间如果就去点 model,
+  // model 的 setter 读到的 provider 可能还是旧的 → 会话里只记了 model 没记 provider
+  // → 发送时报 "no LLM provider configured"(实测踩到)。
+  // 故:等选择框真的显示出该 provider 的名字,再动 model。
+  await window.waitForFunction(
+    (text: string) => {
+      const sels = document.querySelectorAll('.model-selector .el-select')
+      return ((sels[0] as HTMLElement)?.textContent ?? '').includes(text)
+    },
+    providerText,
+    { timeout: 15_000 },
+  )
+
+  const modelSelect = window.locator('.model-selector .el-select').nth(1)
+  await modelSelect.waitFor({ state: 'visible', timeout: 15_000 })
+  await modelSelect.click()
+  await window.waitForTimeout(500)
+  const opt = window.locator(`.el-select-dropdown__item:has-text("${modelText}")`).first()
+  await opt.click()
+  await window.waitForFunction(
+    (text: string) => {
+      const sels = document.querySelectorAll('.model-selector .el-select')
+      return ((sels[1] as HTMLElement)?.textContent ?? '').includes(text)
+    },
+    modelText,
+    { timeout: 15_000 },
+  )
+  await window.waitForTimeout(500)
+}
 
 const repoRoot = path.resolve(__dirname, '..', '..', '..')
 const mainEntry = path.join(repoRoot, 'dist-electron', 'main.js')

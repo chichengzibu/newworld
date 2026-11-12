@@ -1,4 +1,4 @@
-import { test, expect, shouldRunElectronE2E } from './helpers/electron-app'
+import { test, expect, shouldRunElectronE2E, gotoRoute } from './helpers/electron-app'
 
 /**
  * T+240: ClawHub 技能市场真用户测试
@@ -16,8 +16,9 @@ test.describe('T+240 ClawHub 技能市场', () => {
   test.skip(!shouldRunElectronE2E, 'requires E2E_ELECTRON=1')
 
   test('CB1: 进 ClawHub → 默认 tab 是"浏览市场"', async ({ window }) => {
-    await window.click('a.nav-item[href$="#/clawhub"]')
-    await window.waitForURL(/#\/clawhub/)
+    // 【v4.4 起】ClawHub **没有侧栏入口**(侧栏收成 7 个固定 icon 时丢了它),
+    // 现在只能从命令面板(Ctrl+K)或 ModelCompare 页的链接进入 → 这里走路由。
+    await gotoRoute(window, '/clawhub')
     await window.waitForTimeout(800)
 
     // 验证页面有 h1(ClawHub 标题)
@@ -31,8 +32,9 @@ test.describe('T+240 ClawHub 技能市场', () => {
   })
 
   test('CB2: 浏览市场 tab 有 skill 列表或空状态', async ({ window }) => {
-    await window.click('a.nav-item[href$="#/clawhub"]')
-    await window.waitForURL(/#\/clawhub/)
+    // 【v4.4 起】ClawHub **没有侧栏入口**(侧栏收成 7 个固定 icon 时丢了它),
+    // 现在只能从命令面板(Ctrl+K)或 ModelCompare 页的链接进入 → 这里走路由。
+    await gotoRoute(window, '/clawhub')
     await window.waitForTimeout(800)
 
     // skill grid 或 empty state
@@ -41,8 +43,9 @@ test.describe('T+240 ClawHub 技能市场', () => {
   })
 
   test('CB3: 切到"发布技能" tab', async ({ window }) => {
-    await window.click('a.nav-item[href$="#/clawhub"]')
-    await window.waitForURL(/#\/clawhub/)
+    // 【v4.4 起】ClawHub **没有侧栏入口**(侧栏收成 7 个固定 icon 时丢了它),
+    // 现在只能从命令面板(Ctrl+K)或 ModelCompare 页的链接进入 → 这里走路由。
+    await gotoRoute(window, '/clawhub')
     await window.waitForTimeout(800)
     const publishTab = window.locator('.el-tabs__item:has-text("发布技能"), .el-tabs__item:has-text("Publish")').first()
     await publishTab.click()
@@ -57,8 +60,9 @@ test.describe('T+240 ClawHub 技能市场', () => {
   })
 
   test('CB4: 切到"审核队列" tab', async ({ window }) => {
-    await window.click('a.nav-item[href$="#/clawhub"]')
-    await window.waitForURL(/#\/clawhub/)
+    // 【v4.4 起】ClawHub **没有侧栏入口**(侧栏收成 7 个固定 icon 时丢了它),
+    // 现在只能从命令面板(Ctrl+K)或 ModelCompare 页的链接进入 → 这里走路由。
+    await gotoRoute(window, '/clawhub')
     await window.waitForTimeout(800)
     const reviewTab = window.locator('.el-tabs__item:has-text("审核队列"), .el-tabs__item:has-text("Review")').first()
     await reviewTab.click()
@@ -73,8 +77,9 @@ test.describe('T+240 ClawHub 技能市场', () => {
   })
 
   test('CB5: 切到"技能模板" tab → 看到模板列表', async ({ window }) => {
-    await window.click('a.nav-item[href$="#/clawhub"]')
-    await window.waitForURL(/#\/clawhub/)
+    // 【v4.4 起】ClawHub **没有侧栏入口**(侧栏收成 7 个固定 icon 时丢了它),
+    // 现在只能从命令面板(Ctrl+K)或 ModelCompare 页的链接进入 → 这里走路由。
+    await gotoRoute(window, '/clawhub')
     await window.waitForTimeout(800)
     const templatesTab = window.locator('.el-tabs__item:has-text("技能模板"), .el-tabs__item:has-text("Templates")').first()
     await templatesTab.click()
@@ -90,8 +95,9 @@ test.describe('T+240 ClawHub 技能市场', () => {
   })
 
   test('CB6: 技能模板"实例化"按钮工作', async ({ window }) => {
-    await window.click('a.nav-item[href$="#/clawhub"]')
-    await window.waitForURL(/#\/clawhub/)
+    // 【v4.4 起】ClawHub **没有侧栏入口**(侧栏收成 7 个固定 icon 时丢了它),
+    // 现在只能从命令面板(Ctrl+K)或 ModelCompare 页的链接进入 → 这里走路由。
+    await gotoRoute(window, '/clawhub')
     await window.waitForTimeout(800)
     const templatesTab = window.locator('.el-tabs__item:has-text("技能模板"), .el-tabs__item:has-text("Templates")').first()
     await templatesTab.click()

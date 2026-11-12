@@ -1455,3 +1455,86 @@
   `tests/e2e/verification-chat-virtual.spec.ts`(1 例)·
   `tests/e2e/verification-proxy.spec.ts`(1 例)·
   `docs/VERIFICATION.md` 新增「二点五、自动化对照表」
+
+---
+
+## W5 接线批偏差登记 · M4-L e2e 套件对齐（2026-11-11）
+
+> M4-K 把「51 个既有 e2e 失败」从隐性变成显性。本批把它们逐条对齐到当前 UI，
+> **途中挖出三个真实产品缺陷**（其中两个 P0）。
+> 编号自 DEV-144 起。完整设计见 `docs/NOVA-#009-m4l-e2e-alignment-design.md`。
+
+| ID | 状态 | 摘要 |
+|---|---|---|
+| DEV-144 | 已修 | **P0 · 悬浮命令按钮压住「发送」按钮** ★ · `button.floating-cmd-btn` 是 `position:fixed; bottom:24px; right:24px`，而 Chat 的输入区高 **125px**、「发送」按钮位于 724~784px —— 两者**完全重叠**（实测 `elementFromPoint` 命中的是它的 `<kbd>⌘K</kbd>`）。**用户点发送，点到的是命令按钮**。修：Chat 路由下把悬浮按钮抬到输入区之上（`bottom:140px`） |
+| DEV-145 | 已修 | **P0 · LLM 精神分裂：agent 路径拿不到用户配的 provider** ★ · 用户自建的 provider 存在 **ModelManager**（设置 → 模型管理），而 agent 路径走 **LlmClient** —— 它只认 **LlmConfigStore**，且设置页**没有**后者的入口（`/settings/llm-config` 是孤岛路由）。两张表不同步 → agent 每次都报 "no LLM provider configured" → **每条消息先失败一次再回落旧管道**（agent loop 实际上从没真正工作过）。修：`LlmRequest` 加**显式配置通道**（`config`），`ChatManager.dispatchToAgent` 按会话把用户选中的 provider 翻译成内联配置带下去 |
+| DEV-146 | 已修 | **浅色主题下 body 背景仍是深色** · `src/styles/boot-splash.css` 把 `html, body` 背景**写死** `#0f1115`，而它在 main.ts 里**最后引入**（reset → global(含 tokens) → boot-splash）→ 压过了 tokens.css 的 `body { background: var(--bg-base) }` → 切主题时 body 背景纹丝不动。修：改走 token `var(--bg-base, #0f1115)` |
+| DEV-147 | 已修 | **填完 prompt 输入框不自动聚焦** · UI 抽取 `ChatInput.vue` 后 `.chat-input` 容器已消失，Chat.vue 里两处 `querySelector('.chat-input textarea')` 变成死代码 → 文本填进去了、焦点没了。修：选择器改 `.input-area textarea` |
+| DEV-148 | 已修 | **既有 e2e 套件与当前 UI 全面失配（51 个用例）** · 根因三类：① 侧栏从文本列表改成 icon-only rail（`a.nav-item` → `nav.sidenav a.nav-icon`），② 老 spec 依赖「脏 profile」（跨 spec 共享 userData 才有历史会话 / 首启引导已关过），③ 断言的是**已经不存在的元素**（状态栏 / 主题按钮 / 语言 combobox / 侧栏 ClawHub 入口）。修：逐条对齐 —— 侧栏改按 href 断言、缺历史就自己造（mock LLM）、无入口的页面改走路由 |
+
+### DEV-144 明细（P0：发送按钮被压住）
+
+- **实测几何**（1280×800）：悬浮命令按钮 x=1132~1256 / y=732~776；
+  「发送」按钮 x=1176~1256 / y=724~784 → **重叠**；
+  `document.elementFromPoint(发送按钮中心)` 返回 `KBD`（即悬浮按钮里的 `⌘K`）。
+- **为什么没被发现**：e2e 里点发送一直被 Playwright 判成 "intercepts pointer events"，
+  报错指向「点击超时」，读起来像选择器问题 —— 实际是**产品缺陷**。
+- **修法**：Chat 路由下把悬浮按钮抬到输入区之上（`bottom:140px`）。
+  不用「输入区让位」（padding-right）：那会在输入框右侧留一条 140px 的空档。
+
+### DEV-145 明细（P0：LLM 精神分裂，落地版）
+
+- **症状**：用户在「设置 → 模型管理」配好 provider、聊天里选它 → 发送 →
+  气泡显示 "agent 执行失败:no LLM provider configured"，然后**回落旧管道**才出正常回答。
+- **三层错配**：
+  ① **两张表**：ModelManager（用户配的）vs LlmConfigStore（LlmClient 只认这张）
+  ② **入口**：设置页只有 basic / models / mcp / memory / about 五个 tab，
+     **没有 LlmConfigStore 的入口**（`/settings/llm-config` 是孤岛路由）
+  ③ **调用**：agent 路径调 `think()` 时**根本没把会话的 provider/model 传下去**
+- **修法**（additive，不动既有路径）：
+  ① `LlmRequest` 增 `config?: InlineLlmConfig` —— 显式配置优先于 provider 查表
+  ② `electron/models/ModelProvider.ts` 增 `toLlmProviderConfig()` ——
+     类型映射 + ollama 的 baseUrl 补 `/v1`
+  ③ `LlmAgentBrain.run/think` 透传 `provider / model / config`
+  ④ `ChatManager.dispatchToAgent` 按**会话**解析 provider → 内联配置带下去
+- **为什么不写全局表**：LlmConfigStore 按 provider **类型**索引，
+  同类型的多个用户 provider 会互相覆盖；按会话带才正确。
+- **回归钉**：`tests/unit/llm/provider-bridge.test.ts`（10 例）
+  + e2e `error-recovery` ER1/ER2（ER2 现在能拿到本地 ollama 的**真回复**）
+
+### DEV-146~147 明细
+
+- **DEV-146**：body 背景写死 `#0f1115`（实测切到浅色后仍是 `rgb(15,17,21)`）→
+  改走 `var(--bg-base, #0f1115)`，浅色 → `#ffffff` / 深色 → `#000000` / 跟随系统 → 跟随 OS
+- **DEV-147**：两处 `querySelector('.chat-input textarea')` 死代码 → 改 `.input-area textarea`
+
+### DEV-148 明细（51 个用例怎么归类的）
+
+| 类别 | 用例数 | 典型症状 | 修法 |
+|---|---|---|---|
+| 侧栏选择器过期 | ~30 | `locator('a.nav-item')` 找到 0 个 | 改 `nav.sidenav a.nav-icon[href$="#/xxx"]` |
+| 老 spec 依赖脏 profile | ~8 | 找不到历史会话 / 模型选择器 disabled | 自己造（mock LLM + 自己建会话） |
+| 断言已不存在的元素 | ~8 | 状态栏 / 主题按钮 / 语言 combobox / 侧栏 ClawHub 入口 | 改成当前真实入口（设置页 radio / 路由） |
+| 产品缺陷（本批顺手修） | 3 | 见 DEV-144~146 | 改产品 |
+
+- **新加的共享 helper**（`tests/e2e/helpers/electron-app.ts`）：
+  `gotoBySideNav` / `gotoRoute` / `addProviderAndReload` / `createConversationViaUi` /
+  `selectProviderAndModel` —— 避免 15 个 spec 各写一份选择器、各错一次。
+- **顺带收紧两处「假通过」**：
+  · `network-failure` NW4：旧断言 `deleted >= 2` 在只删掉 1 个时也会过 → 改成 `=== 2`
+  · `ui-smoke` 侧栏：旧断言数 14 个 nav-item → 改成逐个入口断存在 + 断 aria-label 非空
+
+### 关单（W5 接线批 · M4-L e2e 套件对齐，2026-11-11）
+
+- **范围**：DEV-144 ~ DEV-148（5 条）
+- **验证**:
+  - **既有 e2e 套件全绿**：`E2E_ELECTRON=1 npx playwright test`
+    → **134 passed / 0 failed / 33 skipped**（修前：**79 passed / 51 failed**）；
+    耗时 **39.5 分钟 → 8.7 分钟**（不再有 192 个会话的 DOM 重渲染）
+  - **新增单测**：`tests/unit/llm/provider-bridge.test.ts`（10 例）——
+    类型映射 / ollama baseUrl 归一 / 显式配置通道优先于 LlmConfigStore
+  - vitest: Test Files **131 passed (131)** / Tests **1526 passed | 15 skipped (1541)** / **0 FAIL**
+  - 后端 tsc(tsconfig.node.json): **0 error**；vue-tsc: **0**
+  - `npm run build` 门禁 5 步通过
+- **产物**：3 个共享 e2e helper + 15 个 spec 对齐 + 2 个产品级修复（DEV-144/145）
+  + 2 个小修（DEV-146/147）

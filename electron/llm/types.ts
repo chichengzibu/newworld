@@ -32,6 +32,22 @@ export interface LlmToolCall {
   }
 }
 
+/**
+ * 本次请求**直接指定**的 provider 配置(绕开 LlmConfigStore)。
+ *
+ * 【为什么需要这条通道】
+ * 用户自建的 provider 存在 **ModelManager**(设置 → 模型管理),而 LlmClient
+ * 只认 **LlmConfigStore**(设置里**没有**它的入口,`/settings/llm-config` 是
+ * 孤岛路由)。于是 agent 路径(自 M4-B 起是聊天的默认路径)永远报
+ * "no LLM provider configured" → 每条消息先失败一次再回落旧管道。
+ * 这条通道让调用方**按会话**把用户选中的那个 provider 直接带下来。
+ */
+export interface InlineLlmConfig {
+  provider: LlmProvider
+  apiKey?: string
+  apiBaseUrl?: string
+}
+
 export interface LlmRequest {
   model: string
   messages: LlmMessage[]
@@ -39,6 +55,11 @@ export interface LlmRequest {
   maxTokens?: number
   /** 强制用哪个 provider */
   provider?: LlmProvider
+  /**
+   * 直接给本次请求的 provider 配置 —— 优先于 provider + LlmConfigStore。
+   * 给定即视为"用户显式配置过",不再要求 LlmConfigStore 里有同名的 enabled 条目。
+   */
+  config?: InlineLlmConfig
   /** 工具定义(OpenAI 风格) */
   tools?: LlmTool[]
   /** 强制工具选择:auto / none / { type: 'function', function: { name } } */

@@ -15,16 +15,27 @@ test.describe('SideNav diagnostic', () => {
   test.skip(!shouldRunElectronE2E, 'requires E2E_ELECTRON=1')
 
   test('dump SideNav items', async ({ window }) => {
-    await window.waitForSelector('a.nav-item', { timeout: 10_000 })
-    const items = await window.locator('a.nav-item').allTextContents()
-     
+    // v4.4 起侧栏是 icon-only rail:`nav.sidenav > a.nav-icon`,**没有可见文字**
+    // → 诊断信息改为打印 aria-label / title(走 i18n,正是要看的文案来源)
+    await window.waitForSelector('nav.sidenav a.nav-icon', { timeout: 10_000 })
+    const items = await window.locator('nav.sidenav a.nav-icon').evaluateAll((els) =>
+      els.map((el) => ({
+        href: el.getAttribute('href') ?? '',
+        aria: el.getAttribute('aria-label') ?? '',
+        title: el.getAttribute('title') ?? '',
+      })),
+    )
+
     console.log('=== Nav items ===')
-    for (const t of items) {
-       
-      console.log(`  "${t.trim()}"`)
+    for (const it of items) {
+      console.log(`  ${it.href.padEnd(22)} aria="${it.aria}"  title="${it.title}"`)
     }
-     
+
     console.log('=== End ===')
     expect(items.length).toBeGreaterThan(0)
+    // 每个入口都要有非空文案(M4-G 实跑抓到的真实缺陷:nav.search / nav.voice 缺 key)
+    for (const it of items) {
+      expect(it.aria.trim(), `${it.href} 缺 aria-label`).not.toBe('')
+    }
   })
 })
