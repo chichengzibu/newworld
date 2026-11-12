@@ -110,6 +110,11 @@ scripts/clawhub-dev-ed25519.key
 dev/
 .workbuddy/
 
+# 【M4-L 补】scripts/ 下的临时分析脚本 ——
+# DEV-122 立过规矩「临时脚本误入仓」,但 .gitignore 只覆盖了根目录的 .tmp-*。
+# scripts/ 下的同类文件(如 .tmp-ipc-sweep.py:preload 与调用方的对扫脚本)照样会冒出来。
+scripts/.tmp-*
+
 # 【M4-J 补】裁判校准工作区 ——
 # 标注集(panel 3MB + mt_bench parquet 700KB)与裁决记录都是**下载产物/中间产物**:
 #   · panel 是 CC-BY-NC-4.0(非商用)—— 明确不入仓
