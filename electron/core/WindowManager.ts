@@ -59,6 +59,55 @@ export class WindowManager {
     return WindowManager.instance;
   }
 
+  /**
+   * 【M4-N】设计宽度 —— 应用的布局是按这个宽度做的
+   * (`#app { min-width: 1280px }`,见 src/styles/global.scss)。
+   */
+  private static readonly DESIGN_WIDTH = 1280;
+  /** 缩放下限:再窄就太小了,不如让用户横向滚 */
+  private static readonly MIN_CONTENT_SCALE = 0.6;
+  /** resize 去抖句柄 */
+  private scaleTimer: NodeJS.Timeout | null = null;
+
+  /**
+   * 【M4-N 小屏等比缩放】
+   *
+   * 【问题】应用布局按 1280px 铺开(`#app { min-width: 1280px }`),
+   * 而窗口以前 `minWidth: 1280` → 屏幕比 1280 窄时(1366×768 笔记本开 125% 缩放
+   * → CSS 宽度只有 1092),窗口会比屏幕还宽 → **右边一截在屏幕外**,
+   * 发送按钮这类靠右的元素**用户根本够不着**。
+   *
+   * 【做法】窗口窄于设计宽度时,把页面整体等比缩小:
+   * `webContents.setZoomFactor(contentWidth / DESIGN_WIDTH)`
+   * → 布局仍按 1280 铺开(不裁切),只是整体变小。屏幕够宽时 factor=1,行为不变。
+   *
+   * 【为什么用 zoom 而不是改 CSS 布局】
+   * 布局是 v4.4 定的固定宽度设计,改成流式是整个 UI 的重做;
+   * 等比缩放是**固定宽度桌面应用的标准做法**(字号随之变小,可读性损失最小)。
+   */
+  private applyContentScale(): void {
+    const win = this.mainWindow;
+    if (!win || win.isDestroyed()) return;
+    const [contentWidth] = win.getContentSize();
+    const scale = Math.min(
+      1,
+      Math.max(WindowManager.MIN_CONTENT_SCALE, contentWidth / WindowManager.DESIGN_WIDTH),
+    );
+    // 偏差太小就不动 —— 避免拖动窗口时反复重排
+    if (Math.abs(win.webContents.getZoomFactor() - scale) < 0.005) return;
+    win.webContents.setZoomFactor(scale);
+    this.log.info('应用内容等比缩放', { contentWidth, scale });
+  }
+
+  /** resize 去抖:拖动窗口时 resize 连续触发,每次都重排会卡 */
+  private scheduleContentScale(): void {
+    if (this.scaleTimer) clearTimeout(this.scaleTimer);
+    this.scaleTimer = setTimeout(() => {
+      this.scaleTimer = null;
+      this.applyContentScale();
+    }, 120);
+  }
+
   public async createMainWindow(): Promise<BrowserWindow> {
     // isDev 三重判断:
     // 1) !app.isPackaged — 未打包(开发/Playwright)
@@ -73,7 +122,10 @@ export class WindowManager {
     const primaryDisplay = screen.getPrimaryDisplay();
     const { width: screenWidth, height: screenHeight } = primaryDisplay.workAreaSize;
 
-    const defaultWidth = Math.min(1280, screenWidth * 0.8);
+    // 【M4-N 小屏等比缩放】屏幕比设计宽度窄时,**窗口占满屏幕宽度**
+    // (窗口也不可能比屏幕宽),剩下的交给缩放:页面按 DESIGN_WIDTH 铺开、整体缩小
+    // → 一点都不裁切。屏幕够宽时行为不变(仍是 1280)。
+    const defaultWidth = Math.min(WindowManager.DESIGN_WIDTH, screenWidth);
     const defaultHeight = Math.min(800, screenHeight * 0.8);
 
     this.log.info('创建主窗口', { isDev, defaultWidth, defaultHeight });
@@ -81,8 +133,10 @@ export class WindowManager {
     this.mainWindow = new BrowserWindow({
       width: defaultWidth,
       height: defaultHeight,
-      minWidth: 1280,
-      minHeight: 720,
+      // 【M4-N】下限放宽:原来 minWidth=1280 → 窗口永远不能比设计宽度窄 →
+      // 窄屏用户根本没法用;现在允许缩到 900,由缩放保证内容完整可见。
+      minWidth: 900,
+      minHeight: 600,
       show: false,
       frame: false,
       titleBarStyle: 'hidden',
@@ -97,6 +151,9 @@ export class WindowManager {
       },
       icon: join(__dirname, '../resources/icon.ico')
     });
+
+    // 【M4-N】初次缩放(窗口初宽可能已经小于设计宽度)
+    this.applyContentScale();
 
     this.mainWindow.once('ready-to-show', () => {
       this.log.info('窗口准备就绪，显示窗口');
@@ -122,10 +179,17 @@ export class WindowManager {
 
     this.mainWindow.on('maximize', () => {
       this.sendMaximizeChange(true);
+      this.applyContentScale();
     });
 
     this.mainWindow.on('unmaximize', () => {
       this.sendMaximizeChange(false);
+      this.applyContentScale();
+    });
+
+    // 【M4-N】窗口尺寸变了 → 重算缩放(去抖:resize 在拖动过程中连续触发)
+    this.mainWindow.on('resize', () => {
+      this.scheduleContentScale();
     });
 
     // 注: focus/blur handlers 已被移除。
