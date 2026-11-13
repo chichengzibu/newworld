@@ -213,7 +213,11 @@ app.whenReady().then(async () => {
     }
 
     // 10. 开发模式下打开DevTools
-    if (isDev) {
+    // 【M4-M 修】e2e 不开 —— DevTools 会 docked 住,实测把页面视口从 1280 挤到 725
+    // (面板占 555px)→ e2e 一直在一个**被裁窄**的界面里跑:
+    // 页面头部右侧的按钮落在视口外(看不见、点不到、位置断言全失真)。
+    // e2e 自己有 console 捕获,不需要 DevTools。
+    if (isDev && process.env.PIPICLAW_E2E !== '1') {
       windowManager.getMainWindow()?.webContents.openDevTools();
     }
 

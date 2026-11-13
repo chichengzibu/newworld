@@ -321,6 +321,7 @@ export default {
   },
   models: {
     title: 'Models',
+    compare: 'Compare Models',
     type: 'Type',
     addProvider: 'Add Provider',
     editProvider: 'Edit Provider',

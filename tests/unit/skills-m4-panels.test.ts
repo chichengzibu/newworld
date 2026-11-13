@@ -28,6 +28,9 @@ vi.mock('@/components/skills/SkillImportDialog.vue', () => ({ default: { templat
 vi.mock('@element-plus/icons-vue', () => ({
   Upload: { template: '<i />' }, MagicStick: { template: '<i />' }, Box: { template: '<i />' },
   SuccessFilled: { template: '<i />' }, Plus: { template: '<i />' },
+  // 【M4-M】SkillsView 新增了「浏览 ClawHub 市场」按钮(Goods 图标)——
+  // 这个 mock 是**显式枚举**的,少一个图标,组件就渲染不出来(整份 spec 全红)。
+  Goods: { template: '<i />' },
 }))
 
 import SkillsView from '../../src/views/SkillsView.vue'

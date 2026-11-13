@@ -521,7 +521,38 @@ M4-K 把「51 个既有 e2e 失败」从隐性变成显性。本批逐条对齐�
 **既有 e2e 套件**:79 passed / 51 failed(39.5 分钟)→ **134 passed / 0 failed**(8.7 分钟)。
 耗时掉一半不是变快,是**不再每次渲染 192 个会话**(userData 隔离修好前的残留)。
 
+### 🧭 低频功能的入口可达性(M4-M)
+
+M4-L 遗留 #1:ClawHub 技能市场与模型对比在 v4.4 收侧栏时**丢了入口** ——
+技能市场只藏在「导入技能」对话框的一个页签里(2 层深),模型对比**只有 Ctrl+K**。
+
+**对比同类型产品后定的方案**(Claude Code / Cursor / Cherry Studio / OpenChat / 飞书):
+
+- 同类 **AI 客户端**(不是 VS Code 派生的 IDE)**都不把"市场"放一级图标导航** ——
+  Cherry Studio 放在「设置 → Agent 设置 → 插件」,Claude Code 用 `/plugin` 显式命令,
+  OpenChat 明确"主导航只留 3~5 项,低频功能放二级"(飞书:低频进「更多」)
+- Cursor 那种"一个图标 + 溢出"依赖 VS Code activity bar 的既有心智模型 ——
+  PiPiClaw 是**产品导航 rail**,用户没有这种先验
+- **图标栏无文字 → 靠"识别";带文字的按钮 → 靠"阅读"。新用户阅读的门槛低于识别**
+
+**采用:两个页面都不进侧栏**,改为在**意图发生的现场**放带文字的按钮:
+技能页「浏览 ClawHub 市场」+ 模型页「对比模型」。侧栏保持 7+1 不变 ——
+多两个等权图标会稀释 Chat/Models/Skills 这些主目的地。
+
+**顺带修了两个"入口其实也够不着"的问题**:
+
+- **e2e 一直在被裁窄的界面里跑** ★ —— `main.ts` 的 `isDev = !app.isPackaged`
+  在 e2e(跑未打包产物)里为真 → **每次 e2e 都自动开 DevTools**,docked 后实测把
+  页面视口从 **1280 挤到 725**(面板占 555px)→ 页头右侧的按钮落在**视口外**:
+  用户看不见、点不到,而 Playwright 的 `toBeVisible()` **仍判它可见**(还能自动
+  滚动点到)→ **位置类断言全部失真、且会假通过**。修:e2e 不开 DevTools;
+  入口断言加强为 `toBeInViewport()`(必须在视口内)
+- **页面被内容顶宽,窄窗口下页头被裁** —— `.skills-content` / `.models-content`
+  缺 `min-width: 0`(flex 子项默认 `min-width:auto` → 被内容的 min-content 宽度顶住)
+  → 补 `min-width: 0` + `.page-header` 加 `flex-wrap: wrap`(窄窗口时按钮换行,不消失)
+
 ### 📊 验证
+
 
 
 vitest 127 files / 1482 passed / 0 FAIL · vue-tsc 0 error · 后端 tsc **0 error**

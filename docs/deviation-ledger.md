@@ -1538,3 +1538,84 @@
   - `npm run build` 门禁 5 步通过
 - **产物**：3 个共享 e2e helper + 15 个 spec 对齐 + 2 个产品级修复（DEV-144/145）
   + 2 个小修（DEV-146/147）
+
+---
+
+## W5 接线批偏差登记 · M4-M 低频功能的入口可达性（2026-11-12）
+
+> M4-L 遗留 #1：「ClawHub / 模型对比要不要回侧栏」—— 本批按"同类产品对比 + 上手难度最低"
+> 定了方案，并**顺手修了 e2e harness 自身的一个缺陷**（它让所有 e2e 断言失真）。
+> 编号自 DEV-149 起。完整设计见 `docs/NOVA-#009-m4m-entry-points-design.md`。
+
+| ID | 状态 | 摘要 |
+|---|---|---|
+| DEV-149 | 已修 | **低频功能没有可见入口** · `/clawhub`（技能市场）只藏在「导入技能」对话框的一个页签里（2 层深）；`/model-compare`（模型对比）**只有 Ctrl+K** 一个入口 —— 用户得**事先知道**这个快捷键。修（按同类产品对比后的结论，见设计文档）：两个页面**都不进侧栏**，改为在**母页面**放**带文字**的按钮：技能页「浏览 ClawHub 市场」+ 模型页「对比模型」。侧栏保持 7+1 不变 |
+| DEV-150 | 已修 | **e2e 一直在被裁窄的界面里跑** ★ · `main.ts` 的 `isDev = !app.isPackaged` 在 e2e（跑的是未打包产物）里为真 → **每次 e2e 都自动打开 DevTools**，docked 后实测把页面视口从 **1280 挤到 725**（面板占 555px）→ 页面头部右侧的按钮落在**视口外**：用户看不见、点不到，而 Playwright 的 `toBeVisible()` **仍判它可见**（还能自动滚动点到）→ **位置类断言全部失真、且会假通过**。修：e2e 不开 DevTools；并把入口断言加强为 `toBeInViewport()`（必须在视口内） |
+| DEV-151 | 已修 | **页面被内容顶宽，窄窗口下页头被裁** · `.skills-content` / `.models-content` 缺 `min-width: 0`（flex 子项默认 `min-width:auto` → 被内容的 min-content 宽度顶住）→ 页面比窗口宽 → 页头按钮被裁。修：补 `min-width: 0` + `.page-header` 加 `flex-wrap: wrap`（窄窗口时按钮换行到标题下面，而不是消失） |
+
+### DEV-149 明细（决策与同类产品对比）
+
+**对比结论**（检索 Claude Code / Cursor / Cherry Studio / OpenChat / 飞书）：
+
+| 产品 | 市场入口放哪 | 一级导航规模 |
+|---|---|---|
+| Claude Code | `/plugin` 一个显式命令 → 多页签管理面板 | 不塞进导航 |
+| Cursor | Activity Bar 一个图标（多了进「…」溢出）；另有侧栏 Customize 页 | 溢出是官方降级方式 |
+| **Cherry Studio**（最接近的同类：国产桌面 AI 客户端） | **设置 → Agent 设置 → 插件** —— 在**相关页面里**，不是一级图标 | 侧栏是助手/Agent 列表，不是功能目录 |
+| **OpenChat 设计系统** | 主导航只留 Chats / Models / Settings；模型管理**放二级**，"不与主要对话目的地竞争" | 3~5 项 |
+| **飞书**（Agent 入口案例） | 低频应用进「更多」，**保留可发现性又不占主导航空间** | 主导航留给高频 |
+
+**采用**：两个页面都不进侧栏，改为在**意图发生的现场**放**带文字**的按钮。
+
+理由三条：
+1. **同类 AI 客户端（不是 VS Code 派生的 IDE）都不把"市场"放一级图标导航**；
+   Cursor 那种"图标 + 溢出"依赖 VS Code activity bar 的既有心智模型（图标是
+   Explorer/Search/Git/Extensions，用户早就在 VS Code 里学过），PiPiClaw 是一条
+   **产品导航 rail**，用户没有这种先验。
+2. **识别 vs 阅读**：图标栏无文字 → 用户靠*识别*图形；带文字的按钮靠*阅读*。
+   新用户**阅读的门槛低于识别**。
+3. **不稀释主导航**：rail 变 9~10 个等权图标，会稀释 Chat/Models/Skills 这些主目的地
+   （OpenChat / 飞书都警告过这点）。
+
+路径长度：只留 Ctrl+K = 快捷键→输入→确认（**要事先知道**）；
+侧栏加图标 = 1 击但靠识别；**本方案 = rail → 相关页 → 文字按钮 = 2 击，零记忆负担**。
+
+### DEV-150 明细（e2e harness 自身的缺陷）
+
+- **现象**：e2e 跑出来的页面视口只有 725px，而窗口是 1280px —— 差 555px 被谁吃了？
+- **查法**：枚举进程内所有窗口 → 只有一个窗口，`webContents.isDevToolsOpened() === true`
+- **根因**：`main.ts` 的 `if (isDev) openDevTools()`，而 `isDev = !app.isPackaged` ——
+  e2e 跑的是 `dist-electron/main.js`（未打包）→ **每次 e2e 都自动开 DevTools**。
+- **为什么这很严重**：它让**所有** e2e 的位置类断言失真，而且会**假通过**：
+  Playwright 的 `toBeVisible()` 只看 CSS 可见性，元素落在视口外也算"可见"，
+  `click()` 还会自动横向滚动到它 —— 于是「用户根本点不到的按钮」被测成"可见可点"。
+- **修**：`if (isDev && process.env.PIPICLAW_E2E !== '1')`；
+  并把入口断言加强为 `toBeInViewport()`。
+
+### DEV-151 明细
+
+`.skills-content` / `.models-content` 是 flex 子项，`min-width` 默认 `auto`
+→ 被内容的 min-content 宽度（1196px）顶住 → 页面比窗口宽 → 页头按钮被裁。
+修：补 `min-width: 0`（宽表格自己在内部横滚）+ `.page-header` 加 `flex-wrap: wrap`
+（窄窗口时按钮换行到标题下面，而不是消失）。
+
+### 关单（W5 接线批 · M4-M 低频功能的入口可达性，2026-11-12）
+
+- **范围**：DEV-149 ~ DEV-151（3 条）
+- **验证**:
+  - **新增 e2e 断言**（`verification-checklist.spec.ts` 的 M1 例）：
+    ① 技能页有可见**且在视口内**的「浏览 ClawHub 市场」→ 点击到达 `/clawhub`
+    ② 模型页有可见**且在视口内**的「对比模型」→ 点击到达 `/model-compare`
+    ③ 侧栏**没有**这两个图标（决策本身被钉住）
+  - **实跑截图**确认按钮渲染正常（`test-results/entry-skills.png` / `entry-models.png`）
+  - 既有 e2e 套件全量重跑（DevTools 视口变化影响全部 e2e，必须重跑）
+    → **131 passed / 0 failed / 33 skipped**（7.9 分钟）
+  - vitest: Test Files **131 passed (131)** / Tests **1526 passed | 15 skipped (1541)** / **0 FAIL**
+    （中途 10 条红过一次：SkillsView 新增 Goods 图标，而两份测试的
+    `@element-plus/icons-vue` mock 是**显式枚举**的 → 少一个图标整个组件渲染不出来
+    → 补进 mock 后全绿。教训：**组件加图标要记得补 mock**）
+  - vue-tsc **0** · 后端 tsc **0 error** · `npm run build` 门禁 **5 步通过**
+  - 顺带修掉一条 flake:`chat-long-conversation` L1 在全量跑时偶发
+    「<div> intercepts pointer events」—— 新造的会话**本身就是 active**,
+    而列表会随会话更新重排(updatedAt 变 → 重排序 → 项在鼠标下移动),
+    这时去点它会点空 → 改成「已经是 active 就不点」

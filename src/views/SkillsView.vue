@@ -14,6 +14,15 @@
           <el-icon><Upload /></el-icon>
           导入技能
         </el-button>
+        <!-- 【M4-M】ClawHub 市场入口:原来只藏在「导入技能」对话框的页签里(2 层深),
+             想去市场的人得先知道"导入"这个动作。现在提到一级按钮,就在技能页的头上。
+             侧栏**不加图标**:那条 rail 是无文字的,加到 9~10 个图标会让
+             「哪个图标是哪个」的识别成本上升(参考 OpenChat:主导航只留高频目的地,
+             低频功能放二级 —— 见 docs/NOVA-#009-m4m-entry-points-design.md) -->
+        <el-button @click="router.push('/clawhub')">
+          <el-icon><Goods /></el-icon>
+          浏览 ClawHub 市场
+        </el-button>
       </div>
     </div>
     
@@ -468,11 +477,14 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue';
-import { Upload, MagicStick, Box, SuccessFilled, Plus } from '@element-plus/icons-vue';
+import { Upload, MagicStick, Box, SuccessFilled, Plus, Goods } from '@element-plus/icons-vue';
+import { useRouter } from 'vue-router';
 import { ElMessage } from "element-plus/es/components/message/index"
 // #007 H1: 提案超时阈值 (30 分钟, 订单既定)
 const PROPOSAL_TIMEOUT_MS = 30 * 60 * 1000
 import { ElMessageBox } from "element-plus/es/components/message-box/index";
+const router = useRouter();
+
 import SkillCard from '@/components/skills/SkillCard.vue';
 import SkillImportDialog from '@/components/skills/SkillImportDialog.vue';
 
@@ -916,6 +928,9 @@ onUnmounted(() => {
   justify-content: space-between;
   align-items: center;
   flex-shrink: 0;
+  /* 【M4-M】窄窗口下按钮换行到标题下面,而不是被裁掉看不见 */
+  flex-wrap: wrap;
+  gap: var(--space-2);
 }
 
 .header-actions {
@@ -1005,6 +1020,10 @@ onUnmounted(() => {
   flex: 1;
   overflow-y: auto;
   min-height: 0;
+  /* 【M4-M】min-width 默认 auto → 被内容的 min-content 宽度顶住 →
+     页面比窗口宽 → 页头按钮被裁到视口外(实测 725px 窗口下按钮在 x=851+)。
+     min-width:0 让它能缩到容器宽,宽表格自己在内部横滚。 */
+  min-width: 0;
 }
 
 .skills-grid {

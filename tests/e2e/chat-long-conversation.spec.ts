@@ -83,13 +83,18 @@ test.describe('T+150 Chat 长对话历史', () => {
   test('L1: 进 Chat 后选已存在会话(有历史)', async ({ window }) => {
     await seedConversation(window, 12)
 
-    // 选第一个现有会话
+    // 选第一个现有会话。
+    // 【M4-M】**已经是 active 就不再点** —— 造的会话本身就是当前会话,
+    // 而列表会随会话更新重排(updatedAt 变化 → 重排序 → 项在鼠标下移动),
+    // 这时去点它就可能点到别的元素上(实测全量跑时 flake 过一次:
+    // "locator.click: <div> intercepts pointer events")。
     const existingConv = window.locator('.conversation-item').first()
     await expect(existingConv).toHaveCount(1)
-    await existingConv.click()
-    await window.waitForTimeout(1000)
-
     const textarea = window.locator('.input-area textarea').first()
+    if (!(await textarea.isVisible().catch(() => false))) {
+      await existingConv.click()
+      await window.waitForTimeout(1000)
+    }
     await expect(textarea).toBeVisible({ timeout: 15_000 })
   })
 
@@ -97,8 +102,10 @@ test.describe('T+150 Chat 长对话历史', () => {
     await seedConversation(window, 20)
 
     const existingConv = window.locator('.conversation-item').first()
-    await existingConv.click()
-    await window.waitForTimeout(1000)
+    if (!(await window.locator('.input-area textarea').first().isVisible().catch(() => false))) {
+      await existingConv.click()
+      await window.waitForTimeout(1000)
+    }
 
     // 找 messages 容器,验证有 scroll 能力
     const messagesContainer = window.locator('.messages-container, .message-list, [class*="message"]').first()
@@ -132,8 +139,10 @@ test.describe('T+150 Chat 长对话历史', () => {
     await seedConversation(window, 12)
 
     const existingConv = window.locator('.conversation-item').first()
-    await existingConv.click()
-    await window.waitForTimeout(1000)
+    if (!(await window.locator('.input-area textarea').first().isVisible().catch(() => false))) {
+      await existingConv.click()
+      await window.waitForTimeout(1000)
+    }
 
     // 滚到顶部
     await window.evaluate(() => {

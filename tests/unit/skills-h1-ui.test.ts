@@ -27,6 +27,8 @@ vi.mock('@/components/skills/SkillCard.vue', () => ({ default: { template: '<div
 vi.mock('@/components/skills/SkillImportDialog.vue', () => ({ default: { template: '<div />' } }))
 vi.mock('@element-plus/icons-vue', () => ({
   Upload: { template: '<i />' }, MagicStick: { template: '<i />' }, Box: { template: '<i />' }, SuccessFilled: { template: '<i />' },
+  // 【M4-M】SkillsView 的「浏览 ClawHub 市场」按钮用了 Goods 图标 —— mock 是显式枚举的
+  Goods: { template: '<i />' },
 }))
 
 import SkillsView from '../../src/views/SkillsView.vue'

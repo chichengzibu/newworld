@@ -1,4 +1,4 @@
-import { test, expect, shouldRunElectronE2E } from './helpers/electron-app'
+import { test, expect, shouldRunElectronE2E, gotoBySideNav } from './helpers/electron-app'
 
 /**
  * VERIFICATION 清单自动化 —— D 段(UI 肉眼确认)/ E 段(运行时稳定性)
@@ -206,5 +206,37 @@ test.describe('VERIFICATION D/E 段 · 清单自动化', () => {
     const bodyText = await window.evaluate(() => document.body.innerText)
     expect(bodyText, '未出现红屏兜底文本').toContain('[PiPiClaw render error]')
     expect(bodyText).toContain('VERIFICATION-E2-探针错误')
+  })
+  test('M1: 低频功能入口在「意图现场」,不在图标栏里(ClawHub / 模型对比)', async ({ window }) => {
+    // 【M4-M】v4.4 把侧栏收成 7 个固定图标时,ClawHub 与模型对比的侧栏入口丢了。
+    // 决策:不进侧栏(无文字的图标栏靠"识别",对新手更难),改为在**母页面**放带文字的按钮
+    //   —— 同类产品的做法:Cherry Studio 的插件市场在「设置 → Agent 设置 → 插件」、
+    //   OpenChat 主导航只留 3 项、Claude Code 用 /plugin 显式命令。
+    // 这条断言钉住:① 两个页面各有**可见的**入口按钮 ② 点了真能到对应路由。
+
+    // ① 技能页 → 浏览 ClawHub 市场
+    await gotoBySideNav(window, '/skills')
+    const marketBtn = window.locator('button:has-text("浏览 ClawHub 市场"), button:has-text("Browse ClawHub")').first()
+    await expect(marketBtn, '技能页缺少 ClawHub 市场入口').toBeVisible({ timeout: 15_000 })
+    // 【关键】必须在**视口内** —— Playwright 的 toBeVisible() 只看 CSS 可见性,
+    // 元素落在视口外也算"可见"(还能被自动滚动点到)→ 那样这条断言就是假通过。
+    // 实测踩过:DevTools docked 把视口挤到 725,按钮在 x=1097+ → 用户根本看不见。
+    await expect(marketBtn).toBeInViewport({ timeout: 10_000 })
+    await marketBtn.click()
+    await window.waitForURL(/#\/clawhub/, { timeout: 10_000 })
+    await expect(window.locator('h1').first()).toBeVisible({ timeout: 10_000 })
+
+    // ② 模型页 → 对比模型
+    await gotoBySideNav(window, '/models')
+    const compareBtn = window.locator('button:has-text("对比模型"), button:has-text("Compare Models")').first()
+    await expect(compareBtn, '模型页缺少「对比模型」入口').toBeVisible({ timeout: 15_000 })
+    await expect(compareBtn).toBeInViewport({ timeout: 10_000 })
+    await compareBtn.click()
+    await window.waitForURL(/#\/model-compare/, { timeout: 10_000 })
+    await expect(window.locator('h1').first()).toBeVisible({ timeout: 10_000 })
+
+    // ③ 侧栏**没有**这两个图标(决策本身也要被钉住 —— 免得哪天又被加回去)
+    await expect(window.locator('nav.sidenav a.nav-icon[href$="#/clawhub"]')).toHaveCount(0)
+    await expect(window.locator('nav.sidenav a.nav-icon[href$="#/model-compare"]')).toHaveCount(0)
   })
 })

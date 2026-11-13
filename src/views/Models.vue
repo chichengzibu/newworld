@@ -7,6 +7,12 @@
       </div>
       <div class="header-right">
         <Breadcrumb />
+        <!-- 【M4-M】模型对比入口:原来只有 Ctrl+K 命令面板能到(用户得先知道快捷键)。
+             放在模型页的头上 —— 「我想比较几个模型」这个意图就发生在这里。 -->
+        <el-button @click="router.push('/model-compare')">
+          <el-icon><Switch /></el-icon>
+          {{ t('models.compare') }}
+        </el-button>
         <el-button type="primary" @click="handleAddProvider">
           <el-icon><Plus /></el-icon>
           {{ t('models.addProvider') }}
@@ -262,9 +268,11 @@ import { ElMessageBox } from "element-plus/es/components/message-box/index";
 import { useI18n } from 'vue-i18n';
 import Breadcrumb from '@/components/layout/Breadcrumb.vue';
 import { useModelsStore, PROVIDER_DEFAULTS, type ProviderConfig, type ProviderFormData } from '@/stores/models';
-import { Plus } from '@element-plus/icons-vue';
+import { Plus, Switch } from '@element-plus/icons-vue';
+import { useRouter } from 'vue-router';
 
 const { t } = useI18n();
+const router = useRouter();
 
 const modelsStore = useModelsStore();
 
@@ -617,6 +625,9 @@ async function handleDelete(id: string, name: string): Promise<void> {
   justify-content: space-between;
   align-items: center;
   flex-shrink: 0;
+  /* 【M4-M】窄窗口下按钮换行,不被裁掉 */
+  flex-wrap: wrap;
+  gap: var(--space-2);
 }
 
 .header-left {
@@ -648,6 +659,8 @@ async function handleDelete(id: string, name: string): Promise<void> {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  /* 【M4-M】同上:不锁 min-content 宽度,否则页面撑破窗口、页头按钮被裁 */
+  min-width: 0;
 }
 
 .provider-grid {

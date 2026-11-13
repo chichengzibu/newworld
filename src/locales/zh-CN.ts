@@ -335,6 +335,7 @@ export default {
   },
   models: {
     title: '模型管理',
+    compare: '对比模型',
     type: '类型',
     addProvider: '添加提供商',
     editProvider: '编辑提供商',
