@@ -67,6 +67,8 @@
 | **M4-J** | **裁判校准**（M4-F 遗留的最后一环：接两套公开人工标注集 + κ/偏置探针 + 诚实结论；顺带修产品级 bug「ollama thinking 吞 token → 裁判等于没跑」） | `NOVA-#009-m4j-judge-calibration-design.md` |
 | **M4-K** | **真机验证清单自动化**（把 VERIFICATION.md 的 D/E 段人工肉眼项逐条变成 e2e 断言；过程中挖出**带在 master 上一个月的 P0**：打开任何有消息的会话 → Chat 视图整屏红框（`useVirtualizer` 返回 Ref，脚本漏 `.value`；且被 `as unknown as` 断言吞掉，typecheck 一直绿）） | `NOVA-#009-m4k-verification-automation-design.md` |
 | **M4-L** | **e2e 套件对齐**（把 M4-K 暴露的 51 个既有 e2e 失败逐条对齐到当前 UI；途中挖出**两个 P0**：悬浮命令按钮压住「发送」按钮（用户点发送点到的是命令按钮）、**LLM 精神分裂**（agent 路径拿不到用户配的 provider → 每条消息先失败一次再回落旧管道） | `NOVA-#009-m4l-e2e-alignment-design.md` |
+| **M4-M** | **低频功能的入口可达性**（ClawHub 技能市场 / 模型对比丢了侧栏入口 —— 技能市场只藏在「导入」对话框的页签里(2 层深),模型对比只有 Ctrl+K。对比 Claude Code / Cursor / Cherry Studio / OpenChat / 飞书后定:**不进侧栏**,改为在**母页面**放**带文字**的按钮(技能页「浏览 ClawHub 市场」+ 模型页「对比模型」); 顺带修 e2e harness 自身缺陷:DevTools 把视口从 1280 挤到 725,导致位置类断言失真且会假通过 | `NOVA-#009-m4m-entry-points-design.md` |
+| **M4-N** | **受控对照的结论增强**（M4-E 的对照只用二值 `passed`,把 `GradeResult.score` 扔了 —— 两次都失败但一次错 1 个工具、一次错 5 个时结论只能写「看不出差别」。现:加连续分差与方向一致性(**准入门不动**),并新增 pairwise 裁判路径(可选/默认关/按 D7 不参与判定,且**强制换序双向 + 一致性要求** —— M4-J 实测本地裁判换序改口率 68~80%) | `NOVA-#009-m4n-trial-signal-design.md` |
 
 **构建门禁**（M3-F 引入，此后每批都守着）：
 `[1/5] 主进程 typecheck → [2/5] 渲染进程 typecheck → [3/5] vite build → [4/5] electron-builder → [5/5] build-report`

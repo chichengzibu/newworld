@@ -289,9 +289,16 @@ function scoreItem(item: CommandItem, q: string): number {
   const fields = [item.title, item.subtitle || '', ...(item.keywords || [])]
   let best = 0
   for (const f of fields) best = Math.max(best, fuzzyMatch(q, f))
-  // recent / prompt 优先级高
-  if (item.kind === 'recent') best += 0.5
-  if (item.kind === 'prompt') best += 0.3
+  // 【M4-N 修】优先级加权**只在真的匹配上**才加 ——
+  // 原来无论匹不匹配都加,于是 best=0 的条目(纯 prompt / recent)也变成 0.3/0.5
+  // → 过滤条件 `score > 0` 形同虚设 → 搜「切换主题」时**所有 prompt 模板都还在**
+  //   (实测:输完查询仍列出 5 个模板 + 1 个动作,搜索没起到过滤作用)
+  // 现在:匹配不上的条目 best=0 → 被过滤掉。
+  if (best > 0) {
+    // recent / prompt 优先级高
+    if (item.kind === 'recent') best += 0.5
+    if (item.kind === 'prompt') best += 0.3
+  }
   return best
 }
 
@@ -366,8 +373,15 @@ function moveSelection(delta: number): void {
 }
 
 function commit(): void {
-  const grp = groupedResults.value[activeGroupIdx.value]
-  const item = grp?.items?.[activeItemIdx.value]
+  const groups = groupedResults.value
+  if (!groups.length) return
+  // 【M4-N】越界兜底:即使选中态因为某些原因落在结果集之外,
+  // 也不该让 Enter 变成"什么都没发生" —— 夹到有效范围内。
+  const gi = Math.max(0, Math.min(activeGroupIdx.value, groups.length - 1))
+  const giItems = groups[gi]?.items ?? []
+  if (!giItems.length) return
+  const ii = Math.max(0, Math.min(activeItemIdx.value, giItems.length - 1))
+  const item = giItems[ii]
   if (item) commitItem(item)
 }
 
@@ -387,8 +401,20 @@ async function commitItem(item: CommandItem): Promise<void> {
       // ignore
     }
   }
-  await item.action()
-  close()
+  // 【M4-N 修】动作失败**也要关面板**。
+  // 原来 `await item.action()` 抛出会直接跳出 → `close()` 永远不执行 →
+  // 面板留在屏幕上,用户只能按 Esc。
+  // 典型触发:prompt 模板的 action 是 `router.push('/chat')`,
+  // 而当前已经在 /chat → vue-router 4 抛 NavigationDuplicated(是**拒绝**不是 resolve)
+  // → 面板关不掉(实测 KS4 单独跑必挂、且是在当前路由上执行的模板)。
+  try {
+    await item.action()
+  } catch (err) {
+    // 动作失败不该把用户困在面板里;记一笔便于排查
+    console.warn('[CommandPalette] 命令执行失败:', err)
+  } finally {
+    close()
+  }
 }
 
 function fillInput(text: string): void {
@@ -451,6 +477,20 @@ onMounted(() => window.addEventListener('cmd:open-palette', onExternalOpen))
 onUnmounted(() => window.removeEventListener('cmd:open-palette', onExternalOpen))
 
 // active 自动滚到可见
+/**
+ * 【M4-N 修】查询一变,选中态必须跟着重置。
+ *
+ * 原来:过滤后 `groupedResults` 变短了,但 `activeGroupIdx`/`activeItemIdx`
+ * 还指着**旧列表里的位置** → 结果:
+ *   · 高亮消失(没有一项带 .active)—— 用户不知道 Enter 会执行什么
+ *   · `commit()` 取到 undefined → `if (item)` 不成立 → **Enter 什么都不发生**
+ *     (实测:输完「切换主题」按 Enter,命令面板纹丝不动)
+ */
+watch(query, () => {
+  activeGroupIdx.value = 0
+  activeItemIdx.value = 0
+})
+
 watch([activeGroupIdx, activeItemIdx], () => {
   nextTick(() => {
     const el = resultsRef.value?.querySelector('.palette-item.active') as HTMLElement | null

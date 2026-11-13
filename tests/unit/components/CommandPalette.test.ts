@@ -120,12 +120,28 @@ describe('P5-UX: CommandPalette 命令面板(逻辑层)', () => {
     const w = mount(CommandPalette, { global: { plugins: [i18n, router] } })
     window.dispatchEvent(new CustomEvent('cmd:open-palette'))
     await flushPromises()
-    ;(w.vm as any).query = 'pylb' // 字符分散在 拼音 中
+    // 【M4-N 修】原查询是 'pylb' —— 实测它在真实字段里**匹配不到任何一项**
+    // (原来这条能过,是因为 prompt 模板的优先级加权在**零匹配时也被加上**
+    //  → 所有模板恒"匹配成功" → 过滤形同虚设)。
+    // 现改成真正能命中的散字查询:'cmp' 是关键词 'compare' 的子序列(c→m→p)。
+    ;(w.vm as any).query = 'cmp'
     await flushPromises()
     const gr = (w.vm as any).groupedResults as Array<{ items: Array<{ title: string }> }>
     const allItems = gr.flatMap((g) => g.items)
     // 至少返回一个 — 至少 fuzzy 命中 1 个
     expect(allItems.length).toBeGreaterThan(0)
+  })
+
+  it('【M4-N 回归】匹配不上的查询 → 一条都不返回(过滤真的在过滤)', async () => {
+    const w = mount(CommandPalette, { global: { plugins: [i18n, router] } })
+    window.dispatchEvent(new CustomEvent('cmd:open-palette'))
+    await flushPromises()
+    ;(w.vm as any).query = 'zzz完全不存在的词qqq'
+    await flushPromises()
+    const gr = (w.vm as any).groupedResults as Array<{ items: Array<{ title: string }> }>
+    const allItems = gr.flatMap((g) => g.items)
+    // 原来这里会剩下全部 prompt 模板(优先级加权泄漏)→ 搜索形同虚设
+    expect(allItems.length, '匹配不上却仍返回了条目 —— 过滤被优先级加权泄漏了').toBe(0)
   })
 
   it('recentConversations 初始为空', () => {

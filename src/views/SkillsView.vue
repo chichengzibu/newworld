@@ -327,7 +327,32 @@
               </el-tag>
             </template>
           </el-table-column>
+          <!-- 【M4-N】综合分差 —— 二元"成功/失败"看不出差别时,它能看出
+               (一次错 1 个工具 vs 一次错 5 个,二元都是"失败") -->
+          <el-table-column label="综合分差" width="100">
+            <template #default="{ row }">
+              <span :style="{ color: row.scoreDelta > 0.001 ? 'var(--success-color, #67c23a)' : row.scoreDelta < -0.001 ? 'var(--danger-color, #f56c6c)' : 'inherit' }">
+                {{ row.scoreDelta > 0 ? '+' : '' }}{{ (row.scoreDelta * 100).toFixed(0) }}%
+              </span>
+            </template>
+          </el-table-column>
+          <!-- 【M4-N】pairwise 裁判(可选参考信号,不参与判定) -->
+          <el-table-column v-if="trialResult.summary.pairwise" label="裁判对照" width="110">
+            <template #default="{ row }">
+              <el-tag v-if="row.pairwise" size="small" :type="row.pairwise === 'with_better' ? 'success' : row.pairwise === 'without_better' ? 'danger' : 'info'">
+                {{ row.pairwise === 'with_better' ? '带技能更好' : row.pairwise === 'without_better' ? '不带更好' : row.pairwise === 'tie' ? '平局' : '不稳定' }}
+              </el-tag>
+              <span v-else>—</span>
+            </template>
+          </el-table-column>
         </el-table>
+        <!-- 【M4-N】pairwise 裁判的说明**独立渲染** ——
+             不靠拼进 summary.note(那是给人看结论的串)。
+             这里装的是「这个裁判在这些配对上顺序敏感」这类**元信息**,
+             藏起来等于没提示。 -->
+        <p v-if="trialResult.summary.pairwise" class="dir-empty">
+          {{ trialResult.summary.pairwise.note }}
+        </p>
       </div>
     </el-card>
 

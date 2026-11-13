@@ -1615,7 +1615,86 @@
     `@element-plus/icons-vue` mock 是**显式枚举**的 → 少一个图标整个组件渲染不出来
     → 补进 mock 后全绿。教训：**组件加图标要记得补 mock**）
   - vue-tsc **0** · 后端 tsc **0 error** · `npm run build` 门禁 **5 步通过**
+  - 新增 `tests/unit/command-palette.test.ts`：**5 passed**（DEV-154 的三个回归）
+  - e2e 全量：**131 passed / 0 failed / 33 skipped**（KS4 从"单独跑 6/6 必挂"修到 3/3 过）
   - 顺带修掉一条 flake:`chat-long-conversation` L1 在全量跑时偶发
     「<div> intercepts pointer events」—— 新造的会话**本身就是 active**,
     而列表会随会话更新重排(updatedAt 变 → 重排序 → 项在鼠标下移动),
     这时去点它会点空 → 改成「已经是 active 就不点」
+
+---
+
+## W5 接线批偏差登记 · M4-N 受控对照的结论增强（2026-11-13）
+
+> M4-J 之后排的下一项：把 M4-E 的受控对照从「三档结论」升级为「二元 + 连续 + 可选 pairwise」。
+> 编号自 DEV-152 起。完整设计见 `docs/NOVA-#009-m4n-trial-signal-design.md`。
+
+| ID | 状态 | 摘要 |
+|---|---|---|
+| DEV-152 | 已修 | **受控对照只有三档结论，且二元判定把信息扔了** · M4-E 的对照只用 `GradeResult.passed`（二值）比大小，**丢掉了同层的 `score`（分层均值）** —— 两次都"失败"时，一次错 1 个工具、一次错 5 个，二元差值一律记 0 → 结论"看不出差别"，而这两次其实差很多（M4-E 自己的注释：「3 次运行得出的差值一次翻转就是 ±33%」）。修：① 每个配对增 `scoreDelta`、汇总增 `meanScoreDelta` 与方向一致性；② 二元结论 neutral 但综合分差方向一致且够大时，说明里补一句「但综合分有稳定差异」——**准入门不动**（设计已定：ACE 式准入门用 held-out reward）；③ 新增 **pairwise 裁判路径**（可选、默认关、按 D7 不参与判定），且**强制换序双向 + 一致性要求**：正反两次结论一致才采信，不一致记 `unstable`（不是"平局"），裁判输出无法解析也记 `unstable` —— M4-J 实测本地裁判换序改口率 68~80%，单次顺序的比较没有信息量 |
+
+### DEV-152 明细
+
+- **为什么不改准入门**：M4-E 设计已定 —— 准入门用二元成功率差值（ACE 社区的
+  「a bullet is committed only when it raises held-out reward」）。
+  改判定口径会推翻既有裁决，且二元口径对「是否越线」更保守。
+  综合分差是**加信息**，不是**换口径**。
+- **pairwise 路径的三条硬规则**（都来自 M4-J 的实测）：
+  ① 正反各跑一次，**两次一致才采信**
+  ② 不一致 → `unstable`（**不是「平局」** —— 平局是裁判的结论，不稳定是裁判不可用）
+  ③ 裁判输出无法解析（`unknown`）→ 同样 `unstable`
+- **裁判不改判定**（D7：LLM 裁判层保持默认关闭）：传了 `pairwiseJudge` 也只进说明，
+  `summary.verdict` 与 `summary.delta` 不受裁判影响（有单测钉住）。
+- **界面**：试验结果表增「综合分差」「裁判对照」两列；
+  `pairwise.note` **独立渲染**（不靠拼进 `summary.note`）——
+  「这个裁判顺序敏感」这类元信息藏起来等于没提示。
+- **回归钉**：`tests/unit/skill-trial-m4n.test.ts`（9 例）+
+  `tests/unit/skills-m4-panels.test.ts` 新增 1 例（试验结果表渲染）
+
+### DEV-153 — workspace 列表排序在同毫秒创建时不兑现承诺（实测 8 轮红 1 轮）
+
+- **现象**：`tests/unit/Workspace.test.ts > listWorkspaces returns workspaces sorted by createdAt desc`
+  偶发红。实测连跑 8 轮抓到 1 轮（1/8 概率）。
+- **根因**：`createdAt` 是 `Date.now()`（**毫秒精度**）→ 同一毫秒内创建的两个 workspace
+  排序键相同；而 `Array.prototype.sort` 是**稳定**的（ES2019 起规范保证）→
+  同键时保留插入顺序 → 列表变成「**旧的在前**」，与函数承诺的
+  「按 createdAt desc（新的在前）」不符。
+  不是测试写错 —— **实现的契约没兑现**：文档说 desc，实现给的是"同键时按插入顺序"。
+- **修法**：`[...values()].reverse().sort((a, b) => b.createdAt - a.createdAt)`
+  —— 先反转插入顺序再**稳定**排序 → 同 `createdAt` 时后建的排前面，
+  「新的在前」在任何情况下都成立。
+  **不用 id 做次级键**：id 是 `randomUUID().slice(0, 8)`，随机、无序，带不出时间语义。
+- **回归钉**：`tests/unit/Workspace.test.ts` 新增一例 —— 把 `Date.now` 钉成同一毫秒，
+  断言「后建的排前面」（断言 a/b 的**相对次序**：WorkspaceManager 是单例，
+  同文件里前面的用例已建过 workspace，绝对位置轮不到这两个）。
+
+### DEV-154 — 命令面板三个真 bug（此前零测试）
+
+> 发现路径：M4-N 跑全量 e2e 时 `keyboard-shortcuts` 的 KS4（命令面板里输入 + Enter 触发命令）红了。
+> 单独跑 **6/6 必挂**，在全量套件里却能过（依赖前置测试留下的状态）→ 不是偶发，是**有状态依赖的确定性失败**。
+> 追下去发现命令面板（`src/components/common/CommandPalette.vue`）**此前零测试**，三个 bug 一起待在那儿：
+
+| # | bug | 现象 | 修法 |
+|---|---|---|---|
+| ① | **过滤漏** | `scoreItem` 的优先级加权（最近 +0.5 / 模板 +0.3）**在零匹配时也加** → `score > 0` 形同虚设 → 输「切换主题」仍列出**全部 5 个 prompt 模板** → 搜索根本不起作用 | 只有 `best > 0` 时才加优先级加权 |
+| ② | **动作抛错 → 面板关不掉** | `await item.action()` 抛出（典型：prompt 模板的 action 是 `router.push('/chat')`，而当前已在 /chat → vue-router 4 抛 **NavigationDuplicated**，是 reject 不是 resolve）→ `close()` 被跳过 → 面板留在屏幕上，用户只能按 Esc | `try/catch/finally`，动作失败也 `close()`，失败记 `console.warn` |
+| ③ | **查询变化后选中态不重置** | 过滤后 `groupedResults` 变短，但 `activeGroupIdx/activeItemIdx` 还指着旧位置 → **高亮消失** + `commit()` 取到 undefined → **Enter 什么都不发生** | `watch(query)` 重置选中为 (0,0)；`commit()` 再加越界夹取兜底 |
+
+- **为什么值得单独记**：①是「搜索功能形同虚设」，③是「按回车没反应」——
+  都是**用户一眼能看见**的问题，而 typecheck、构建、组件测试全都发现不了
+  （面板此前**一个测试都没有**）。
+- **回归钉**：新增 `tests/unit/command-palette.test.ts`（5 例）——
+  过滤真的过滤 / 模板不再混入 / 高亮跟着重置 / Enter 执行最佳匹配项 / 动作抛错仍关面板；
+  外加 e2e KS4（单独跑从 6/6 挂 → 3/3 过）
+
+### 关单（W5 接线批 · M4-N 受控对照的结论增强，2026-11-13）
+
+- **范围**：DEV-152 ~ DEV-154（3 条）
+- **验证**:
+  - 新增单测 `tests/unit/skill-trial-m4n.test.ts`：**9 passed**
+    （分差计算 / 方向一致性 / neutral 时补说明 / mixed 不下结论 /
+    顺序一致采信 / 顺序不一致→unstable / unknown→unstable / **裁判不改判定** / 不传则无字段）
+  - 新增组件测试（`skills-m4-panels.test.ts`）：试验结果表渲染综合分差与裁判对照
+  - vitest: Test Files **133 passed (133)** / Tests **1543 passed | 15 skipped (1558)** / **0 FAIL**
+    （连跑 3 轮全绿；另：连跑 8 轮验证 DEV-153 的 flaky 已消失 —— 修前 8 轮红 1 轮）
+  - vue-tsc **0** · 后端 tsc **0 error** · `npm run build` 门禁 **5 步通过**

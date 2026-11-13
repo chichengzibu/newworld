@@ -223,4 +223,64 @@ describe('M4 技能面板渲染', () => {
     expect(w.text()).not.toContain('边际效用')
     expect(w.text()).not.toContain('效果统计')
   })
+  it('【M4-N】试验结果表:综合分差与裁判对照都落到界面上了', async () => {
+    // 【为什么补这条】M4-N 给试验结果表加了两列(综合分差 / 裁判对照)——
+    // 用户可见的东西必须有自动化守护(M4-H 教训:面板只过 typecheck 不算数)。
+    const result = {
+      skillId: 'pdf-extract',
+      pairs: [
+        {
+          task: { id: 't0', instruction: '把桌面上的 PDF 归档' },
+          withSkill: { variant: 'with_skill', run: {}, grade: { passed: true, score: 1, layers: [] } },
+          withoutSkill: { variant: 'without_skill', run: {}, grade: { passed: false, score: 0.33, layers: [] } },
+          delta: 1,
+          scoreDelta: 0.67,
+          pairwise: 'with_better',
+        },
+        {
+          task: { id: 't1', instruction: '整理下载文件夹' },
+          withSkill: { variant: 'with_skill', run: {}, grade: { passed: false, score: 0.33, layers: [] } },
+          withoutSkill: { variant: 'without_skill', run: {}, grade: { passed: false, score: 0.53, layers: [] } },
+          delta: 0,
+          scoreDelta: -0.2,
+          pairwise: 'unstable',
+        },
+      ],
+      summary: {
+        n: 2, withSkillSuccesses: 1, withoutSkillSuccesses: 0,
+        withSkillRate: 0.5, withoutSkillRate: 0, delta: 0.5,
+        verdict: 'positive', note: '有帮助:带该技能的成功率明显更高(差值 50%,判定门槛 ±10%)',
+        meanScoreDelta: 0.235, scoreDeltaDirection: 'mixed',
+        pairwise: {
+          n: 2, withBetter: 1, withoutBetter: 0, tie: 0, unstable: 1,
+          note: 'pairwise 裁判(参考信号,不参与判定):2 个配对 —— 带技能更好 1 / 不带更好 0 / 平局 0;其中 1 个**两次顺序结论不一致**(unstable)——裁判在这些配对上顺序敏感,不可当结论用',
+        },
+      },
+      finishedAt: 0,
+    }
+    installApi({ skills: { ...installApi().skills, runUtilityTrial: vi.fn().mockResolvedValue({ success: true, data: result }) } })
+
+    const w = await mountView()
+    const sel = w.findComponent({ name: 'ElSelect' })
+    sel.vm.$emit('update:modelValue', 'pdf-extract')
+    await flushPromises()
+    const ta = w.find('textarea')
+    ta.setValue('把桌面上的 PDF 归档' + String.fromCharCode(10) + '整理下载文件夹')
+    await flushPromises()
+
+    const btn = w.findAll('button').find((b: any) => b.text().includes('开始验证'))
+    await btn!.trigger('click')
+    await flushPromises()
+    await flushPromises()
+
+    const text = w.text()
+    // 综合分差:两行分别 +67% 与 -20%
+    expect(text).toContain('+67%')
+    expect(text).toContain('-20%')
+    // 裁判对照:一致 → 带技能更好;不一致 → 不稳定(不是"平局")
+    expect(text).toContain('带技能更好')
+    expect(text).toContain('不稳定')
+    // 汇总说明里要点明裁判顺序敏感
+    expect(text).toContain('顺序敏感')
+  })
 })
