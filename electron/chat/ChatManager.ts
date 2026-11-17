@@ -257,7 +257,23 @@ export class ChatManager {
       }
     }
 
-    // 2. 添加用户消息
+    // 2. 【M4-Q 修】把传入的 provider/model **落到会话上**。
+    // 此前 sendMessage 收了 providerId 却只写进"用户消息"里,**从不写会话**;
+    // 而 agent 路径(dispatchToAgent)读的是**会话上的** providerId
+    // → 经 IPC 发消息(IM 通道 / 定时任务 / 语音 / 任何外部调用方)时
+    //   agent 永远拿不到 provider → 每条消息都报
+    //   「[LlmAgentBrain error] no LLM provider configured」→ 回落旧管道
+    //   → **学习闭环(M4-B/M4-F)记到的全是这种失败**。
+    // UI 路径没暴露这个问题,是因为模型选择器自己调了 store.setCurrentModel
+    // (它会 updateConversation)—— 两条路径不一致。
+    if (providerId || modelId) {
+      const conv = this.config.getConversation(conversationId);
+      if (conv && (conv.providerId !== providerId || conv.modelId !== modelId)) {
+        this.config.updateConversation(conversationId, { providerId, modelId });
+      }
+    }
+
+    // 3. 添加用户消息
     const userMessage: ChatMessage = {
       id: `user_${Date.now()}`,
       role: 'user',

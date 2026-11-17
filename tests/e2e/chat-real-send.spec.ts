@@ -47,7 +47,7 @@ test.describe('T+90 Chat 真链路 send/receive', () => {
       const r = await api.models.add({
         name: 'Ollama Local (T+90)',
         type: 'openai',
-        baseUrl: 'http://localhost:11434/v1',
+        baseUrl: 'http://127.0.0.1:11434/v1',
         apiKey: 'no-key',
         enabled: true,
         timeout: 60_000,

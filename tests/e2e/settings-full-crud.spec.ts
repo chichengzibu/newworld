@@ -33,7 +33,7 @@ test.describe('T+540 Settings 模型管理完整 CRUD', () => {
       const r = await api.models.add({
         name: 'CR Test Provider',
         type: 'openai',
-        baseUrl: 'http://localhost:11434/v1',
+        baseUrl: 'http://127.0.0.1:11434/v1',
         apiKey: 'no-key',
         enabled: true,
         timeout: 30000,
@@ -143,7 +143,7 @@ test.describe('T+540 Settings 模型管理完整 CRUD', () => {
       const r = await api.models.add({
         name: 'CR Test Provider',
         type: 'openai',
-        baseUrl: 'http://localhost:11434/v1',
+        baseUrl: 'http://127.0.0.1:11434/v1',
         apiKey: 'no-key',
         enabled: true,
         timeout: 30000,

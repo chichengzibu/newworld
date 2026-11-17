@@ -84,15 +84,27 @@ jobs:
       - name: Sandbox selfcheck
         run: node scripts/sandbox-selfcheck.mjs || echo "sandbox soft-fail no docker in CI"
 
-      - name: Playwright e2e - active specs (ubuntu only, hard-fail)
+      # 【M4-Q】e2e 全量进门禁
+      # 此前这一步只跑 **4 个 spec**(chat-agent / settings-p7 / a5-computer-use /
+      # ui-smoke)—— 而近几批挖到的 P0 全都**不在那 4 个里**:
+      #   · Chat 虚拟列表红屏(打开有消息的会话就整屏报错)
+      #   · 悬浮命令按钮压住「发送」按钮
+      #   · MCP 沙箱拒绝被报告成「调用成功」
+      # 「跑」没有变成「门禁」,bug 就会再来一遍。现:跑**全量**。
+      #
+      # 两个前置:
+      #   ① xvfb —— Linux runner 没有 X server,Electron 起不来
+      #   ② mock LLM 顶在 11434 —— 依赖 LLM 端点的 spec(error-recovery /
+      #      network-failure / …)用仓库自带的 mock,**不装 6GB 真模型**(也不下载)，
+      #      断言保持确定性
+      - name: Playwright e2e - FULL suite (ubuntu only, hard-fail)
         if: matrix.os == 'ubuntu-latest'
-        # 仅跑非 placeholder 的 active spec,hard-fail
-        # placeholder specs(需要 docker/飞书凭证)继续 skip
         run: |
           npx playwright install --with-deps chromium
-          E2E_ELECTRON=1 npx playwright test \
-            tests/e2e/chat-agent.spec.ts \
-            tests/e2e/settings-p7.spec.ts \
-            tests/e2e/a5-computer-use.spec.ts \
-            tests/e2e/ui-smoke.spec.ts \
-            --reporter=line
+          sudo apt-get update && sudo apt-get install -y xvfb
+          # mock LLM:让依赖 LLM 端点的 spec 有确定性响应
+          node scripts/mock-llm-server.mjs 11434 &
+          sleep 3
+          xvfb-run -a env E2E_ELECTRON=1 npx playwright test --reporter=line
+          # mock LLM 不用主动杀 —— job 结束即回收
+

@@ -115,7 +115,7 @@ test.describe('T+600 Network 离线 / 黑洞 / 超时', () => {
     // 注入好 Ollama
     await addProviderAndReload(window, {
       name: 'Good Ollama (T+600)',
-      baseUrl: 'http://localhost:11434/v1',
+      baseUrl: 'http://127.0.0.1:11434/v1',
       timeout: 60_000,
       models: [{ id: 'qwen3.5:9b', name: 'qwen3.5:9b', capabilities: ['chat'] }],
     })

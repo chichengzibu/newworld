@@ -52,7 +52,11 @@ test.describe('T+150 Chat 长对话历史', () => {
 
   /** 造一条有 N 轮对话的会话(自给自足,不依赖别的 spec) */
   async function seedConversation(window: any, rounds: number): Promise<void> {
-    await addProviderAndReload(window, {
+    // 【M4-Q 修】providerId 必须留着并传给 sendMessage ——
+    // 不传的话 agent 路径(LlmAgentBrain → LlmClient)拿不到 provider →
+    // 每条助手回复都是「[LlmAgentBrain error] no LLM provider configured」,
+    // 而本 spec 只断言"消息条数 > 0"(**用户消息就够数**)→ **一直在假通过**。
+    const providerId = await addProviderAndReload(window, {
       name: MOCK_PROVIDER,
       baseUrl: `http://127.0.0.1:${MOCK_PORT}/v1`,
       models: [{ id: 'mock-model', name: 'mock-model', capabilities: ['chat'] }],
@@ -70,12 +74,12 @@ test.describe('T+150 Chat 长对话历史', () => {
     })
     if (!conversationId) throw new Error('造历史时拿不到会话 id')
 
-    await window.evaluate(async ({ convId, n }: { convId: string; n: number }) => {
+    await window.evaluate(async ({ convId, n, providerId }: { convId: string; n: number; providerId: string }) => {
       const api = (window as any).electronAPI
       for (let i = 0; i < n; i++) {
-        await api.chat.sendMessage(convId, `第 ${i + 1} 轮消息`, undefined, 'mock-model')
+        await api.chat.sendMessage(convId, `第 ${i + 1} 轮消息`, providerId, 'mock-model')
       }
-    }, { convId: conversationId, n: rounds })
+    }, { convId: conversationId, n: rounds, providerId })
 
     await window.waitForTimeout(1500)
   }
@@ -133,6 +137,19 @@ test.describe('T+150 Chat 长对话历史', () => {
     const messages = window.locator('.message-outer')
     const count = await messages.count()
     expect(count).toBeGreaterThan(0)
+
+    // 【M4-Q 修】断**内容**,不只是条数 —— 只断条数时,用户消息就够数,
+    // 助手回复其实是一句报错也能过(实测踩过:回复全是
+    // 「[LlmAgentBrain error] no LLM provider configured」,用例照样绿)。
+    // 现在必须看到 mock 的真回复才算数。
+    const assistantTexts = await window.evaluate(() =>
+      Array.from(document.querySelectorAll('.message.assistant')).map((e: any) => (e.textContent ?? '').trim()))
+    expect(assistantTexts.length, '一条助手回复都没有').toBeGreaterThan(0)
+    expect(
+      assistantTexts.some(t => t.includes('MOCK_LLM_OK')),
+      `助手回复里没有 mock 的真回复:${JSON.stringify(assistantTexts.slice(0, 3))}`,
+    ).toBe(true)
+    expect(assistantTexts.some(t => t.includes('no LLM provider configured'))).toBe(false)
   })
 
   test('L4: 输入框始终可见(滚到底部)', async ({ window }) => {

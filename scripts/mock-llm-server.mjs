@@ -66,6 +66,38 @@ const server = createServer((req, res) => {
         `[${ts}] POST /v1/chat/completions #${requestCount} model=${payload.model} userMsgLen=${userMsg.length} -> ${responseContent.slice(0, 80)}`,
       )
 
+      // 【M4-Q 修】支持 SSE 流式。
+      // 为什么必须:app 的聊天路径走 `streamChat`,而适配器**只解析 `data:` 行**
+      // (openai-compatible.ts:「if (!trimmed.startsWith('data:')) continue」)。
+      // mock 原来只回普通 JSON → 一行 data: 都解析不到 → **内容永远进不来**
+      // (助手气泡只有时间戳)→ 依赖 mock 的 e2e 一直在假通过。
+      if (payload.stream === true) {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        const chunks = responseContent.match(/.{1,24}/gs) ?? [responseContent];
+        for (const c of chunks) {
+          res.write(`data: ${JSON.stringify({
+            id: `mock-chatcmpl-${requestCount}`,
+            object: 'chat.completion.chunk',
+            created: Math.floor(Date.now() / 1000),
+            model: payload.model || 'mock-gpt',
+            choices: [{ index: 0, delta: { content: c }, finish_reason: null }],
+          })}\n\n`);
+        }
+        res.write(`data: ${JSON.stringify({
+          id: `mock-chatcmpl-${requestCount}`,
+          object: 'chat.completion.chunk',
+          created: Math.floor(Date.now() / 1000),
+          model: payload.model || 'mock-gpt',
+          choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+          usage: { prompt_tokens: userMsg.length, completion_tokens: responseContent.length, total_tokens: userMsg.length + responseContent.length },
+        })}\n\n`);
+        res.write('data: [DONE]\n\n');
+        res.end();
+        return;
+      }
+
       res.setHeader('Content-Type', 'application/json')
       res.end(
         JSON.stringify({

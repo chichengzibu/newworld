@@ -1773,3 +1773,62 @@
   - e2e 全量：**134 passed / 0 failed / 33 skipped**（8.0 分钟）
   - vitest: Test Files **135 passed (135)** / Tests **1549 passed | 15 skipped (1564)** / **0 FAIL**
   - vue-tsc **0** · 后端 tsc **0 error** · `npm run build` 门禁 **5 步通过**
+
+---
+
+## W5 接线批偏差登记 · M4-Q e2e 进 CI 门禁（2026-11-13）
+
+> 上一批定的顺序:先把「跑」变成「门禁」,再实跑剩余界面。本批做第一件,
+> **过程中挖出一条"一直在假通过"的 e2e** —— 门禁要是有假绿,比没有门禁更危险。
+> 编号自 DEV-159 起。完整设计见 `docs/NOVA-#009-m4q-e2e-ci-gate-design.md`。
+
+| ID | 状态 | 摘要 |
+|---|---|---|
+| DEV-159 | 已修 | **e2e 门禁只覆盖 4 个 spec** · CI(`.github/workflows/ci.yml`)的 Playwright 步骤只跑 chat-agent / settings-p7 / a5-computer-use / ui-smoke **四个文件** —— 而近几批挖到的 P0 **全都不在那四个里**:Chat 虚拟列表整屏红屏、悬浮命令按钮压住「发送」、MCP 沙箱拒绝被报告成「调用成功」。「跑」没有变成「门禁」,bug 就会再来一遍。修:改跑**全量**(ubuntu + xvfb),依赖 LLM 端点的 spec 用仓库自带的 mock 顶在 11434(不装 6GB 真模型) |
+| DEV-160 | 已修 | **★ sendMessage 收了 providerId 却从不写回会话** · `sendMessage(conversationId, content, providerId, modelId)` 把 providerId 只写进"用户消息"里,**会话本身没有**;而 agent 路径(`dispatchToAgent`)读的是**会话上的** providerId → 经 IPC 发消息时(IM 通道 / 定时任务 / 语音 / 任何外部调用方)agent 永远拿不到 provider → 每条消息都报「[LlmAgentBrain error] no LLM provider configured」→ 回落旧管道 → **学习闭环(M4-B/M4-F)记到的全是这种失败**。UI 路径没暴露,是因为模型选择器自己调 `store.setCurrentModel`(它会 updateConversation)—— **两条路径不一致**。修:sendMessage 把传入的 provider/model 落到会话上 |
+| DEV-161 | 已修 | **★ mock LLM 不支持 SSE → 内容一行都进不来** · app 的聊天走 `streamChat`,而适配器**只解析 `data:` 行**(`if (!trimmed.startsWith('data:')) continue`);mock 只回普通 JSON → 即使 provider 接通了,**助手气泡里也只有时间戳**。于是依赖 mock 的 e2e 断言「消息条数 > 0」时**用户消息就够数** → 一直在假通过。修:mock 支持 `stream:true` 时回 SSE(分块 + `[DONE]`) |
+| DEV-162 | 已修 | **依赖 mock 的 e2e 只断条数,不断内容** · `chat-long-conversation` 的 L3 断言「message 元素 > 0」——**助手回复即使全是报错也算过**(实测踩过:每条都是「no LLM provider configured」,用例照样绿)。修:改为断言**助手气泡里出现 mock 的真回复标记**,且**不得**出现 provider 未配置的报错 |
+| DEV-163 | 已修 | **mock 只绑 127.0.0.1,而 spec 用 localhost** · Linux 上 `localhost` 可能按 RFC 6724 优先解析到 `::1` → 连不上只绑 IPv4 的 mock。修:依赖 LLM 端点的 spec 统一用 `http://127.0.0.1:11434/v1` |
+
+### DEV-160~162 明细（三处叠在一起，才让 e2e 一直"绿"）
+
+一个用 mock LLM 发消息的 e2e，要走通这条链需要三处都对：
+
+```
+sendMessage(convId, msg, providerId, modelId)
+   │
+   ├─ ① 会话上要有 providerId   ← 原实现只写进"用户消息",会话上没有 ★
+   │
+   ├─ ② dispatchToAgent 读会话上的 providerId → 映射成内联配置(M4-L 加的通道)
+   │
+   └─ ③ mock 要回 SSE            ← 原实现只回普通 JSON ★
+                                      → 适配器只认 data: 行 → 内容一行都进不来
+```
+
+**三处任缺其一，助手回复就是空的（或一句报错），而"消息条数 > 0"的断言照样通过。**
+
+- 修完后的实测：助手气泡内容 = `MOCK_LLM_OK_1_WITH_INPUT: 收到 "你好"` ✓
+- **回归钉**：`tests/e2e/mock-llm.spec.ts`（1 例：app 必须把 mock 的回复**真的显示出来**，
+  且**不得**出现「no LLM provider configured」）+
+  `chat-long-conversation` 的 L3 改为断内容（不再只断条数）
+
+### 关单（W5 接线批 · M4-Q e2e 进 CI 门禁，2026-11-13）
+
+- **范围**：DEV-159 ~ DEV-163（5 条）
+- **验证**：
+  - e2e 全量：**135 passed / 0 failed / 33 skipped**（8.0 分钟）
+  - vitest: Test Files **135 passed (135)** / Tests **1549 passed | 15 skipped (1564)** / **0 FAIL**
+  - vue-tsc **0** · 后端 tsc **0 error** · `npm run build` 门禁 **5 步通过**
+  - 新增 e2e `mock-llm.spec.ts`：app 必须把 mock 回复**真的显示出来**，
+    且**不得**出现「no LLM provider configured」
+
+### DEV-159 明细（CI 门禁）
+
+- 改前：4 个 spec 文件 · 改后：**全量**（`npx playwright test`）
+- 两个前置：
+  ① **xvfb** —— Linux runner 没有 X server，Electron 起不来
+  ② **mock LLM 顶在 11434** —— 依赖 LLM 端点的 spec 用 mock，**不装 6GB 真模型**也不下载
+- npm 脚本：`test:e2e:electron`（Playwright Electron 套件）·
+  `test:all`（vitest + build + electron e2e）
+  —— 注意：原有的 `test:e2e` 是**另一套**（浏览器侧 vitest + vite dev server），
+  本批**没有动它**，另起名字以免混淆

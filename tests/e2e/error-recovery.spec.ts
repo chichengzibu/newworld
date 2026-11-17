@@ -92,7 +92,7 @@ test.describe('T+480 Chat 错误处理 / 降级 UX', () => {
     // (Chat.vue 只在 onMounted 拉一次)→ 模型选择器里没有这一项 → 选不中
     await addProviderAndReload(window, {
       name: 'Good Ollama (T+480 ER2)',
-      baseUrl: 'http://localhost:11434/v1',
+      baseUrl: 'http://127.0.0.1:11434/v1',
       timeout: 30_000,
       models: [{ id: 'qwen3.5:9b', name: 'qwen3.5:9b', capabilities: ['chat'] }],
     })
@@ -120,8 +120,12 @@ test.describe('T+480 Chat 错误处理 / 降级 UX', () => {
     await window.waitForFunction(() => {
       const bubbles = document.querySelectorAll('.message.assistant, .assistant-message, [class*="message"][class*="assistant"]')
       for (const b of Array.from(bubbles)) {
-        const text = b.textContent ?? ''
-        if (text.includes('4') && text.length > 3) return true
+        // 【M4-Q】原来断的是「回复里包含 4」—— 那是**模型算术能力**的断言,
+        // 既不稳定(小模型可能答 4 也可能答"二加二等于四"),也让这条用例**没法用
+        // mock LLM 跑**(CI 里不装 6GB 真模型)。本用例要验的是
+        // 「错误之后切回正确 provider,**还能继续发消息**」—— 断「有非空回复」即可。
+        const text = (b.textContent ?? '').trim()
+        if (text.length > 3) return true
       }
       return false
     }, { timeout: 180_000 })

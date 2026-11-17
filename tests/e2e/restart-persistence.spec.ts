@@ -95,7 +95,7 @@ test.describe('T+420 状态持久化到磁盘', () => {
       const r = await api.models.add({
         name: 'Ollama Persistence Test (T+420)',
         type: 'openai',
-        baseUrl: 'http://localhost:11434/v1',
+        baseUrl: 'http://127.0.0.1:11434/v1',
         apiKey: 'no-key',
         enabled: true,
         timeout: 30_000,

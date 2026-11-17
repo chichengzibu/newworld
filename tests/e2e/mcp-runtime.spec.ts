@@ -73,13 +73,17 @@ test.describe('MCP 运行时 · 端到端', () => {
       expect(text, '相对路径没按授权目录解析 —— 拿到了仓库根').not.toContain('node_modules')
 
       // 越界必须被拒(授权目录之外)
+      // 越界路径要**按平台取**:Windows 用系统目录,Linux 用 /etc/passwd
+      const outsidePath = process.platform === 'win32'
+        ? 'C:\\Windows\\System32\\drivers\\etc\\hosts'
+        : '/etc/passwd'
       const blocked = await window.evaluate(async (payload) => {
         const api = (window as any).electronAPI
         return api.mcp.invoke(payload)
       }, {
         server: serverName,
         toolName: 'read_file',
-        args: { path: 'C:\\Windows\\System32\\drivers\\etc\\hosts' },
+        args: { path: outsidePath },
       })
       expect(blocked?.success, '越界访问竟然成功了 —— 沙箱失效!').toBe(false)
       expect(String(blocked?.error ?? '')).toMatch(/sandbox|outside|not under/i)

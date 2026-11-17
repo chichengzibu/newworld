@@ -621,7 +621,30 @@ M4-E 的受控对照回答「这个技能到底有没有用」,但结论只有�
 验证:新增 e2e `mcp-runtime.spec.ts`(2 例:集成链通 + 默认白名单够不着工作目录)·
 新增单测 `mcp-invoke-errors.test.ts`(2 例)· PoC **14/14 仍 PASS**
 
+### 🚪 e2e 进 CI 门禁(M4-Q)
+
+CI 的 Playwright 步骤此前**只跑 4 个 spec 文件**(chat-agent / settings-p7 /
+a5-computer-use / ui-smoke)—— 而近几批挖到的 P0(Chat 整屏红屏 / 悬浮命令按钮压住
+「发送」/ MCP 沙箱拒绝被报告成「调用成功」)**全都不在那四个里**。
+「跑」没有变成「门禁」,bug 就会再来一遍。现:改跑**全量**(ubuntu + xvfb),
+依赖 LLM 端点的 spec 用仓库自带的 **mock LLM 顶在 11434**(不装 6GB 真模型、也不下载)。
+
+**过程中挖出一条一直在假通过的 e2e** —— 要把 e2e 变成门禁,先得确认它们真在跑东西。
+拿 mock LLM 核对时发现助手气泡是空的(只有时间戳),三处叠在一起:
+
+- **★ sendMessage 收了 providerId 却从不写回会话**(产品缺陷)—— agent 路径读的是**会话上的**
+  providerId → 经 IPC 发消息时(IM 通道/定时任务/语音/任何外部调用方)agent 永远拿不到
+  provider → 每条消息报「no LLM provider configured」→ 回落旧管道 →
+  **学习闭环记到的全是这种失败**。UI 路径没暴露,是因为模型选择器自己调了
+  `store.setCurrentModel`(它会 updateConversation)—— 两条路径不一致
+- **★ mock 不支持 SSE**(测试件缺陷)—— 适配器只解析 `data:` 行,普通 JSON 的内容一行都进不来
+- **断言只断"消息条数 > 0"** —— **用户消息就够数**,助手回复全是报错也算过
+
+修完实测助手气泡 = `MOCK_LLM_OK_1_WITH_INPUT: 收到 "你好"` ✓
+另新增 e2e `mock-llm.spec.ts`:必须看到 mock 的真回复,**且不得**出现 provider 未配置的报错。
+
 ### 📊 验证
+
 
 
 
