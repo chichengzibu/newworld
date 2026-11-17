@@ -2,7 +2,7 @@
 
 > **总目标**：Agent runtime 跟 ClaudeCode 对齐 + MCP 集成 + 知识库真向量 = 能力超越 ClaudeCode 起点
 > **现状**：v4.4.0 ship 完成（5 P0 安全 + 14 v4.4 视觉），总评 6.5/10
-> **差距**：MCP 0% / 知识库假向量 / Agent 死代码 / 沙箱 stub / ~~LLM 精神分裂~~（M4-L 已修 agent 路径取不到用户 provider 这一半）
+> **差距**：~~MCP 0%~~（M4-P 实测：传输层与集成链均已通并端到端验过）/ 知识库假向量 / Agent 死代码 / 沙箱 stub / ~~LLM 精神分裂~~（M4-L 已修 agent 路径取不到用户 provider 这一半）
 
 ## M1 — v4.5.0-alpha（4 周）
 
@@ -70,6 +70,7 @@
 | **M4-M** | **低频功能的入口可达性**（ClawHub 技能市场 / 模型对比丢了侧栏入口 —— 技能市场只藏在「导入」对话框的页签里(2 层深),模型对比只有 Ctrl+K。对比 Claude Code / Cursor / Cherry Studio / OpenChat / 飞书后定:**不进侧栏**,改为在**母页面**放**带文字**的按钮(技能页「浏览 ClawHub 市场」+ 模型页「对比模型」); 顺带修 e2e harness 自身缺陷:DevTools 把视口从 1280 挤到 725,导致位置类断言失真且会假通过 | `NOVA-#009-m4m-entry-points-design.md` |
 | **M4-N** | **受控对照的结论增强**（M4-E 的对照只用二值 `passed`,把 `GradeResult.score` 扔了 —— 两次都失败但一次错 1 个工具、一次错 5 个时结论只能写「看不出差别」。现:加连续分差与方向一致性(**准入门不动**),并新增 pairwise 裁判路径(可选/默认关/按 D7 不参与判定,且**强制换序双向 + 一致性要求** —— M4-J 实测本地裁判换序改口率 68~80%) | `NOVA-#009-m4n-trial-signal-design.md` |
 | **M4-O** | **小屏等比缩放**（布局固定按 1280px 铺开 + 窗口 `minWidth: 1280` → 1366×768 笔记本开 125% 缩放这档（CSS 宽 1092）**右边一截在屏幕外**,发送按钮这类靠右的元素够不着。现:窗口窄于设计宽度时按比例缩小页面,布局仍按 1280 铺开 → 什么都不裁切;`minWidth` 放宽到 900、resize 去抖、缩放下限 0.6 | `NOVA-#009-m4o-small-screen-scaling-design.md` |
+| **M4-P** | **MCP 运行时端到端**（路线图那句「MCP 0%」已陈旧 —— 传输层早通了(PoC 14/14),但「配置→启动→工具同步进 agent→真调用」这条集成链**从没端到端跑过**(PoC 的 Phase 2 跳过、Phase 3 只 grep 产物)。补了真跑 → 挖出三个问题:**工具级错误(isError)被当成「调用成功」**（沙箱拒绝被报告成功 → LLM 会说「已完成」）· **默认白名单含程序工作目录**（路径沙箱开了个洞）· 相对路径按 cwd 解析导致「配了却用不了」。三条全修 + 设置页补「允许路径」字段 | `NOVA-#009-m4p-mcp-runtime-design.md` |
 
 **构建门禁**（M3-F 引入，此后每批都守着）：
 `[1/5] 主进程 typecheck → [2/5] 渲染进程 typecheck → [3/5] vite build → [4/5] electron-builder → [5/5] build-report`

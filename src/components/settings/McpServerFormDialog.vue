@@ -50,6 +50,19 @@
         </div>
       </el-form-item>
 
+      <el-form-item label="允许路径">
+        <el-input
+          v-model="allowedPathsText"
+          type="textarea"
+          :rows="3"
+          placeholder="每行一个目录,例如:&#10;D:\MyProject&#10;留空 = 只允许访问应用自己的沙箱目录"
+        />
+        <div class="dir-empty">
+          路径沙箱:文件类 MCP Server 只能访问这里列出的目录。未列出的目录一律拒绝 ——
+          留空则只允许应用自己的沙箱目录(不包含程序的工作目录)。
+        </div>
+      </el-form-item>
+
       <el-form-item label="启用">
         <el-switch v-model="formData.enabled" />
       </el-form-item>
@@ -77,6 +90,8 @@ const props = defineProps<{
     args?: string[];
     env?: Record<string, string>;
     enabled: boolean;
+    /** 路径白名单(文件类 MCP Server 只能碰这些目录) */
+    allowedPaths?: string[];
   };
 }>();
 
@@ -87,6 +102,7 @@ const emit = defineEmits<{
     command: string;
     args: string[];
     env: Record<string, string>;
+    allowedPaths: string[];
     enabled: boolean;
     isEdit: boolean;
   }];
@@ -103,6 +119,9 @@ const formData = reactive({
   envKeys: {} as Record<string, string>,
   enabled: true,
 });
+
+/** 「允许路径」输入框的文本(每行一个路径) */
+const allowedPathsText = ref('');
 
 const formRules: FormRules = {
   name: [
@@ -121,6 +140,7 @@ watch(() => props.modelValue, (visible) => {
     formData.command = props.server.command;
     formData.args = props.server.args ? [...props.server.args] : [];
     formData.enabled = props.server.enabled;
+    allowedPathsText.value = (props.server.allowedPaths ?? []).join(String.fromCharCode(10));
     
     formData.env = {};
     formData.envKeys = {};
@@ -142,6 +162,7 @@ function resetForm(): void {
   formData.env = {};
   formData.envKeys = {};
   formData.enabled = true;
+  allowedPathsText.value = '';
 }
 
 function addArg(): void {
@@ -187,6 +208,10 @@ function handleSubmit(): void {
         command: formData.command,
         args: formData.args.filter(arg => arg.trim() !== ''),
         env: finalEnv,
+        allowedPaths: allowedPathsText.value
+          .split(String.fromCharCode(10))
+          .map(line => line.trim())
+          .filter(line => line !== ''),
         enabled: formData.enabled,
         isEdit: isEdit.value,
       });

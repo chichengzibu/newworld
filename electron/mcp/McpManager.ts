@@ -155,7 +155,13 @@ export class McpManager {
       const sandbox = path.join(userData, 'sandbox');
       try { fs.mkdirSync(sandbox, { recursive: true }); } catch { /* ignore */ }
 
-      const allowed = config.allowedPaths ?? [sandbox, process.cwd()];
+      // 【M4-P 修】默认白名单**只给应用自己的沙箱目录**。
+      // 原来还有 `process.cwd()` —— 那是开发期"方便读仓库"留下的,但对**装到用户
+      // 机器上**的应用来说 cwd 是任意的启动目录(快捷方式启动时甚至可能是 System32),
+      // 把"当前工作目录"无条件放进白名单 = 路径沙箱开了个洞;
+      // 而设置页当时**还没有** allowedPaths 字段 → 用户根本没法自己收窄。
+      // 现:默认只碰 userData/sandbox;要访问别的目录由用户在设置页显式授权。
+      const allowed = config.allowedPaths ?? [sandbox];
       const { command, args, env } = buildFilesystemCommand(config, allowed);
 
       log.info(
@@ -338,9 +344,28 @@ export class McpManager {
           durationMs: Date.now() - start,
         };
       }
+      const result = resp.result as McpToolResult;
+      // 【M4-P 修】MCP 有**两层错误**:JSON-RPC error(协议级)与
+      // **工具级 isError**(MCP 约定:工具执行失败时返回正常响应 + isError:true)。
+      // 路径沙箱拒绝、文件不存在、参数非法都属于后者 —— 原先只查了 JSON-RPC error,
+      // 于是**沙箱拒绝被当成"调用成功"返回**:success:true,错误文本藏在 content 里。
+      // 后果:调用方(设置页的"测试"按钮)和**LLM 都会以为这次调用成功了**,
+      // agent 可能据此告诉用户"已完成",而文件根本没读到。
+      if (result?.isError) {
+        const text = (result.content ?? [])
+          .map((c: { type?: string; text?: string }) => (c?.type === 'text' ? (c.text ?? '') : JSON.stringify(c)))
+          .join('; ')
+          .trim();
+        return {
+          success: false,
+          error: text || `MCP 工具 ${toolName} 执行失败`,
+          errorCode: -32000,
+          durationMs: Date.now() - start,
+        };
+      }
       return {
         success: true,
-        result: resp.result as McpToolResult,
+        result,
         durationMs: Date.now() - start,
       };
     } catch (e) {

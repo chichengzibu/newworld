@@ -1722,3 +1722,54 @@
   - vitest: Test Files **133 passed (133)** / Tests **1543 passed | 15 skipped (1558)** / **0 FAIL**
     （连跑 3 轮全绿；另：连跑 8 轮验证 DEV-153 的 flaky 已消失 —— 修前 8 轮红 1 轮）
   - vue-tsc **0** · 后端 tsc **0 error** · `npm run build` 门禁 **5 步通过**
+
+---
+
+## W5 接线批偏差登记 · M4-P MCP 运行时端到端（2026-11-13）
+
+> 路线图开篇的差距写着「MCP 0%」。本批先**量**再下结论:传输层通（PoC 14/14），
+> 但「配置 → 启动 → 工具同步进 agent → 真调用」这条集成链**从没端到端跑过**
+> （PoC 的 Phase 2 跳过、Phase 3 只 grep 产物里有没有字样）。
+> 补了真跑 → **挖出三个问题，其中一个是「沙箱拒绝被报告成调用成功」**。
+> 编号自 DEV-156 起。完整设计见 `docs/NOVA-#009-m4p-mcp-runtime-design.md`。
+
+| ID | 状态 | 摘要 |
+|---|---|---|
+| DEV-156 | 已修 | **★ MCP 工具级错误被当成「调用成功」** · MCP 有两层错误:JSON-RPC error(协议级)与**工具级 `isError`**(MCP 约定:工具失败时返回正常响应 + isError:true —— 路径沙箱拒绝/文件不存在/权限不足都属于这类)。`McpManager.invoke` 只查了前者 → **后者被当成成功**(`success:true`,错误文本藏在 content 里)。后果不是日志难看:设置页「测试」按钮显示成功、**LLM 以为调用成功了** → agent 可能据此告诉用户「已完成」,而文件根本没读到。修:invoke 检查 `result.isError` → 以失败返回,错误文本提取给调用方/LLM |
+| DEV-157 | 已修 | **★ 默认路径白名单含程序的工作目录** · `allowed = config.allowedPaths ?? [sandbox, process.cwd()]` —— `process.cwd()` 是开发期「方便读仓库」留下的,但对**装到用户机器上**的应用,cwd 是任意的启动目录(快捷方式启动时甚至可能是 System32)→ **把「当前工作目录」无条件放进白名单 = 路径沙箱开了个洞**;而设置页当时**还没有 allowedPaths 字段** → 用户根本没法自己收窄。修:默认只给 `userData/sandbox`;要访问别的目录由用户在设置页显式授权(本批同时补上该字段) |
+| DEV-158 | 已修 | **相对路径按 cwd 解析 → 配了却用不了** · server 里相对路径按 `process.cwd()` 解析,而默认白名单(`userData/sandbox`)与 cwd 毫无关系 → 相对路径永远落在沙箱外 → 工具「配了但用不了」。修:相对路径的基准改为**第一个白名单根**(语义即「在我被允许的那个目录里」) |
+
+### DEV-156 明细（MCP 的两层错误）
+
+| 层 | 形态 | 例子 | 原实现 |
+|---|---|---|---|
+| ① JSON-RPC error | 协议级错误响应 | 方法不存在、参数非法 | ✓ 查了 |
+| ② **工具级 `isError`** | **正常响应 + `isError:true`** | **路径沙箱拒绝、文件不存在、权限不足** | ✗ **没查** |
+
+- 隔离复现（自己起 server、给一个白名单、读白名单外的文件）：
+  server 返回的是 `{"content":[{"type":"text","text":"Tool error: path outside sandbox: …"}],"isError":true}` —— **一个"成功"的 JSON-RPC 响应**
+- 修：`McpManager.invoke` 在拿到响应后检查 `result.isError` → 返回 `success:false` + 错误文本
+- **一处修复覆盖两条路径**：`McpToolAdapter.execute` 本来就看 `res.success` → agent 侧同步受益
+
+### DEV-157 明细（白名单默认值）
+
+- 原来：`config.allowedPaths ?? [sandbox, process.cwd()]`
+- 现在：`config.allowedPaths ?? [sandbox]`
+- 配套：**设置页 MCP 表单补「允许路径」字段**（每行一个目录，留空 = 只允许应用自己的沙箱目录）——
+  原来用户**无法**配置白名单，只能吃默认
+- 回归：e2e 断言「默认白名单下读程序工作目录 → 被拒」
+
+### 回归钉
+
+- `tests/e2e/mcp-runtime.spec.ts`（2 例）：集成链通 + 默认白名单够不着工作目录
+- `tests/unit/mcp-invoke-errors.test.ts`（2 例）：工具级失败必须以失败返回 / 正常返回拼成 LLM 可读文本
+- `tests/unit/mcp-form-allowed-paths.test.ts`（4 例）：表单有「允许路径」/ 保存真的传出去 / 编辑能回填 / 留空 = 只允许沙箱
+- `scripts/mcp-filesystem-poc.mjs`：**14/14 PASS**（server 改动没弄坏底层）
+
+### 关单（W5 接线批 · M4-P MCP 运行时端到端，2026-11-13）
+
+- **范围**：DEV-156 ~ DEV-158（3 条）
+- **验证**：
+  - e2e 全量：**134 passed / 0 failed / 33 skipped**（8.0 分钟）
+  - vitest: Test Files **135 passed (135)** / Tests **1549 passed | 15 skipped (1564)** / **0 FAIL**
+  - vue-tsc **0** · 后端 tsc **0 error** · `npm run build` 门禁 **5 步通过**
