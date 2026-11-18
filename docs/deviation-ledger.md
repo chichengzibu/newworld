@@ -1832,3 +1832,89 @@ sendMessage(convId, msg, providerId, modelId)
   `test:all`（vitest + build + electron e2e）
   —— 注意：原有的 `test:e2e` 是**另一套**（浏览器侧 vitest + vite dev server），
   本批**没有动它**，另起名字以免混淆
+
+---
+
+## W5 接线批偏差登记 · M4-R 剩余界面实跑（2026-11-18）
+
+> M4-Q 定的顺序:先把「跑」变成「门禁」，**再实跑剩余界面**。本批做第二件。
+> 编号自 DEV-164 起。完整设计见 `docs/NOVA-#009-m4r-pages-verification-design.md`。
+
+| ID | 状态 | 摘要 |
+|---|---|---|
+| DEV-164 | 已修 | **首屏之外的界面从未实跑** · M4-K 遗留 #3 记着：「其余页面(Skills / Models / IM / Schedule / Settings / DevPanel 展开态)**仍只过 typecheck 与组件测试**」。M4-H 的教训很硬:「typecheck 通过 ≠ 模板能渲染 ≠ 数据能落到界面上」—— 而 M4-G/M4-K/M4-L 挖出的 P0 全是**实跑**才看见的。现:新增 `tests/e2e/verification-pages.spec.ts`（7 例）把这 5 个页面 + DevPanel 展开态 + 设置页 5 个页签**逐个真跑**,每页断三件事:根容器真的渲染 / **该有的关键内容在**(不是只有标题)/ **没有红屏兜底**;另断「关键元素完整落在视口内」(防 M4-O 那类"靠右的元素被裁")。**本批未发现新的产品缺陷** —— 5 个页面 + DevPanel + 5 个设置页签全部正常 |
+
+### DEV-165 — e2e 的「隔离」只隔开了开发者 profile，**没隔开 spec 文件之间**（M4-R 顺手挖出）
+
+- **现象**：新增的「剩余界面实跑」spec **单独跑全绿**，放进全量套件里却红一条
+  （「模型管理页缺关键内容:button:has-text("添加提供商")」）。
+- **根因**：M4-K 的隔离修复把 userData 目录建在 **模块级**：
+  ```ts
+  const sharedUserDataDir = mkdtempSync(...)   // 模块加载时执行一次
+  ```
+  而 Playwright 在同一个 worker 里**顺序跑多个 spec 文件**，Node 的模块缓存让这个
+  helper **只被加载一次** → **所有 spec 文件共用同一个 userData** → 状态在文件之间泄漏。
+- **实测泄漏的东西**：`ui-smoke` 切到 English 后**没切回来** → 下一个 spec 文件
+  启动时语言仍是英文 → 依赖中文文案的断言全红（而单跑那个 spec 是绿的）。
+  同类还会漏：provider、会话、主题。
+- **为什么之前没暴露**：M4-K 修的是「别写开发者真实的 %APPDATA%」——
+  那条成立且有效，但**没解决 spec 文件之间**的隔离。
+- **修法**：userData 目录改成**每个测试一个**（应用本来就是每个测试重启一次，
+  顺带把 profile 也做成每个测试独立 → 零额外成本，状态彻底不串）；
+  清理时加**护栏**（只删「系统临时目录下 + 前缀 pipiclaw-e2e-」的目录）。
+
+### DEV-165 连带：暴露出一批**顺序依赖**的 spec（一直存在，只是被共享 profile 掩盖了）
+
+改成每测试独立 profile 后，一批 spec 立刻红了 —— 它们**一直依赖同文件内前面测试留下的状态**：
+
+| spec | 依赖 |
+|---|---|
+| `settings-full-crud` CR2/CR3/CR4/CR6/CR7 | 依赖 **CR1** 建的 provider（CR4 更依赖 **CR3** 改名后的名字） |
+| `network-failure` NW4 | 依赖 **NW1/NW3** 建的两个 provider（它断言删掉 2 个） |
+
+- **为什么以前不红**：跑全量时前面刚好有那个测试 → 状态在 → 绿。
+  **单跑任何一个必红** —— 也就是说这批用例**从来没被单独验证过**。
+- **修法**：每个测试**自建前提**（`ensureTestProvider(window, name?)`）→
+  用例之间彻底无关（顺带能并行跑了）。
+- **教训**：共享 profile 会把「用例依赖彼此」这件事**藏起来**。
+  隔离做对之后，这种依赖会自己冒出来 —— **冒出来是好事**
+### 每测试独立 profile 的代价与化解（DEV-165 连带）
+
+改成每测试独立 profile 后，**每个测试都从"全新安装"起步** → 首启引导要走一遍
+（4 步）+ 等那个「欢迎使用 PiPiClaw!」toast 自己消失（~3s）→ 全量从 8 分钟涨到 **19.8 分钟**。
+
+化解：引导走完后**把 toast 隐藏**（`display:none`，**不是移除 DOM** ——
+移除会让 Element Plus 到点自己 unmount 时可能对已脱离的节点报错）→
+它不再挡点击、也不动它自己的生命周期，且**不用等它消失**。
+
+> 首启引导本身**仍然每个测试都走一遍**（这是真实的新用户路径，不预置配置绕过）。
+。
+
+### 关单（W5 接线批 · M4-R / M4-S 剩余界面实跑 + e2e 隔离补强，2026-11-18）
+
+- **范围**：DEV-164 ~ DEV-165（2 条）
+- **验证**：
+  - e2e 全量：**142 passed / 0 failed / 33 skipped**（**11.7 分钟**）
+  - vitest: Test Files **135 passed (135)** / Tests **1549 passed | 15 skipped (1564)** / **0 FAIL**
+  - vue-tsc **0** · 后端 tsc **0 error** · `npm run build` 门禁 **5 步通过**
+  - 新增 e2e `tests/e2e/verification-pages.spec.ts`（7 例）
+  - 顺序依赖的 spec 改造后**单跑也绿**（settings-full-crud CR2~CR7 · network-failure NW4）
+
+### DEV-164 明细
+
+- **每页断什么**（不是"页面加载成功"这种空断言）：
+  | 页 | 根容器 | 关键内容 |
+  |---|---|---|
+  | 技能管理 | `.skills-page` | 技能目录卡 · 技能验证(受控对照)卡 · **「浏览 ClawHub 市场」**(M4-M 新增) |
+  | 模型管理 | `.models-page` | 「添加提供商」· **「对比模型」**(M4-M 新增) |
+  | IM 管理 | `.im-management` | `.im-tabs` |
+  | 定时任务 | `.schedule-page` | `.schedule-intro` |
+  | 设置 | `.settings-page` | `.settings-nav__btn` · 主题 `.radio-group` |
+  | DevPanel | `.dev-panel .dev-body` | 内容非空 + 含 `FPS` |
+  | 设置 5 个页签 | `.settings-panels` | 逐个点过去,每个都要有内容 |
+
+- **顺手验了一个可疑点**:技能页页头三个按钮(智能去重 / 导入技能 / 浏览 ClawHub 市场)
+  在截图里看着像被右边缘裁掉了。**量了才知道没裁**:按钮右边缘 1268 < 视口 1280
+  (正好是页面内边距)→ 不是缺陷。教训同 M4-O:**量,别看截图猜**。
+  但顺手把「关键元素必须完整落在视口内」写成了断言(防同类回归)。
+- **留了存档图**:`test-results/page-*.png`(每页一张,人工可查)

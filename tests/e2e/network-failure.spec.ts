@@ -151,6 +151,37 @@ test.describe('T+600 Network 离线 / 黑洞 / 超时', () => {
     await window.waitForSelector('#app', { timeout: 10_000 })
     await window.waitForTimeout(800)
 
+    // 【M4-R】自建前提(原来靠 NW1 建的 provider → 顺序依赖)
+    await window.evaluate(async () => {
+      const api = (window as any).electronAPI
+      const list = await api.models.list()
+      const has = (n: string) => list?.data?.some((p: any) => p.name === n)
+      if (!has('Blackhole (T+600)')) {
+        await api.models.add({
+          name: 'Blackhole (T+600)',
+          type: 'openai',
+          baseUrl: 'http://192.0.2.1:11434/v1',
+          apiKey: 'no-key',
+          enabled: true,
+          timeout: 3_000,
+          models: [{ id: 'fake', name: 'fake', capabilities: ['chat'] }],
+        })
+      }
+      // 【M4-R】两个都要有 —— 原来「Good Ollama」是 NW3 建的(顺序依赖),
+      // 而 NW4 断言删掉 2 个 → 独立跑时只剩 1 个 → 断言必红
+      if (!has('Good Ollama (T+600)')) {
+        await api.models.add({
+          name: 'Good Ollama (T+600)',
+          type: 'openai',
+          baseUrl: 'http://127.0.0.1:11434/v1',
+          apiKey: 'no-key',
+          enabled: true,
+          timeout: 60_000,
+          models: [{ id: 'qwen3.5:9b', name: 'qwen3.5:9b', capabilities: ['chat'] }],
+        })
+      }
+    })
+
     const result = await window.evaluate(async () => {
       const api = (window as any).electronAPI
       const list = await api.models.list()

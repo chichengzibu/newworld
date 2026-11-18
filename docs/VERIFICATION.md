@@ -73,6 +73,7 @@ D/E 段的每一项现在都有对应的自动化用例 —— **人工截图不
 | F1 产物体积在预算内 | `node scripts/build-report.mjs --ci`（构建门禁第 5 步） | `scripts/build-report.mjs` |
 | F2 CSS 跌破 250KB 应 EXIT=1 | 人为把 `dist/assets/vendor-element-plus-*.css` 砍到 200KB → 门禁 EXIT=1（实测已验，随后还原） | 同上 |
 | **小屏等比缩放**（M4-N/M4-O 新增） | 物理窗口缩到 1000×800 → 缩放系数 0.78125 → CSS 视口回到 1280 → 发送按钮完整可见**且点得到**（`elementFromPoint` 命中按钮） | `tests/e2e/verification-small-screen.spec.ts` |
+| **剩余界面实跑**（M4-R 新增） | Skills / Models / IM / Schedule / Settings / DevPanel 展开态 + 设置页 5 个页签**逐个真跑**：根容器渲染 / 关键内容在 / 无红屏兜底 / 关键元素完整落在视口内 | `tests/e2e/verification-pages.spec.ts` |
 
 **复跑**：
 

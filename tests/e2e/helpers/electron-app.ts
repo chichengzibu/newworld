@@ -25,19 +25,19 @@ export async function completeFirstLaunchGuide(window: Page): Promise<boolean> {
   // 步骤 0(欢迎) → 下一步
   const nextBtn = window.getByRole('button', { name: /下一步/ })
   if (await nextBtn.count()) await nextBtn.first().click().catch(() => {})
-  await window.waitForTimeout(400)
+  await window.waitForTimeout(200)
 
   // 步骤 1(选模型) → 先选一张卡片,「下一步」才会出现
   const modelCard = window.locator('.model-option')
   if (await modelCard.count()) await modelCard.first().click().catch(() => {})
-  await window.waitForTimeout(400)
+  await window.waitForTimeout(200)
   if (await nextBtn.count()) await nextBtn.first().click().catch(() => {})
-  await window.waitForTimeout(400)
+  await window.waitForTimeout(200)
 
   // 步骤 2(权限) → 完成配置
   const finishCfg = window.getByRole('button', { name: /完成配置/ })
   if (await finishCfg.count()) await finishCfg.first().click().catch(() => {})
-  await window.waitForTimeout(400)
+  await window.waitForTimeout(200)
 
   // 步骤 3(完成) → 开始使用
   const start = window.getByRole('button', { name: /开始使用/ })
@@ -47,11 +47,20 @@ export async function completeFirstLaunchGuide(window: Page): Promise<boolean> {
   // 【关键】引导结束后会弹一个「欢迎使用 PiPiClaw!」的 toast,
   // 它**正好盖在侧栏「新建」按钮上**(实测截图)→ 之后的点击被 toast 吃掉,
   // 表现为"点了新建但会话没建出来",且**随机**(取决于 toast 是否还在)。
-  // 故:等 toast 消失再放行。
+  //
+  // 【M4-S】等它自己消失要 ~3s —— 每个测试都等,全量要多花好几分钟。
+  // 而 toast 只是浮在 DOM 上的一个元素,**直接移除**即可(等价于它消失)。
   await window.locator('.el-message').first()
-    .waitFor({ state: 'detached', timeout: 10_000 })
+    .waitFor({ state: 'attached', timeout: 5_000 })
     .catch(() => {})
-  await window.waitForTimeout(200)
+  await window.evaluate(() => {
+    // 【用隐藏而不是移除】移除 DOM 节点会让 Element Plus 到点自己 unmount 时
+    // 可能对已脱离的节点报错;隐藏则完全不动它的生命周期,只是不挡点击。
+    document.querySelectorAll('.el-message').forEach((el) => {
+      ;(el as HTMLElement).style.display = 'none'
+    })
+  })
+  await window.waitForTimeout(100)
   return true
 }
 
@@ -208,22 +217,41 @@ const mainEntry = path.join(repoRoot, 'dist-electron', 'main.js')
 
 export const shouldRunElectronE2E = !!process.env.E2E_ELECTRON
 
-// 跨测试共享一个 fresh userData 目录(同一 spec 内复用,跨 spec 隔离)
-const sharedUserDataDir = shouldRunElectronE2E
-  ? mkdtempSync(join(tmpdir(), 'pipiclaw-e2e-'))
-  : ''
+/**
+ * 【M4-R 修】userData 改成**每个测试一个**目录。
+ *
+ * 【之前的问题】目录是**模块级**创建的:
+ *   const sharedUserDataDir = mkdtempSync(...)
+ * 而 Playwright 在同一个 worker 里**顺序跑多个 spec 文件**,
+ * Node 的模块缓存让这个 helper **只被加载一次** → **所有 spec 文件共用同一个
+ * userData** → 状态在文件之间泄漏。
+ *
+ * 实测踩到:`ui-smoke` 切到 English 后**没切回来** → 下一个 spec 文件启动时
+ * 语言仍是英文 → 依赖中文文案的断言全红(而单跑那个 spec 是绿的)。
+ * 同类泄漏还有:provider、会话、主题。
+ *
+ * 为什么之前没暴露:M4-K 修的是「别写开发者真实的 %APPDATA%」——
+ * 那条成立且有效(隔开了真实 profile),但**没解决 spec 文件之间**的隔离。
+ *
+ * 【改成每个测试一个】应用本来就是**每个测试重启一次**(fixture 是函数作用域),
+ * 顺带把 profile 也做成每个测试独立 → 零额外成本,状态彻底不串。
+ */
+function createUserDataDir(): string {
+  return mkdtempSync(join(tmpdir(), 'pipiclaw-e2e-'))
+}
 
 export const test = base.extend<{
   electronApp: ElectronApplication
   window: Page
   freshUserData: string
 }>({
-  // 暴露当前 spec 的 userData 路径,供需要直接读 localStorage 的测试用
+  // 每个测试一个独立的 userData 目录(见 createUserDataDir 上方说明)
+  // —— 同时暴露给需要直接读 localStorage / 配置文件 的测试用
   freshUserData: async ({}, use) => {
-    await use(sharedUserDataDir)
+    await use(createUserDataDir())
   },
 
-  electronApp: async ({}, use) => {
+  electronApp: async ({ freshUserData: userDataDir }, use) => {
     if (!shouldRunElectronE2E) {
       throw new Error(
         'E2E_ELECTRON is not set. Set E2E_ELECTRON=1 to run real Electron e2e.'
@@ -239,7 +267,7 @@ export const test = base.extend<{
       //   ② 测试之间互相污染 —— 实测侧栏累积到 **192 个会话**,
       //      侧栏一次渲染 192 项 → DOM 持续重渲染 → Playwright 动作性检查超时 →
       //      「…」下拉菜单等交互点不动(实测 popper 数恒为 0)
-      args: [mainEntry, '--no-sandbox', `--user-data-dir=${sharedUserDataDir}`],
+      args: [mainEntry, '--no-sandbox', `--user-data-dir=${userDataDir}`],
       cwd: repoRoot,
       env: {
         ...process.env,
@@ -258,6 +286,17 @@ export const test = base.extend<{
 
     await use(app)
     await app.close().catch(() => {})
+    // 清理本测试的 profile(不留垃圾)。
+    // 【护栏】只删「系统临时目录下 + 前缀 pipiclaw-e2e-」的目录 ——
+    // 万一将来有人把路径传错,这里不会误删别的东西。
+    try {
+      const resolved = path.resolve(userDataDir)
+      const tmpRoot = path.resolve(tmpdir())
+      const isTempProfile =
+        resolved.startsWith(tmpRoot + path.sep) &&
+        path.basename(resolved).startsWith('pipiclaw-e2e-')
+      if (isTempProfile) rmSync(resolved, { recursive: true, force: true })
+    } catch { /* best-effort */ }
   },
 
   window: async ({ electronApp }, use) => {
@@ -272,16 +311,5 @@ export const test = base.extend<{
     await use(window)
   },
 })
-
-// 测试套件结束后清理临时目录
-if (shouldRunElectronE2E) {
-  process.on('exit', () => {
-    try {
-      rmSync(sharedUserDataDir, { recursive: true, force: true })
-    } catch {
-      // best-effort
-    }
-  })
-}
 
 export { expect } from '@playwright/test'
