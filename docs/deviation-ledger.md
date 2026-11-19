@@ -2127,6 +2127,61 @@ sendMessage(convId, msg, providerId, modelId)
   技能判断提到第 1 条,并给出**反例**(不要先用 Glob/Read 去"找"技能),
   让模型知道清单判断优先于动手。
 - **回归钉**:`tests/unit/skill-id-routing-m4w.test.ts`(10 例)——
-  摘要带 id / 按 name 兜底 / 大小写兜底 / resolveSkillId /
+  摘要带 id / 按 name 兜底 / 大小写兜底 / resolveCanonicalSkillId /
   错误信息含 id↔名称对照 / **appliedEntity 记规范 id**;
   `tests/integration/skill-routing-live.test.ts`(实跑基准,默认 skip)
+
+---
+
+## M4-X 批：技能来源体系（不集成 / 联网找 / 手动装 / 存储位置）
+
+> 起因:用户要求「技能部分不要集成,联网环境下自动去开源技能库寻找以及推荐用户联网下载,
+> 有网和无网环境下可以手动添加技能包,技能包存储位置添加为应用本身结构目录的 skills 下面」。
+> 四条要求拆成四件事,逐条先量现状再动手。
+
+| ID | 状态 | 摘要 |
+|---|---|---|
+| DEV-172 | 已修 | **技能"联网自动寻找"此前是一条死路** · 全量审计:`ClawHubManager` 是**本地模拟市场**(数据在 userData/clawhub-skills.json,界面明写「本地演示模式」),「下载」按钮是 **stub**(只弹 toast);`ClawHubRegistry` 是唯一走网络的,但指向 `https://example.com/pipiclaw-clawhub` —— **占位符,永远不可达**;而且它的 index.json 规范要求「zipUrl + Ed25519 签名」,那是**自建私有仓库**的格式,开源技能库(GitHub 上的 SKILL.md 集合)根本不提供。修:新增 `electron/skill/SkillHub.ts` —— 内置**实测可达**的开源源(Anthropic 官方技能集 + Skill-Shelf 社区库),各有原生格式 → 适配成统一形状;索引落盘缓存 → 搜索/推荐是**纯本地**过滤(断网照常);安装按目录枚举 + 逐文件下载(含 references/ 与 scripts/) |
+| DEV-173 | 已修 | **技能包存储位置:从 `<userData>/skills` 改到「应用自身结构目录的 skills」** · 开发态 = `<appPath>/skills`(实测 dev 下 electron 以 `"."` 启动 → appPath = 仓库根 → 仓库的 `skills/`);打包后 = `<dirname(appPath)>/skills`(`<install>/resources/skills`,NSIS 默认装到 `%LOCALAPPDATA%\Programs\` → 可写;app.asar **内部**不可写,故不能直接用 `<appPath>/skills`)。**守住读写同源**:选中的目录落盘记住(ConfigStore `skills.dir`),读与写都走 `SkillManager.getSkillsDir()` 这一个函数;选之前**真写探针文件**测可写,不可写(Program Files 这类只读安装位)就落回 userData,并把原因显示在界面上 |
+| DEV-174 | 已修 | **技能随应用集成** —— 仓库里的两个样例技能(`file-organizer` / `sample-web-summary`)**删除**;`SkillLoader` 构造器里「首启把项目 skills 拷进用户数据目录」的行为删除;`.gitignore` 加 `skills/*`(目录只留 `.gitkeep` 占位,其余是用户下载/手动添加的) |
+
+### 实跑证据(M4-X)
+
+`tests/integration/skill-hub-live.test.ts` —— 接**真实网络**、走真实安装路径:
+
+```
+源 anthropic-skills: ✅ 19 条        (Anthropic 官方技能集,.claude-plugin/marketplace.json)
+源 skill-shelf:      ✅ 15 条        (社区库,index.json)
+合计 34 条
+搜 "pdf" → 3 条: pdf / docx / canvas-design
+推荐 5 条: Slide Maker / Windows Games in Bottles / ...
+安装 anthropic-skills:docx → ✅ docx
+已加载: docx — Use this skill whenever the user wants to create, read, edit
+```
+
+**顺带修掉两个自己写出来的 bug(都是实跑才暴露的)**:
+① **下载直链丢了目录前缀** —— 列目录时返回的是"相对该目录的路径",拼直链时
+`skills/docx/scripts/x.py` 被请求成 `scripts/x.py` → 404。改:列表返回仓库内**完整路径**,
+写盘时再算相对路径。
+② **安装失败留下半成品目录** —— 下载中途失败会留下一个缺文件的技能目录,
+它**会被 SkillLoader 扫到并加载**,但正文/脚本是残缺的 —— 比"没装"更糟
+(用户看不出来它不完整)。改:失败即清掉目标目录。
+
+### 手动添加(有网无网都能用)—— 现状确认
+
+四种入口**本来就有**,其中**三种完全离线可用**:
+| 入口 | 需要网络 |
+|---|---|
+| 本地 `.md` 文件 | ❌ 纯本地 |
+| 本地技能文件夹 | ❌ 纯本地 |
+| 本地 `.zip` 技能包 | ❌ 纯本地 |
+| URL 导入 | ✅ 需要网络 |
+
+界面入口(技能页「导入技能」对话框)保持不变;本次新增的开源技能库卡片是**另一条路**
+(联网找 + 一键下载),两条并存 —— 断网时手动添加照常可用。
+
+### 安全边界(用户 2026-11-19 明确授权)
+
+下载的技能包**可能含可执行脚本**(`scripts/*.py`)。用户选择「装完整包(含 scripts)」。
+执行仍走**既有**的 Bash 白名单 + 用户确认门 —— 本批**没有**新增任何绕过确认的路径。
+界面上每个技能都显示来源(`sourceId`),安装失败会清掉半成品而不是留下残缺技能。

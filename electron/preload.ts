@@ -197,6 +197,11 @@ const IpcChannels = {
   SKILLS_RUN_UTILITY_TRIAL: 'skills:runUtilityTrial',
   // 【M4-V】裁判放行门禁状态
   SKILLS_JUDGE_TRUST: 'skills:judgeTrust',
+  // 【M4-X】开源技能库(搜索/推荐/下载安装)
+  SKILLS_HUB_SEARCH: 'skills:hub:search',
+  SKILLS_HUB_RECOMMEND: 'skills:hub:recommend',
+  SKILLS_HUB_REFRESH: 'skills:hub:refresh',
+  SKILLS_HUB_INSTALL: 'skills:hub:install',
   SKILLS_GET_UTILITY: 'skills:getUtility',
   SKILLS_RELOAD: 'skills:reload',
   SKILLS_IMPORT_FILE: 'skills:importFile',
@@ -1069,6 +1074,25 @@ const electronAPI = {
        */
       runUtilityTrial: (payload: { skillId: string; tasks: Array<{ id: string; instruction: string; expectation?: any }>; enableJudge?: boolean }): Promise<IpcResponse<any>> =>
         ipcRenderer.invoke(IpcChannels.SKILLS_RUN_UTILITY_TRIAL, payload),
+
+      /**
+       * 【M4-X】在开源技能库里搜索。
+       * 索引是本地缓存的 → **断网也能搜**(只有下载安装需要网络)。
+       */
+      hubSearch: (opts: { q?: string; sourceId?: string; category?: string; limit?: number }): Promise<IpcResponse<any[]>> =>
+        ipcRenderer.invoke(IpcChannels.SKILLS_HUB_SEARCH, opts),
+
+      /** 【M4-X】推荐可下载的技能(已装的不会重复推荐) */
+      hubRecommend: (opts?: { limit?: number }): Promise<IpcResponse<{ items: any[]; index: any }>> =>
+        ipcRenderer.invoke(IpcChannels.SKILLS_HUB_RECOMMEND, opts ?? {}),
+
+      /** 【M4-X】刷新索引(联网抓取开源技能库) */
+      hubRefresh: (): Promise<IpcResponse<any>> =>
+        ipcRenderer.invoke(IpcChannels.SKILLS_HUB_REFRESH),
+
+      /** 【M4-X】下载并安装一个技能 */
+      hubInstall: (id: string): Promise<IpcResponse<any>> =>
+        ipcRenderer.invoke(IpcChannels.SKILLS_HUB_INSTALL, { id }),
 
       /**
        * 【M4-V】查当前裁判能不能用(校准门禁)。

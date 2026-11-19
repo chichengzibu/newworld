@@ -31,6 +31,10 @@ vi.mock('@element-plus/icons-vue', () => ({
   // 【M4-M】SkillsView 新增了「浏览 ClawHub 市场」按钮(Goods 图标)——
   // 这个 mock 是**显式枚举**的,少一个图标,组件就渲染不出来(整份 spec 全红)。
   Goods: { template: '<i />' },
+  // 【M4-X】开源技能库卡片用了这两个图标 —— mock 是**显式枚举**的,
+  // 少一个图标整份 spec 全红(见上面 Goods 的注释)。
+  Refresh: { template: '<i />' },
+  Search: { template: '<i />' },
 }))
 
 import SkillsView from '../../src/views/SkillsView.vue'
@@ -75,6 +79,19 @@ function installApi(over: Record<string, any> = {}) {
         success: true,
         data: { trusted: false, model: 'qwen3.5:9b', reason: 'κ=0.411 < 门槛 0.6；换序改口率 67.9% > 门槛 10%' },
       }),
+      // 【M4-X】开源技能库 —— 默认给两条推荐
+      hubSearch: vi.fn().mockResolvedValue({ success: true, data: [] }),
+      hubRecommend: vi.fn().mockResolvedValue({
+        success: true,
+        data: {
+          items: [
+            { id: 'anthropic-skills:pdf', sourceId: 'anthropic-skills', name: 'PDF 处理', description: '处理 PDF 文件与表格', tags: ['pdf'] },
+          ],
+          index: { fetchedAt: 1730000000000, count: 34, sources: [{ id: 'anthropic-skills', name: 'Anthropic 官方技能集', ok: true, count: 19 }] },
+        },
+      }),
+      hubRefresh: vi.fn().mockResolvedValue({ success: true, data: { fetchedAt: Date.now(), count: 34, sources: [] } }),
+      hubInstall: vi.fn().mockResolvedValue({ success: true, data: { skillId: 'pdf', skills: [] } }),
     },
     ...over,
   }
@@ -321,6 +338,48 @@ describe('M4 技能面板渲染', () => {
     expect(cb).toBeDefined()
     expect((cb as any).props('disabled')).toBe(false)
     expect(w.text()).toContain('κ=0.720')
+  })
+
+  /* ─────────────────── 【M4-X】开源技能库 ─────────────────── */
+
+  it('【M4-X】开源技能库:推荐条目落到界面上,带来源与说明', async () => {
+    const w = await mountView()
+    const text = w.text()
+    expect(text).toContain('开源技能库')
+    expect(text).toContain('PDF 处理')       // 推荐条目的名字
+    expect(text).toContain('处理 PDF 文件与表格') // 推荐条目的说明
+    expect(text).toContain('下载安装')        // 装它的按钮
+    // 索引状态要如实展示(几条、什么时候拉的)
+    expect(text).toContain('索引')
+    expect(text).toContain('34')
+  })
+
+  it('【M4-X】搜索开源技能:把关键词传给主进程,结果替换列表', async () => {
+    installApi()
+    api.skills.hubSearch.mockResolvedValue({
+      success: true,
+      data: [{ id: 'x:1', sourceId: 'x', name: '搜到的技能', description: '按关键词搜出来的', tags: [] }],
+    })
+    const w = await mountView()
+    const input = w.find('input[placeholder*="搜索开源技能"]')
+    expect(input.exists()).toBe(true)
+    await input.setValue('pdf')
+    const ta = w.find('input[placeholder*="搜索开源技能"]')
+    await ta.trigger('keyup.enter')
+    await flushPromises()
+    expect(api.skills.hubSearch).toHaveBeenCalled()
+    expect((api.skills.hubSearch as any).mock.calls.some((c: any) => c[0]?.q === 'pdf')).toBe(true)
+    expect(w.text()).toContain('搜到的技能')
+  })
+
+  it('【M4-X】点「下载安装」→ 调主进程安装', async () => {
+    const w = await mountView()
+    await flushPromises()
+    const btn = w.findAll('button').find((b: any) => b.text().includes('下载安装'))
+    expect(btn).toBeTruthy()
+    await btn!.trigger('click')
+    await flushPromises()
+    expect(api.skills.hubInstall).toHaveBeenCalledWith('anthropic-skills:pdf')
   })
 
   it('【M4-V】裁判被门禁拦下:结果里写明为什么没跑(不是一片空白)', async () => {

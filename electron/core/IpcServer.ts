@@ -546,6 +546,89 @@ export class IpcServer {
     });
 
     /**
+     * 【M4-X】开源技能库 —— 搜索 / 推荐 / 下载安装。
+     *
+     * 【为什么要有它】
+     * 此前**没有一条能用的路**:ClawHubManager 是本地模拟市场(「下载」按钮是 stub),
+     * ClawHubRegistry 指向 example.com 占位符。技能要么用户手工导入,
+     * 要么没有 —— "联网自动去开源技能库寻找"这条需求是空的。
+     *
+     * 【离线也能用】索引落盘缓存 → 搜索/推荐是**纯本地**过滤,断网照常;
+     * 只有"下载安装"需要网络。
+     */
+    ipcMain.handle('skills:hub:search', async (_, payload: { q?: string; sourceId?: string; category?: string; limit?: number }) => {
+      try {
+        const { SkillHub } = await import('../skill/SkillHub');
+        const hub = SkillHub.getInstance();
+        // 索引过期就在后台悄悄刷一次 —— 本次先用缓存返回,不让用户等网络
+        if (hub.isStale()) void hub.refresh().catch(() => { /* 刷不到就用缓存 */ });
+        return { success: true, data: hub.search({
+          q: payload?.q,
+          sourceId: payload?.sourceId,
+          category: payload?.category,
+          limit: payload?.limit,
+        }) };
+      } catch (error) {
+        this.log.error('skills:hub:search 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    ipcMain.handle('skills:hub:recommend', async (_, payload: { limit?: number }) => {
+      try {
+        const { SkillHub } = await import('../skill/SkillHub');
+        const hub = SkillHub.getInstance();
+        if (hub.isStale()) void hub.refresh().catch(() => { /* 刷不到就用缓存 */ });
+        const cached = hub.getCached();
+        return {
+          success: true,
+          data: {
+            items: hub.recommend({ limit: payload?.limit }),
+            // 索引状态 —— 界面上要如实说"这是缓存/离线",别让用户以为是实时结果
+            index: cached ? {
+              fetchedAt: cached.fetchedAt,
+              count: cached.entries.length,
+              sources: cached.sources,
+            } : null,
+          },
+        };
+      } catch (error) {
+        this.log.error('skills:hub:recommend 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    ipcMain.handle('skills:hub:refresh', async () => {
+      try {
+        const { SkillHub } = await import('../skill/SkillHub');
+        const index = await SkillHub.getInstance().refresh();
+        return { success: true, data: { fetchedAt: index.fetchedAt, count: index.entries.length, sources: index.sources } };
+      } catch (error) {
+        this.log.error('skills:hub:refresh 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    ipcMain.handle('skills:hub:install', async (_, payload: { id: string }) => {
+      try {
+        const { SkillHub } = await import('../skill/SkillHub');
+        const { SkillLoader } = await import('../skill/SkillLoader');
+        const hub = SkillHub.getInstance();
+        const entry = hub.getCached()?.entries.find(e => e.id === payload?.id);
+        if (!entry) return { success: false, error: '索引里找不到该技能(请先刷新索引)' };
+        const res = await hub.install(entry);
+        if (!res.ok) return { success: false, error: res.error ?? '安装失败' };
+        // 装完立刻重扫 —— 否则用户得手动刷新才看得到新技能
+        SkillLoader.getInstance().reloadSkills();
+        const skills = SkillLoader.getInstance().getAllSkills();
+        return { success: true, data: { skillId: res.skillId, skills } };
+      } catch (error) {
+        this.log.error('skills:hub:install 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    /**
      * 【M4-V】查当前裁判能不能用。
      *
      * 界面用它决定"启用裁判对照"的勾选框能不能勾 —— 门禁不通过时

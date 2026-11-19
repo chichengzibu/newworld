@@ -156,6 +156,74 @@
     </el-card>
 
     <!--
+      【M4-X】开源技能库 —— 联网时自动去开源技能库寻找并推荐,用户点下载。
+      此前**没有一条能用的路**:ClawHub 是本地模拟市场(「下载」按钮是 stub),
+      远程 registry 指向 example.com 占位符 —— 技能只能手工导入。
+      索引落盘缓存 → 搜索/推荐**断网也能用**;只有「下载安装」需要网络。
+      手动添加(本地文件/文件夹/压缩包)**任何时候都能用**。
+    -->
+    <el-card class="skills-hub-card">
+      <div class="dir-header">
+        <h3>{{ '开源技能库' }}</h3>
+        <el-button size="small" :loading="hubRefreshing" @click="refreshHubIndex">
+          <el-icon><Refresh /></el-icon>
+          {{ '刷新索引' }}
+        </el-button>
+      </div>
+
+      <el-input
+        v-model="hubQuery"
+        placeholder="搜索开源技能（名称、描述、标签）"
+        clearable
+        :prefix-icon="Search"
+        style="margin-bottom: var(--space-sm);"
+        @keyup.enter="searchHub"
+        @clear="searchHub"
+      />
+
+      <!-- 索引状态:如实说明这是缓存还是刚拉的 —— 别让用户以为是实时结果 -->
+      <p v-if="hubIndex" class="dir-empty">
+        {{ '索引' }} {{ hubIndex.count }} {{ '条' }}
+        <template v-if="hubIndex.fetchedAt">
+          · {{ '更新于' }} {{ new Date(hubIndex.fetchedAt).toLocaleString('zh-CN') }}
+        </template>
+        <template v-if="hubIndex.sources?.some((s: any) => !s.ok)">
+          · <span style="color: var(--danger-color, #f56c6c);">
+            {{ '部分来源不可用：' }}{{ hubIndex.sources.filter((s: any) => !s.ok).map((s: any) => s.name).join('、') }}
+          </span>
+        </template>
+      </p>
+      <p v-else class="dir-empty">{{ '尚未拉取索引 —— 点「刷新索引」联网获取（断网时仍可用「导入技能」手动添加）' }}</p>
+
+      <div v-if="hubItems.length === 0 && hubSearched" class="dir-empty">
+        {{ '没有匹配的技能。可换个关键词，或用「导入技能」手动添加。' }}
+      </div>
+
+      <div v-else class="hub-list">
+        <div v-for="item in hubItems" :key="item.id" class="hub-item">
+          <div class="hub-item-main">
+            <div class="hub-item-title">
+              <span class="hub-item-name">{{ item.name }}</span>
+              <el-tag size="small" type="info">{{ item.sourceId }}</el-tag>
+              <el-tag v-for="t in (item.tags || []).slice(0, 4)" :key="t" size="small" type="success" style="margin-left: 4px;">
+                {{ t }}
+              </el-tag>
+            </div>
+            <div class="hub-item-desc">{{ item.description }}</div>
+          </div>
+          <el-button
+            size="small"
+            type="primary"
+            :loading="hubInstalling === item.id"
+            @click="installHubSkill(item.id)"
+          >
+            {{ '下载安装' }}
+          </el-button>
+        </div>
+      </div>
+    </el-card>
+
+    <!--
       【M4-B】效果判定面板
       此前学习闭环收集的调用成败数据【没有任何读取方】—— 进了 skill-stats.json 就没人再看过。
       本面板是它的第一个读取方:把"这个工具/技能到底好不好用"变成能一眼看到的结论。
@@ -533,7 +601,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue';
-import { Upload, MagicStick, Box, SuccessFilled, Plus, Goods } from '@element-plus/icons-vue';
+import { Upload, MagicStick, Box, SuccessFilled, Plus, Goods, Refresh, Search } from '@element-plus/icons-vue';
 import { useRouter } from 'vue-router';
 import { ElMessage } from "element-plus/es/components/message/index"
 // #007 H1: 提案超时阈值 (30 分钟, 订单既定)
@@ -791,6 +859,83 @@ const runTrial = async (): Promise<void> => {
   }
 };
 
+// ══════════ 【M4-X】开源技能库 ══════════
+// 技能包从公开 GitHub 仓库下载(含 scripts/ 可执行脚本)——用户 2026-11-19 明确授权。
+// 执行仍走既有的 Bash 白名单 + 用户确认门,这里只是把包放进技能目录。
+const hubQuery = ref('');
+const hubItems = ref<any[]>([]);
+const hubIndex = ref<any>(null);
+const hubRefreshing = ref(false);
+const hubInstalling = ref('');
+const hubSearched = ref(false);
+
+/** 搜索开源技能库（索引是本地缓存的 → 断网也能搜） */
+const searchHub = async (): Promise<void> => {
+  hubSearched.value = true;
+  const q = hubQuery.value.trim();
+  try {
+    const res = await (window as any).electronAPI?.skills?.hubSearch?.({ q, limit: q ? 30 : 0 });
+    if (res?.success) hubItems.value = res.data ?? [];
+  } catch (e) {
+    console.error('searchHub failed', e);
+  }
+};
+
+/** 无关键词时显示推荐（已装的不会重复推荐） */
+const loadHubRecommend = async (): Promise<void> => {
+  try {
+    const res = await (window as any).electronAPI?.skills?.hubRecommend?.({ limit: 12 });
+    if (res?.success) {
+      hubItems.value = res.data?.items ?? [];
+      hubIndex.value = res.data?.index ?? null;
+      hubSearched.value = false;
+    }
+  } catch (e) {
+    console.error('loadHubRecommend failed', e);
+  }
+};
+
+/** 联网刷新索引 */
+const refreshHubIndex = async (): Promise<void> => {
+  hubRefreshing.value = true;
+  try {
+    const res = await (window as any).electronAPI?.skills?.hubRefresh?.();
+    if (res?.success) {
+      hubIndex.value = res.data;
+      ElMessage.success(`索引已更新：${res.data?.count ?? 0} 条`);
+      await loadHubRecommend();
+    } else {
+      ElMessage.error(res?.error || '索引刷新失败（离线时不影响手动添加）');
+    }
+  } catch (e) {
+    console.error('refreshHubIndex failed', e);
+    ElMessage.error('索引刷新失败（离线时不影响手动添加）');
+  } finally {
+    hubRefreshing.value = false;
+  }
+};
+
+/** 下载并安装一个技能 */
+const installHubSkill = async (id: string): Promise<void> => {
+  hubInstalling.value = id;
+  try {
+    const res = await (window as any).electronAPI?.skills?.hubInstall?.(id);
+    if (res?.success) {
+      ElMessage.success('已安装');
+      if (Array.isArray(res.data?.skills)) skills.value = res.data.skills;
+      else await loadSkills();
+      await loadHubRecommend();
+    } else {
+      ElMessage.error(res?.error || '安装失败');
+    }
+  } catch (e) {
+    console.error('installHubSkill failed', e);
+    ElMessage.error('安装失败');
+  } finally {
+    hubInstalling.value = '';
+  }
+};
+
 const loadUtility = async () => {
   try {
     const result = await (window as any).electronAPI?.skills?.getUtility?.();
@@ -958,6 +1103,8 @@ onMounted(() => {
   loadSkills();
   loadStorageInfo();
   loadAcceptance();
+  // 【M4-X】进技能页就拉一次开源技能库的推荐（断网时用本地缓存,不影响本页其它功能）
+  loadHubRecommend();
   // 【M4-V】查裁判门禁状态 —— 决定勾选框能不能勾
   loadJudgeTrust();
 
@@ -1194,6 +1341,47 @@ onUnmounted(() => {
 /* 【M3-D】技能目录 */
 .skills-dir-card {
   margin-top: var(--space-md);
+}
+
+/* 【M4-X】开源技能库卡片 */
+.skills-hub-card {
+  margin-bottom: var(--space-md);
+}
+.hub-list {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-sm);
+}
+.hub-item {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-md);
+  padding: var(--space-sm);
+  border: 1px solid var(--border-color, #ebeef5);
+  border-radius: 4px;
+}
+.hub-item-main {
+  min-width: 0;
+}
+.hub-item-title {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-bottom: 2px;
+}
+.hub-item-name {
+  font-weight: 600;
+}
+.hub-item-desc {
+  font-size: 12px;
+  color: var(--fg-tertiary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
 }
 
 .skills-trial-card {

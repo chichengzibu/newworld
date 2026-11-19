@@ -29,6 +29,8 @@ vi.mock('@element-plus/icons-vue', () => ({
   Upload: { template: '<i />' }, MagicStick: { template: '<i />' }, Box: { template: '<i />' }, SuccessFilled: { template: '<i />' },
   // 【M4-M】SkillsView 的「浏览 ClawHub 市场」按钮用了 Goods 图标 —— mock 是显式枚举的
   Goods: { template: '<i />' },
+  // 【M4-X】开源技能库卡片用了这两个图标 —— mock 是显式枚举的,少一个就整份 spec 全红
+  Refresh: { template: '<i />' }, Search: { template: '<i />' },
 }))
 
 import SkillsView from '../../src/views/SkillsView.vue'

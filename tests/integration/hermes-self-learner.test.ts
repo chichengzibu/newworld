@@ -5,12 +5,11 @@ import * as path from 'node:path'
 vi.mock('electron', () => ({
   app: {
     getPath: vi.fn(() => '/tmp/pipiclaw-selflearner-test'),
-    // SelfLearner writes to getAppPath() + '/../skills'
-    // We want that to resolve to getPath('userData') + '/skills'
-    // = /tmp/pipiclaw-selflearner-test/skills
-    // so getAppPath() needs to be a subpath: /tmp/pipiclaw-selflearner-test/x
-    // then path.join(x, '..', 'skills') = /tmp/pipiclaw-selflearner-test/skills
-    getAppPath: vi.fn(() => '/tmp/pipiclaw-selflearner-test/app'),
+    // 【M4-X】技能目录改为「应用自身结构目录的 skills」→ 开发态是 `<appPath>/skills`
+    // (真实 electron 以 "." 启动,appPath = 仓库根)。这里同理:
+    // appPath = /tmp/pipiclaw-selflearner-test → <appPath>/skills = .../skills
+    // = 与 getPath('userData') + '/skills' 同一个目录(读写同源)。
+    getAppPath: vi.fn(() => '/tmp/pipiclaw-selflearner-test'),
     getName: () => 'pipiclaw',
     getVersion: () => '0.0.0',
   },

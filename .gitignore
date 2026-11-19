@@ -122,3 +122,7 @@ scripts/.tmp-*
 # 仓里只保留 tests/fixtures/judge-calibration/ 下的 MT-Bench 派生样本(CC-BY-4.0,许可干净)
 .tmp-calibration/
 
+# 【M4-X】技能包存放目录(应用自身结构目录下的 skills/)
+# 不集成:仓库里不存技能包 —— 目录本身占位,其余是用户下载/手动添加的
+skills/*
+!skills/.gitkeep

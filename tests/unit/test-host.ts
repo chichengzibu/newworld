@@ -64,14 +64,12 @@ export class TestHost implements PlatformHost {
   }
 
   getAppPath(): string {
-    // 模拟生产布局:skills 位于 getAppPath()/../skills(生产 = app 安装包目录)。
-    // 设为 TEST_USER_DATA/app,使 SelfLearner 的写入路径
-    //    path.join(getAppPath(), '..', 'skills')
-    // 与 SkillManager 的读取路径
-    //    path.join(getPath('userData'), 'skills')
-    // 解析为同一目录(TEST_USER_DATA/skills),与 SkillLoader 的
-    // project-skills → userData 拷贝逻辑保持一致。
-    return pathNode.join(TEST_USER_DATA, 'app')
+    // 【M4-X】技能目录改到「应用自身结构目录的 skills」后,这里是**唯一真源**:
+    // 开发态下真实 electron 以 "." 启动 → appPath = 仓库根 → `<appPath>/skills` = 仓库的 skills/。
+    // 测试里同理:appPath = TEST_USER_DATA → `<appPath>/skills` = TEST_USER_DATA/skills,
+    // 与各测试直接写入的 `<TEST_USER_DATA>/skills` 是**同一个目录**
+    // (读写同源 —— 历史上"写一处、读另一处"导致技能永远扫不到,别再分叉)。
+    return TEST_USER_DATA
   }
 
   // —— 生命周期:测试环境无真实应用,调用即视为错误 ——

@@ -98,20 +98,11 @@ export class SkillLoader {
     // this.selfLearner = SelfLearner.getInstance();
     
     // 使用 SkillManager.getSkillsDir() 作为路径单点(W7.0.4)
+    // 【M4-X】该目录现在是**应用自身结构目录**下的 skills(不可写时落回 userData),
+    // 且**不再有"首启从项目目录拷贝样例技能"的行为** —— 技能不随应用集成,
+    // 由用户从开源技能库下载或手动添加。
     this.skillsDir = SkillManager.getSkillsDir();
-    
-    // 如果用户数据目录下没有技能，尝试从项目根目录复制
-    const projectSkillsDir = path.join(getHost().getAppPath(), '..', 'skills');
-    if (fs.existsSync(projectSkillsDir) && !fs.existsSync(this.skillsDir)) {
-      this.log.info('[SkillLoader] 发现项目技能目录，正在复制到用户数据目录', { 
-        source: projectSkillsDir,
-        dest: this.skillsDir
-      });
-      
-      // 复制项目技能目录到用户数据目录
-      this.copyDirectory(projectSkillsDir, this.skillsDir);
-    }
-    
+
     // 确保目录存在
     this.ensureSkillsDir();
     // 加载技能

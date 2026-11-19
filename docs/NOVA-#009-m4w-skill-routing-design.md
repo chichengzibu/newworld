@@ -65,6 +65,9 @@ PIPICLAW_SKILL_ROUTING=1 PIPICLAW_SKILL_ROUTING_VARIANT=fixed  npx vitest run te
 | `file-organizer` | `文件整理器` |
 | `sample-web-summary` | `Web Page Summarizer` |
 
+> 注:这两个样例技能在 **M4-X 已按用户要求删除**(「技能部分不要集成」)。
+> 本节保留的是当时的实测事实 —— 缺陷本身与它们是否还在仓库里无关。
+
 而：
 - `getSkillSummaries()` → 只给**展示名**
 - `load_skill(skill_id)` → 只按 **id** 查
@@ -102,7 +105,7 @@ PIPICLAW_SKILL_ROUTING=1 PIPICLAW_SKILL_ROUTING_VARIANT=fixed  npx vitest run te
 | L1 摘要带出 `skill_id` | `SkillLoader.getSkillSummaries()` / `getAllSkillSummaries()` |
 | 按 **name 兜底**加载 | `SkillLoader.getSkillBody()`（大小写/空白不敏感） |
 | 错误信息列 **id（名称）** 对照 | 同上 —— 模型能直接抄，不用猜哪个是 id |
-| `appliedEntity` 记**规范 id** | `LoadSkillTool` + 新增 `SkillLoader.resolveSkillId()` |
+| `appliedEntity` 记**规范 id** | `LoadSkillTool` + 新增 `SkillLoader.resolveCanonicalSkillId()` |
 
 **为什么 `appliedEntity` 必须记规范 id**：学习闭环记的是「技能 S 被应用了」。
 若记的是展示名，`skill-stats.json` 里的技能名就与 `load_skill` 寻址用的 id 对不上 ——
@@ -142,7 +145,7 @@ PIPICLAW_SKILL_ROUTING=1 PIPICLAW_SKILL_ROUTING_VARIANT=fixed  npx vitest run te
 
 | 项 | 结果 |
 |---|---|
-| `tests/unit/skill-id-routing-m4w.test.ts` | **10 例**：摘要带 id / 按 name 兜底 / 大小写兜底 / resolveSkillId / 错误信息含 id↔名称对照 / **appliedEntity 记规范 id** / 不存在则失败且不记账 |
+| `tests/unit/skill-id-routing-m4w.test.ts` | **10 例**：摘要带 id / 按 name 兜底 / 大小写兜底 / resolveCanonicalSkillId / 错误信息含 id↔名称对照 / **appliedEntity 记规范 id** / 不存在则失败且不记账 |
 | `tests/integration/skill-routing-live.test.ts` | 实跑基准（默认 skip，需 `PIPICLAW_SKILL_ROUTING=1`） |
 | vitest | **143 files / 1607 passed / 0 FAIL** |
 
