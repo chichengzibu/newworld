@@ -18,6 +18,7 @@
  */
 
 import { spawn, spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -45,6 +46,27 @@ function moveAside(dir) {
     // 忽略: 若 rename 也失败,交给后续步骤自行处理
   }
 }
+// 【M4-U】构建前先剪掉历史备份(每个产物目录只留最近 1 代)。
+//
+// 为什么:moveAside() 每次构建把旧产物**改名**成 `<dir>.bak-<时间戳>`
+// (改名是为了绕开 safe-delete 的批量删除拦截),但**从不清旧的**
+// → 一次构建留 3 个备份(`release` 一个就 ~466MB)
+// → 实测连续构建十几次后堆了 **39 个目录、5.1GB**
+// → electron-builder 扫目录超时 → 「未找到打包产物」→ **构建门禁红**。
+//
+// 在 moveAside **之前**剪:留下的那一代是"上一次成功的构建",
+// 等新构建成功后才被下一代换掉 —— 比"构建完就删"安全。
+{
+  const cleanup = spawnSync(
+    process.execPath,
+    [path.join(path.dirname(fileURLToPath(import.meta.url)), 'cleanup-build-backups.mjs'), '--keep', '1'],
+    { stdio: 'inherit' },
+  );
+  if (cleanup.status !== 0) {
+    console.warn('[build] 清理历史备份失败(不阻断构建)');
+  }
+}
+
 moveAside('dist');
 moveAside('dist-electron');
 moveAside('release');

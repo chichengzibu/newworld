@@ -1956,3 +1956,24 @@ sendMessage(convId, msg, providerId, modelId)
 - **mock 加了工具调用模式**(`scripts/mock-llm-server.mjs`):
   用户消息带 `__TOOL_CALL__` → 首轮回 `Glob` 的 tool_calls(非流式 JSON 不行,
   适配器只解析 `data:` 行 —— 见 DEV-161),第二轮(带 tool 结果回来)再回正文。
+
+---
+
+## W5 接线批偏差登记 · M4-U 构建备份无限累积（2026-11-19）
+
+> 编号自 DEV-167 起。
+
+| ID | 状态 | 摘要 |
+|---|---|---|
+| DEV-167 | 已修 | **构建备份无限累积 → 门禁变脆** · `scripts/build.mjs` 的 `moveAside()` 每次构建把旧产物**改名**成 `<dir>.bak-<时间戳>`(改名是为绕开 Windows safe-delete 的「批量删除确认」拦截),但**从不清旧的** → 一次构建留 3 个备份(`release` 一个 ~466MB)→ 实测连续构建十几次后堆了 **39 个目录 / 5.1GB** → electron-builder 扫目录超时 → 「未找到打包产物(release/ 下无 exe/app)」→ **构建门禁红**。修:新增 `scripts/cleanup-build-backups.mjs`(带护栏:只删**仓库根目录下**、名字严格匹配 `(dist|dist-electron|release).bak-<纯数字>` 的目录),并在 build.mjs 里于 moveAside **之前**剪枝(每个目录留最近 1 代)。实测:清理后 39 → 6 个目录(5.1GB → 473MB,磁盘可用 100G → 104G),构建重新产出安装包 |
+
+### DEV-167 明细
+
+- **为什么在 moveAside 之前剪**:留下的那一代是「上一次成功的构建」,
+  等新构建成功后才被下一代换掉 —— 比「构建完就删」安全(新构建坏了还有旧的能回退)。
+- **剪枝的边界**:每个产物目录最多 2 代(上一代 + 当前代)→ 约 470MB 封顶,不再随构建次数增长。
+- **护栏**:清理脚本只认**仓库根目录下**、名字严格匹配
+  `(dist|dist-electron|release).bak-<纯数字>` 的目录 —— 别的一律不碰;
+  且删不掉不算失败(可能被 safe-delete 拦着),不阻断构建。
+- **顺带修了一个自造的错误**:第一次用 `new URL(import.meta.url).pathname` 取脚本目录,
+  在 Windows 上得到 `/D:/...` 这种带前导斜杠的串 → 路径拼错 → 改用 `fileURLToPath`。

@@ -75,6 +75,7 @@
 | **M4-R** | **剩余界面实跑**（M4-K 遗留 #3:首屏之外的 Skills / Models / IM / Schedule / Settings / DevPanel 展开态**只过 typecheck 与组件测试**,而近几批的 P0 全是实跑才看见的。现新增 e2e(7 例)逐页真跑:根容器渲染 / 关键内容在 / 无红屏兜底 / 关键元素完整落在视口内;**本批未发现新的产品缺陷** —— 5 页 + DevPanel + 5 个设置页签全部正常 | `NOVA-#009-m4r-pages-verification-design.md` |
 | **M4-S** | **e2e 隔离补强**（M4-R 顺手挖出:M4-K 的隔离修复把 userData 建在**模块级**,而 Playwright 同 worker 顺序跑多个 spec 时 helper **只加载一次** → **所有 spec 文件共用一个 userData** → 状态跨文件泄漏(实测 `ui-smoke` 切到 English 没切回来 → 后续 spec 全红)。现:userData **每个测试一个** + 清理加护栏;连带暴露一批**顺序依赖**的 spec(`settings-full-crud` CR2~CR7 依赖 CR1、`network-failure` NW4 依赖 NW1/NW3 —— **单跑必红**)→ 改为各自自建前提 | `NOVA-#009-m4r-pages-verification-design.md` |
 | **M4-T** | **学习闭环端到端**（「自我学习」是本项目对标 Hermes / Claude Code 的**核心差异点**,但从没被端到端验过「它真的在记东西」;且 M4-Q 修掉的那个 bug(`sendMessage` 收 providerId 不写回会话)**本来会让闭环记到的全是失败**)。现新增 e2e(2 例)验成事实:成功的对话 → 观察落盘(outcome='ok')· 工具调用链(mock 加工具调用模式 → agent 真的调了 → 观察里有 Glob 步骤 → tracker 有工具级记录)。**未发现新的产品缺陷** —— 但它是 M4-Q 修复的**回归守卫** | `NOVA-#009-m4s-learning-loop-e2e-design.md` |
+| **M4-U** | **构建备份不再无限累积**（`moveAside()` 每次构建把旧产物改名成 `<dir>.bak-<时间戳>`却从不清旧的 → 连续构建十几次后堆了 **39 个目录 / 5.1GB** → electron-builder 扫目录超时 → 「未找到打包产物」→ **构建门禁红**。现:构建前剪枝(每个目录留最近 1 代,护栏只认 `(dist|dist-electron|release).bak-<纯数字>`)→ 实测 39→6 个目录(473MB 封顶),构建重新产出安装包 | `scripts/cleanup-build-backups.mjs` |
 
 **构建门禁**（M3-F 引入，此后每批都守着）：
 `[1/5] 主进程 typecheck → [2/5] 渲染进程 typecheck → [3/5] vite build → [4/5] electron-builder → [5/5] build-report`
