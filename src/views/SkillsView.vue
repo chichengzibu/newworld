@@ -300,6 +300,27 @@
         <el-form-item>
           <el-button type="primary" :loading="trialRunning" @click="runTrial">开始验证</el-button>
         </el-form-item>
+        <!-- 【M4-V】裁判对照开关。
+             默认关(D7:裁判层保持默认关闭)。门禁不通过时**禁用**并写明原因 ——
+             不能让用户勾上一个必然被拦的开关,也不能只说"不可用"不说为什么。 -->
+        <el-form-item label="裁判对照">
+          <el-checkbox
+            v-model="trialEnableJudge"
+            :disabled="judgeTrust !== null && !judgeTrust.trusted"
+          >
+            同时用 LLM 裁判比较两次执行（参考信号，不参与判定）
+          </el-checkbox>
+          <div v-if="judgeTrust" class="dir-empty">
+            <template v-if="judgeTrust.trusted">
+              可用：{{ judgeTrust.reason }}
+            </template>
+            <template v-else>
+              <b>不可用</b> —— {{ judgeTrust.reason }}
+              <br />
+              裁判对照必须先通过校准门禁；未校准的裁判其分数不是数据，是噪声。
+            </template>
+          </div>
+        </el-form-item>
       </el-form>
 
       <div v-if="trialResult" class="trial-result">
@@ -353,6 +374,16 @@
         <p v-if="trialResult.summary.pairwise" class="dir-empty">
           {{ trialResult.summary.pairwise.note }}
         </p>
+        <!-- 【M4-V】裁判对照的说明**独立渲染** ——
+             门禁拦下时,这里必须写清楚"为什么没跑"。
+             否则用户看到结果里没有裁判对照,会以为"这功能不存在"。 -->
+        <el-alert
+          v-if="trialResult.summary.judgeStatus"
+          :type="trialResult.summary.judgeStatus.ran ? 'info' : 'warning'"
+          :closable="false"
+          show-icon
+          :title="trialResult.summary.judgeStatus.reason"
+        />
       </div>
     </el-card>
 
@@ -689,6 +720,19 @@ const trialSkillId = ref('');
 const trialTasksText = ref('');
 const trialRunning = ref(false);
 const trialResult = ref<any>(null);
+// 【M4-V】是否请求 pairwise 裁判对照 —— 默认关(D7:裁判层保持默认关闭)
+const trialEnableJudge = ref(false);
+// 【M4-V】当前裁判的放行状态 —— 门禁不通过时勾选框禁用,并写明原因
+const judgeTrust = ref<{ trusted: boolean; model: string; reason: string; basis?: string } | null>(null);
+
+const loadJudgeTrust = async (): Promise<void> => {
+  try {
+    const res = await (window as any).electronAPI?.skills?.judgeTrust?.();
+    if (res?.success) judgeTrust.value = res.data;
+  } catch (e) {
+    console.error('loadJudgeTrust failed', e);
+  }
+};
 
 const trialVerdictType = computed(() => {
   const v = trialResult.value?.summary?.verdict;
@@ -731,6 +775,8 @@ const runTrial = async (): Promise<void> => {
     const res = await (window as any).electronAPI?.skills?.runUtilityTrial?.({
       skillId: trialSkillId.value,
       tasks,
+      // 【M4-V】裁判对照:默认不请求;请求了也要过主进程的校准门禁
+      enableJudge: trialEnableJudge.value,
     });
     if (res?.success) {
       trialResult.value = res.data;
@@ -912,6 +958,8 @@ onMounted(() => {
   loadSkills();
   loadStorageInfo();
   loadAcceptance();
+  // 【M4-V】查裁判门禁状态 —— 决定勾选框能不能勾
+  loadJudgeTrust();
 
   const api = (window as any).electronAPI;
   if (api?.learning?.onNewProposal) {

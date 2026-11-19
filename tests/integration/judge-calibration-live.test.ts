@@ -64,6 +64,7 @@ import {
   type CalibrationItem,
   type JudgeVerdictRecord,
 } from '../../electron/learning/JudgeCalibration'
+import { buildCalibrationRecord } from '../../electron/learning/JudgeTrust'
 import {
   DATASET_DIR,
   OUTPUT_DIR,
@@ -227,6 +228,26 @@ describe('M4-J 裁判校准实跑', () => {
     const reportFile = join(OUTPUT_DIR, `report-${MODEL.replace(/[:/]/g, '_')}.md`)
     writeFileSync(reportFile, md, 'utf-8')
     writeFileSync(join(OUTPUT_DIR, `report-${MODEL.replace(/[:/]/g, '_')}.json`), JSON.stringify(report, null, 2), 'utf-8')
+
+    // 【M4-V】同时产出**放行门禁用的归档记录** ——
+    // 记录只能从报告推导(数字口径天然一致),达标了才把它贴进
+    // electron/learning/JudgeCalibrationRecords.ts,门禁才会放行这个模型。
+    const record = buildCalibrationRecord(report, {
+      model: MODEL,
+      dataset: DATASETS.join(','),
+      calibratedAt: new Date().toISOString(),
+    })
+    const recordFile = join(OUTPUT_DIR, `record-${MODEL.replace(/[:/]/g, '_')}.json`)
+    writeFileSync(recordFile, JSON.stringify(record, null, 2), 'utf-8')
+    console.log(`\n[calib] 放行记录已写: ${recordFile}`)
+    console.log('[calib] 门禁会按它判定:')
+    console.log(`[calib]   trusted = ${report.verdict.reliable}`)
+    if (report.verdict.reliable) {
+      console.log('[calib]   ✅ 达标 —— 可贴进 JudgeCalibrationRecords.ts,门禁即放行该模型')
+    } else {
+      console.log('[calib]   ❌ 未达标 —— 不要贴进 JudgeCalibrationRecords.ts')
+    }
+    console.log(`[calib]   理由: ${report.verdict.reasons.join(' / ')}`)
 
     console.log('\n' + md)
     console.log(`[calib] 报告已写: ${reportFile}`)

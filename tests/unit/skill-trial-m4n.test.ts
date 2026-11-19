@@ -89,6 +89,15 @@ describe('M4-N pairwise 裁判(换序双向 + 一致性要求)', () => {
   /** 永远说"第一个更好" —— 典型的位置偏置裁判 */
   const alwaysFirst: PairwiseJudge = async () => ({ winner: 'a', reason: '第一个更好' })
 
+  /**
+   * 【M4-V 起的新契约】裁判要跑,必须带**放行凭据**。
+   *
+   * 理由:D7「裁判层保持默认关闭」原来只是一句注释 —— 注释挡不住任何人。
+   * 现在门禁会拦:传了裁判但没给凭据(或凭据说"不放行")→ 裁判不被调用。
+   * 本组用例测的是"放行之后"的 pairwise 语义,所以一律带上凭据。
+   */
+  const trusted = { trusted: true, reason: '已通过校准门禁(测试)', basis: '测试用凭据' }
+
   it('正反两次结论一致 → 采信为 with_better', async () => {
     // 一个"按内容判断"的裁判:带技能那次多调了 Write(工具列表可区分)
     const byContent: PairwiseJudge = async (a) => {
@@ -106,6 +115,7 @@ describe('M4-N pairwise 裁判(换序双向 + 一致性要求)', () => {
     }
     const res = await runSkillTrial('s1', tasks(5), executor, {
       pairwiseJudge: byContent,
+      pairwiseGate: trusted,
       judgeSampleRate: 1,
     })
     for (const p of res.pairs) {
@@ -117,6 +127,7 @@ describe('M4-N pairwise 裁判(换序双向 + 一致性要求)', () => {
   it('正反两次结论不一致 → unstable(不是"平局")', async () => {
     const res = await runSkillTrial('s1', tasks(5), executorBothFailButScored, {
       pairwiseJudge: alwaysFirst,
+      pairwiseGate: trusted,
       judgeSampleRate: 1,
     })
     for (const p of res.pairs) {
@@ -131,6 +142,7 @@ describe('M4-N pairwise 裁判(换序双向 + 一致性要求)', () => {
     const broken: PairwiseJudge = async () => ({ winner: 'unknown' })
     const res = await runSkillTrial('s1', tasks(5), executorBothFailButScored, {
       pairwiseJudge: broken,
+      pairwiseGate: trusted,
       judgeSampleRate: 1,
     })
     for (const p of res.pairs) {
@@ -141,6 +153,7 @@ describe('M4-N pairwise 裁判(换序双向 + 一致性要求)', () => {
   it('裁判不改判定(D7:裁判层保持默认关闭,结论不随裁判漂移)', async () => {
     const withJudge = await runSkillTrial('s1', tasks(5), executorBothFailButScored, {
       pairwiseJudge: alwaysFirst,
+      pairwiseGate: trusted,
       judgeSampleRate: 1,
     })
     const withoutJudge = await runSkillTrial('s1', tasks(5), executorBothFailButScored)

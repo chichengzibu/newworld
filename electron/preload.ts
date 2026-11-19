@@ -195,6 +195,8 @@ const IpcChannels = {
   SKILLS_GET_EFFECTIVENESS: 'skills:getEffectiveness',
   // 【M4-E】技能效用对照实验
   SKILLS_RUN_UTILITY_TRIAL: 'skills:runUtilityTrial',
+  // 【M4-V】裁判放行门禁状态
+  SKILLS_JUDGE_TRUST: 'skills:judgeTrust',
   SKILLS_GET_UTILITY: 'skills:getUtility',
   SKILLS_RELOAD: 'skills:reload',
   SKILLS_IMPORT_FILE: 'skills:importFile',
@@ -1065,8 +1067,15 @@ const electronAPI = {
        * 【M4-E】跑一次技能效用对照实验(每个任务跑两遍:带/不带技能)。
        * **token 成本翻倍** —— 调用前须向用户说明。
        */
-      runUtilityTrial: (payload: { skillId: string; tasks: Array<{ id: string; instruction: string; expectation?: any }> }): Promise<IpcResponse<any>> =>
+      runUtilityTrial: (payload: { skillId: string; tasks: Array<{ id: string; instruction: string; expectation?: any }>; enableJudge?: boolean }): Promise<IpcResponse<any>> =>
         ipcRenderer.invoke(IpcChannels.SKILLS_RUN_UTILITY_TRIAL, payload),
+
+      /**
+       * 【M4-V】查当前裁判能不能用(校准门禁)。
+       * 界面用它决定"启用裁判对照"的勾选框能不能勾 —— 不通过时禁用并说明原因。
+       */
+      judgeTrust: (): Promise<IpcResponse<{ trusted: boolean; model: string; reason: string; basis?: string }>> =>
+        ipcRenderer.invoke(IpcChannels.SKILLS_JUDGE_TRUST),
 
       /** 【M4-D】技能的边际效用(同类别任务下,带它 vs 不带它的成功率差) */
       getUtility: (): Promise<IpcResponse<any[]>> =>

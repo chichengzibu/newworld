@@ -24,7 +24,10 @@ import { SelfLearner } from '../learning/SelfLearner';
 import { SkillEffectivenessTracker } from '../learning/SkillEffectivenessTracker';
 import { classifyFailure } from '../learning/FailureClassifier';
 import { normalizeTaskCategory } from '../learning/TaskCategory';
-import { runSkillTrial, type TrialExecutor, type TrialResult, type TrialTask } from '../learning/SkillTrial';
+import { runSkillTrial, type TrialExecutor, type TrialResult, type TrialTask, type TrialOptions } from '../learning/SkillTrial';
+import { createPairwiseJudge } from '../learning/RunJudge';
+import { evaluateJudgeTrust, toJudgeGate } from '../learning/JudgeTrust';
+import { LlmConfigStore } from '../llm/LlmConfigStore';
 import { AcceptanceLog } from '../learning/AcceptanceLog';
 import type { GradableRun } from '../learning/TaskGrader';
 import { CostTracker } from '../insight/CostTracker';
@@ -1450,15 +1453,78 @@ export class ChatManager {
    * 【M4-E】跑一次技能效用对照实验。
    *
    * 【成本提示】每个任务跑两遍 → token 翻倍。界面必须先告知用户。
+   *
+   * 【M4-V 裁判对照接线】此前这条路径**从不传 judge** —— 裁判层在生产上
+   * 一次都没跑过(M4-N 只在单测里存在)。现在接上了,但**默认关闭**:
+   *   - 用户显式开了 `enableJudge` 才请求裁判对照
+   *   - 请求了还要过**校准门禁**(evaluateJudgeTrust):
+   *     没归档过校准记录 / 任何一项指标不达标 → 裁判**不被调用**
+   *   - 被拦下时,结果里会写明为什么(judgeStatus),不是静默没跑
+   *
+   * 【为什么裁判用「用户配置的模型」而不是写死的裁判模型】
+   * 校准记录是**按模型**归档的 —— 换了模型,旧记录立刻失效(judge drift)。
+   * 所以门禁查的就是用户当前实际在用的那个模型。
    */
   public async runSkillUtilityTrial(
     skillId: string,
     tasks: TrialTask[],
+    opts: { enableJudge?: boolean } = {},
   ): Promise<TrialResult> {
     const conversationId = this.config.createConversation({ title: `技能验证:${skillId}` }).id;
-    const executor: TrialExecutor = async (task, opts) =>
-      this.runTrialVariant(conversationId, task.instruction, opts.suppressedSkills);
-    return await runSkillTrial(skillId, tasks, executor);
+    const executor: TrialExecutor = async (task, o) =>
+      this.runTrialVariant(conversationId, task.instruction, o.suppressedSkills);
+
+    const trialOpts: TrialOptions = {};
+    if (opts.enableJudge) {
+      const judgeCfg = this.resolveJudgeConfig();
+      if (judgeCfg) {
+        // 【门禁】只有门禁放行,才真的构造裁判并传下去
+        const gate = toJudgeGate(evaluateJudgeTrust(judgeCfg.model));
+        if (gate.trusted) {
+          trialOpts.pairwiseJudge = createPairwiseJudge({ model: judgeCfg.model, provider: judgeCfg.provider });
+        }
+        trialOpts.pairwiseGate = gate;
+      } else {
+        // 没配模型 → 门禁无从查起,但**照样要把话说清楚**
+        trialOpts.pairwiseGate = {
+          trusted: false,
+          reason: '没有可用的 LLM provider —— 无法构造裁判,也没有可查的校准记录',
+        };
+      }
+    }
+    return await runSkillTrial(skillId, tasks, executor, trialOpts);
+  }
+
+  /**
+   * 解析"用哪个模型当裁判" —— 取用户当前**启用**的 provider。
+   *
+   * 【为什么取用户的 provider 而不是写死裁判模型】
+   * 校准记录按模型归档:用户换模型 = 旧记录失效。
+   * 写死模型会让门禁查一个跟实际调用不同的模型 → 放行形同虚设。
+   */
+  private resolveJudgeConfig(): { model: string; provider: any } | null {
+    const active = LlmConfigStore.getInstance().getActive();
+    if (!active) return null;
+    const model = active.defaultModel;
+    if (!model) return null;
+    return { model, provider: active.provider };
+  }
+
+  /**
+   * 【M4-V】查当前裁判能不能用 —— 界面用它来决定勾选框是否可勾。
+   */
+  public getJudgeTrust(): { trusted: boolean; model: string; reason: string; basis?: string } {
+    const cfg = this.resolveJudgeConfig();
+    if (!cfg) {
+      return { trusted: false, model: '', reason: '没有启用任何 LLM provider —— 无法构造裁判' };
+    }
+    const verdict = evaluateJudgeTrust(cfg.model);
+    return {
+      trusted: verdict.trusted,
+      model: verdict.model,
+      reason: verdict.trusted ? (verdict.basis ?? '已通过校准门禁') : verdict.reasons.join('；'),
+      basis: verdict.basis,
+    };
   }
 
   /**

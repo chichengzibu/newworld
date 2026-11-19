@@ -525,17 +525,38 @@ export class IpcServer {
      * 【成本必须先告知用户】每个任务跑两遍(带/不带技能)→ token 翻倍。
      * 界面在调用前会先说明。
      */
-    ipcMain.handle('skills:runUtilityTrial', async (_, payload: { skillId: string; tasks: Array<{ id: string; instruction: string; expectation?: any }> }) => {
+    ipcMain.handle('skills:runUtilityTrial', async (_, payload: { skillId: string; tasks: Array<{ id: string; instruction: string; expectation?: any }>; enableJudge?: boolean }) => {
       try {
         const skillId = String(payload?.skillId ?? '').trim();
         if (!skillId) return { success: false, error: '技能 id 不能为空' };
         const tasks = Array.isArray(payload?.tasks) ? payload.tasks : [];
         if (tasks.length === 0) return { success: false, error: '至少要有一个任务' };
         const { ChatManager } = await import('../chat/ChatManager');
-        const result = await ChatManager.getInstance().runSkillUtilityTrial(skillId, tasks as any);
+        const result = await ChatManager.getInstance().runSkillUtilityTrial(
+          skillId,
+          tasks as any,
+          // 【M4-V】裁判对照默认关(D7);用户显式开了才请求,且仍要过校准门禁
+          { enableJudge: payload?.enableJudge === true },
+        );
         return { success: true, data: result };
       } catch (error) {
         this.log.error('skills:runUtilityTrial 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    /**
+     * 【M4-V】查当前裁判能不能用。
+     *
+     * 界面用它决定"启用裁判对照"的勾选框能不能勾 —— 门禁不通过时
+     * 勾选框禁用,并把**具体哪一项不达标**写给用户看。
+     */
+    ipcMain.handle('skills:judgeTrust', async () => {
+      try {
+        const { ChatManager } = await import('../chat/ChatManager');
+        return { success: true, data: ChatManager.getInstance().getJudgeTrust() };
+      } catch (error) {
+        this.log.error('skills:judgeTrust 失败', error);
         return { success: false, error: String(error) };
       }
     });

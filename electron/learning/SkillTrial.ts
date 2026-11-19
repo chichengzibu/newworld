@@ -36,6 +36,7 @@ import {
   type RunJudge,
   type PairwiseJudge,
 } from './RunJudge'
+import type { JudgeGate } from './JudgeTrust'
 
 /** 对照实验里的一个任务 */
 export interface TrialTask {
@@ -78,6 +79,36 @@ export interface TrialOptions {
    * 只作为参考信号进说明 —— judge drift 真实存在,不能让结论随裁判漂移。
    */
   pairwiseJudge?: PairwiseJudge;
+  /**
+   * 【M4-V】pairwise 裁判的**放行凭据** —— 校准门禁的判定结果。
+   *
+   * 【为什么传了 judge 还必须传它】
+   * D7 原来只是一句注释:注释挡不住任何人。
+   * 门禁把这句约定变成会拦人的东西:传了 `pairwiseJudge` 却没给
+   * 放行凭据(或凭据说"不放行")→ **裁判不会被调用**,
+   * 且试验结果里会写明为什么不跑。
+   *
+   * 【不跑而不是"跑了再说"】
+   * 一次 pairwise 判定是**两次模型调用**。对一个没校准过的裁判花这个钱,
+   * 换回来的结论既不能用、又会污染说明。宁可不跑,并说清楚。
+   */
+  pairwiseGate?: JudgeGate;
+}
+
+/**
+ * 裁判对照的状态 —— 调用方**请求过**裁判对照时必存在。
+ *
+ * 【为什么要有这个字段】
+ * M4-S 的教训:输出层看不到任何东西,用户会以为"没这回事"。
+ * 门禁拦下裁判时,用户必须看到**为什么**被拦,而不是看到一片空白。
+ */
+export interface TrialJudgeStatus {
+  /** 裁判是否真的调用了 */
+  ran: boolean;
+  /** 门禁是否放行 */
+  trusted: boolean;
+  /** 中文说明(直接展示) */
+  reason: string;
 }
 
 /**
@@ -174,6 +205,13 @@ export interface TrialSummary {
     unstable: number;
     note: string;
   };
+  /**
+   * 【M4-V】裁判对照的状态。
+   *
+   * 存在 = 调用方**请求过**裁判对照(不论有没有跑成)。
+   * 没请求过 → 没有这个字段(用户没开这个开关,不必提)。
+   */
+  judgeStatus?: TrialJudgeStatus;
 }
 
 /** 一次对照实验的完整结果 */
@@ -215,6 +253,21 @@ export async function runSkillTrial(
   let judgeRuns = 0;
   let pairwiseRuns = 0;
 
+  // 【M4-V】门禁 —— 裁判对照要么跑,要么说清为什么不跑。
+  //
+  // 三种状态:
+  //   没请求        → 不提裁判(用户没开这个开关)
+  //   请求但未放行  → 不跑(省两次模型调用),并把原因写进结果
+  //   请求且放行    → 跑,并把放行依据写进结果
+  const pairwiseRequested = !!opts.pairwiseJudge;
+  const gate = opts.pairwiseGate;
+  const pairwiseAllowed = pairwiseRequested && !!gate && gate.trusted;
+  const pairwiseBlockReason = pairwiseRequested && !pairwiseAllowed
+    ? (gate
+      ? gate.reason
+      : '没有提供放行凭据 —— 裁判未通过校准门禁(D7:裁判层保持默认关闭)')
+    : '';
+
   for (const [taskIndex, task] of tasks.entries()) {
     let withRun: GradableRun | null = null;
     let withoutRun: GradableRun | null = null;
@@ -246,7 +299,13 @@ export async function runSkillTrial(
 
     // 【M4-N】pairwise 裁判:**正反各跑一次,两次一致才采信**。
     // 单次顺序的比较在本地裁判上几乎没有信息量(实测换序改口率 68~80%)。
-    if (opts.pairwiseJudge && sampler(taskIndex)) {
+    //
+    // 【M4-V】这条规则现在有据可依了】
+    // "顺序一致 ⇒ 更可信"这条代理**曾经是没验证过的**(实跑发现它反着:
+    // 被采信的一致子集 κ 反而更低)。现在放行凭据里要求
+    // `stableRuleHolds === true` —— 校准必须证明这条规则在该模型上成立,
+    // 才允许跑到这一行。否则门禁在上一层就拦住了,根本到不了这里。
+    if (pairwiseAllowed && opts.pairwiseJudge && sampler(taskIndex)) {
       const forward = await opts.pairwiseJudge(withRun, withoutRun, task.expectation);
       const backward = await opts.pairwiseJudge(withoutRun, withRun, task.expectation);
       const prefForward = forward.winner === 'a' ? 'with_better'
@@ -264,8 +323,20 @@ export async function runSkillTrial(
   }
 
   const summary = summarize(pairs.length, pairs);
+  // 【M4-V】裁判对照的状态 —— 请求过就必须有说法,不允许静默
+  if (pairwiseRequested) {
+    summary.judgeStatus = pairwiseAllowed
+      ? {
+        ran: pairwiseRuns > 0,
+        trusted: true,
+        reason: pairwiseRuns > 0
+          ? (gate?.basis ?? '已通过校准门禁')
+          : '裁判对照已放行,但本次没有样本落在采样率内 —— 未产生任何裁判调用',
+      }
+      : { ran: false, trusted: false, reason: pairwiseBlockReason };
+  }
   // 【M4-N】pairwise 裁判汇总(参考信号,不参与 verdict)
-  if (opts.pairwiseJudge && pairwiseRuns > 0) {
+  if (pairwiseAllowed && pairwiseRuns > 0) {
     const withBetter = pairs.filter(p => p.pairwise === 'with_better').length;
     const withoutBetter = pairs.filter(p => p.pairwise === 'without_better').length;
     const tie = pairs.filter(p => p.pairwise === 'tie').length;

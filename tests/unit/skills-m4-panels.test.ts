@@ -70,6 +70,11 @@ function installApi(over: Record<string, any> = {}) {
       getEffectiveness: vi.fn().mockResolvedValue({ success: true, data: [] }),
       getUtility: vi.fn().mockResolvedValue({ success: true, data: [] }),
       runUtilityTrial: vi.fn().mockResolvedValue({ success: true, data: null }),
+      // 【M4-V】裁判门禁状态 —— 默认"不放行"(与现实一致:现有裁判都未达标)
+      judgeTrust: vi.fn().mockResolvedValue({
+        success: true,
+        data: { trusted: false, model: 'qwen3.5:9b', reason: 'κ=0.411 < 门槛 0.6；换序改口率 67.9% > 门槛 10%' },
+      }),
     },
     ...over,
   }
@@ -282,5 +287,83 @@ describe('M4 技能面板渲染', () => {
     expect(text).toContain('不稳定')
     // 汇总说明里要点明裁判顺序敏感
     expect(text).toContain('顺序敏感')
+  })
+
+  /* ─────────────────── 【M4-V】裁判门禁在界面上的表现 ─────────────────── */
+
+  it('【M4-V】门禁不通过:勾选框禁用,并写明具体哪一项不达标', async () => {
+    const w = await mountView()
+    const text = w.text()
+    // 不可用 + 具体原因(不是笼统的"不可用")
+    expect(text).toContain('不可用')
+    expect(text).toContain('κ=0.411')
+    expect(text).toContain('67.9%')
+    // 勾选框是禁用的
+    // 注意:勾选框自己的文本是它的 label 内容("裁判对照"是 form-item 的 label,不在框内)
+    const cb = w.findAllComponents({ name: 'ElCheckbox' }).find((c: any) => c.text().includes('LLM 裁判'))
+    expect(cb).toBeDefined()
+    expect((cb as any).props('disabled')).toBe(true)
+    expect(w.text()).toContain('裁判对照')
+  })
+
+  it('【M4-V】门禁通过:勾选框可用,并给出依据', async () => {
+    installApi({
+      skills: {
+        ...installApi().skills,
+        judgeTrust: vi.fn().mockResolvedValue({
+          success: true,
+          data: { trusted: true, model: 'good-model', reason: '已校准(2026-11-19,n=220,κ=0.720)', basis: 'x' },
+        }),
+      },
+    })
+    const w = await mountView()
+    const cb = w.findAllComponents({ name: 'ElCheckbox' }).find((c: any) => c.text().includes('LLM 裁判'))
+    expect(cb).toBeDefined()
+    expect((cb as any).props('disabled')).toBe(false)
+    expect(w.text()).toContain('κ=0.720')
+  })
+
+  it('【M4-V】裁判被门禁拦下:结果里写明为什么没跑(不是一片空白)', async () => {
+    const result = {
+      skillId: 'pdf-extract',
+      pairs: [{
+        task: { id: 't0', instruction: '把桌面上的 PDF 归档' },
+        withSkill: { variant: 'with_skill', run: {}, grade: { passed: true, score: 1, layers: [] } },
+        withoutSkill: { variant: 'without_skill', run: {}, grade: { passed: false, score: 0.33, layers: [] } },
+        delta: 1, scoreDelta: 0.67,
+      }],
+      summary: {
+        n: 1, withSkillSuccesses: 1, withoutSkillSuccesses: 0,
+        withSkillRate: 1, withoutSkillRate: 0, delta: 1,
+        verdict: 'positive', note: '有帮助:带该技能的成功率明显更高',
+        meanScoreDelta: 0.67, scoreDeltaDirection: 'consistent_with',
+        judgeStatus: {
+          ran: false, trusted: false,
+          reason: 'κ=0.411 < 门槛 0.6；裁判未通过校准门禁,未产生任何裁判调用',
+        },
+      },
+      finishedAt: 0,
+    }
+    installApi({
+      skills: {
+        ...installApi().skills,
+        runUtilityTrial: vi.fn().mockResolvedValue({ success: true, data: result }),
+      },
+    })
+    const w = await mountView()
+    const sel = w.findComponent({ name: 'ElSelect' })
+    sel.vm.$emit('update:modelValue', 'pdf-extract')
+    await flushPromises()
+    const ta = w.find('textarea')
+    ta.setValue('把桌面上的 PDF 归档')
+    await flushPromises()
+    const btn = w.findAll('button').find((b: any) => b.text().includes('开始验证'))
+    await btn!.trigger('click')
+    await flushPromises()
+    await flushPromises()
+
+    const text = w.text()
+    expect(text).toContain('κ=0.411')
+    expect(text).toContain('未产生任何裁判调用')
   })
 })
