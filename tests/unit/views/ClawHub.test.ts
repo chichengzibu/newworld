@@ -1,306 +1,128 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
-import { createI18n } from 'vue-i18n'
 
-// 视图从 element-plus 子路径取 ElMessage(见 src/views/ClawHub.vue:288),
-// 仅 mock 主模块挂不上 spy。vi.hoisted 让主模块与子路径两个 mock
-// 共享同一 ElMessage 对象,view 与测试断言指向同一 spy。
-const ElMessageMock = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn() }))
+/**
+ * PiPiClaw — 私有技能仓库页面测试（M4-X）
+ * ═══════════════════════════════════════════════════════════════════════
+ * 【这一批在测什么】
+ * M4-X 把本页的 4 个**本地演示**页签删了(本地市场/发布/审核/模板 ——
+ * 审计结论:下载是 stub、审核通过的条目永远装不上、模板实例化写到
+ * `userData/templates/` 而 SkillLoader 从不扫那个目录)。
+ * 本页现在**只剩远程仓库** —— 自建仓库、zip 带 Ed25519 签名。
+ *
+ * 所以这里测的是:
+ *   ① 页面如实呈现"私有技能仓库"与它与开源技能库的区别
+ *   ② 连仓库 → 调 registry IPC → 列出条目
+ *   ③ 安装 → 调 install IPC
+ *   ④ 连不上 → **说清楚失败**(不能一片空白)
+ */
+
+const ElMessageMock = vi.hoisted(() => ({ success: vi.fn(), error: vi.fn(), warning: vi.fn(), info: vi.fn() }))
 vi.mock('element-plus', () => ({ ElMessage: ElMessageMock }))
 vi.mock('element-plus/es/components/message/index', () => ({ ElMessage: ElMessageMock }))
 
-const i18n = createI18n({ legacy: false, locale: 'zh-CN', messages: { 'zh-CN': {} } })
+const mockRegistry = [
+  { id: 'r1', name: '内部 PDF 工具', description: '公司专用的 PDF 处理', category: 'internal', tags: ['pdf'], version: '1.2.0', installedVersion: '1.0.0', hasUpdate: true },
+  { id: 'r2', name: '内部部署助手', description: '部署流水线相关', category: 'devops', tags: ['deploy'], version: '0.9.0', installedVersion: undefined, hasUpdate: false },
+]
 
-;(globalThis as any).window = (globalThis as any).window || {}
-const mockSkills = [
-  { id: 's1', name: 'Code Helper', description: 'helps code', category: 'dev', tags: ['code'], authorName: 'Alice', ratingCount: 2, ratingSum: 9, downloadCount: 10, status: 'approved' },
-  { id: 's2', name: 'Test Gen', description: 'gen tests', category: 'dev', tags: ['test'], authorName: 'Bob', ratingCount: 0, ratingSum: 0, downloadCount: 5, status: 'approved' },
-]
-const mockPending = [
-  { id: 'p1', name: 'New Skill', description: 'awaiting review', category: 'ai', authorName: 'Carol', publishedAt: Date.now() },
-]
 ;(window as any).electronAPI = {
   channel: {
-    clawhubSearch: vi.fn().mockResolvedValue({ success: true, data: mockSkills }),
-    clawhubListPending: vi.fn().mockResolvedValue({ success: true, data: mockPending }),
-    clawhubPublish: vi.fn().mockResolvedValue({ success: true, data: { id: 'new' } }),
-    clawhubReview: vi.fn().mockResolvedValue({ success: true, data: { status: 'approved' } }),
-    clawhubRate: vi.fn().mockResolvedValue({ success: true, data: { id: 'r1' } }),
-    clawhubListTemplates: vi.fn().mockResolvedValue({ success: true, data: [
-      { id: 'tpl-daily', name: '每日总结', description: '生成日报', useCase: '下班前', category: 'productivity', tags: ['daily'], authorName: 'Team', manifestContent: '...' },
-      { id: 'tpl-review', name: '代码审查', description: 'review diff', useCase: 'PR 后', category: 'developer', tags: ['pr'], authorName: 'Team', manifestContent: '...' },
-    ] }),
-    clawhubListTemplateCategories: vi.fn().mockResolvedValue({ success: true, data: ['productivity', 'developer'] }),
-    clawhubInstantiateTemplate: vi.fn().mockResolvedValue({ success: true, data: { id: 'skill-new', name: '我的日报', status: 'pending' } }),
+    clawhubRegistryList: vi.fn().mockResolvedValue({ success: true, data: mockRegistry }),
+    clawhubRegistryInstall: vi.fn().mockResolvedValue({ success: true, data: { skillId: 'r1' } }),
   },
 }
 
 const elementPlusStubs = {
-  'el-tabs': { template: '<div class="el-tabs-stub"><slot /></div>' },
-  'el-tab-pane': { template: '<div class="el-tab-pane-stub"><slot /></div>' },
   'el-button': { template: '<button class="el-button-stub" @click="$emit(\'click\')"><slot /></button>' },
   'el-input': { template: '<input class="el-input-stub" />' },
-  'el-select': { template: '<select class="el-select-stub"><slot /></select>' },
-  'el-option': { template: '<option class="el-option-stub"><slot /></option>' },
-  'el-form': { template: '<form><slot /></form>' },
-  'el-form-item': { template: '<div class="el-form-item-stub"><slot /></div>' },
   'el-card': { template: '<div class="el-card-stub"><slot /></div>' },
-  'el-dialog': { template: '<div class="el-dialog-stub" v-if="modelValue"><slot /></div>', props: ['modelValue', 'title', 'width'] },
-  'el-table': { template: '<div class="el-table-stub"><slot /></div>' },
-  'el-table-column': { template: '<div class="el-table-column-stub" />', props: ['label', 'prop', 'width'] },
   'el-tag': { template: '<span class="el-tag-stub"><slot /></span>' },
-  'el-empty': { template: '<div class="el-empty-stub">{{ description }}</div>', props: ['description'] },
-  'el-rate': { template: '<div class="el-rate-stub" />' },
+  // 真实的 el-alert 渲染 title 属性 —— stub 也要渲染,否则界面上的提示语测不到
+  'el-alert': { template: '<div class="el-alert-stub">{{ title }}</div>', props: ['title'] },
+  'el-row': { template: '<div class="el-row-stub"><slot /></div>' },
+  'el-col': { template: '<div class="el-col-stub"><slot /></div>' },
+  'el-skeleton': { template: '<div class="el-skeleton-stub" />' },
 }
 
 import ClawHub from '../../../src/views/ClawHub.vue'
 
-describe('P1-05: ClawHub 浏览市场 + 搜索', () => {
+async function mountView() {
+  const w = mount(ClawHub, { global: { stubs: elementPlusStubs } })
+  await flushPromises()
+  return w
+}
+
+describe('M4-X 私有技能仓库页面', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    ;(window as any).electronAPI.channel.clawhubRegistryList.mockResolvedValue({ success: true, data: mockRegistry })
+    ;(window as any).electronAPI.channel.clawhubRegistryInstall.mockResolvedValue({ success: true, data: { skillId: 'r1' } })
   })
 
-  it('挂载加载 search + pending', async () => {
-    mount(ClawHub, { global: { plugins: [i18n], stubs: elementPlusStubs } })
-    await flushPromises()
-    expect((window as any).electronAPI.channel.clawhubSearch).toHaveBeenCalled()
-    expect((window as any).electronAPI.channel.clawhubListPending).toHaveBeenCalled()
+  it('页面标题是「私有技能仓库」,并说清与开源技能库的区别', async () => {
+    const w = await mountView()
+    const text = w.text()
+    expect(text).toContain('私有技能仓库')
+    expect(text).toContain('开源技能库')
+    // 本地演示的那套不该再出现在界面上
+    expect(text).not.toContain('本地演示模式')
+    expect(text).not.toContain('发布技能')
+    expect(text).not.toContain('审核队列')
   })
 
-  it('展示搜索结果 + 技能名', async () => {
-    mount(ClawHub, { global: { plugins: [i18n], stubs: elementPlusStubs } })
+  it('点「连接仓库」→ 调 registry 列表 IPC', async () => {
+    const w = await mountView()
+    const btn = w.findAll('button').find((b: any) => b.text().includes('连接仓库'))
+    expect(btn).toBeTruthy()
+    await btn!.trigger('click')
     await flushPromises()
-    // 检查 mock 数据被消费(通过 IPC mock 调用)
-    expect((window as any).electronAPI.channel.clawhubSearch).toHaveBeenCalled()
+    expect((window as any).electronAPI.channel.clawhubRegistryList).toHaveBeenCalled()
   })
 
-  it('doSearch 调 search + 带 sortBy', async () => {
-    const w = mount(ClawHub, { global: { plugins: [i18n], stubs: elementPlusStubs } })
+  it('连上后列出条目:名称、说明、版本、可更新标记', async () => {
+    const w = await mountView()
+    const btn = w.findAll('button').find((b: any) => b.text().includes('连接仓库'))
+    await btn!.trigger('click')
     await flushPromises()
-    vi.clearAllMocks()
-    const vm = w.vm as any
-    vm.sortBy = 'downloads'
-    await vm.doSearch()
-    const call = (window as any).electronAPI.channel.clawhubSearch.mock.calls[0][0]
-    expect(call.sortBy).toBe('downloads')
+    const text = w.text()
+    expect(text).toContain('内部 PDF 工具')
+    expect(text).toContain('公司专用的 PDF 处理')
+    expect(text).toContain('v1.2.0')
+    expect(text).toContain('可更新')
+    expect(text).toContain('未安装')
   })
 
-  it('展示 3 个 Tab', async () => {
-    const w = mount(ClawHub, { global: { plugins: [i18n], stubs: elementPlusStubs } })
+  it('点「安装」→ 调 registry 安装 IPC', async () => {
+    const w = await mountView()
+    const btn = w.findAll('button').find((b: any) => b.text().includes('连接仓库'))
+    await btn!.trigger('click')
     await flushPromises()
-    expect(w.html()).toContain('浏览市场')
-    expect(w.html()).toContain('发布技能')
-    expect(w.html()).toContain('审核队列')
-  })
-})
-
-describe('P1-03: ClawHub 发布技能', () => {
-  it('handlePublish 缺 name → warning', async () => {
-    const w = mount(ClawHub, { global: { plugins: [i18n], stubs: elementPlusStubs } })
+    const installBtn = w.findAll('button').find((b: any) => b.text().trim() === '安装')
+    expect(installBtn).toBeTruthy()
+    await installBtn!.trigger('click')
     await flushPromises()
-    const { ElMessage } = await import('element-plus')
-    const vm = w.vm as any
-    vm.publishForm.name = ''
-    vm.publishForm.description = 'x'
-    await vm.handlePublish()
-    expect(ElMessage.warning).toHaveBeenCalled()
+    expect((window as any).electronAPI.channel.clawhubRegistryInstall).toHaveBeenCalledWith('r2', undefined)
   })
 
-  it('handlePublish 缺 description → warning', async () => {
-    const w = mount(ClawHub, { global: { plugins: [i18n], stubs: elementPlusStubs } })
+  it('连不上 → 说清楚失败(不是一片空白)', async () => {
+    ;(window as any).electronAPI.channel.clawhubRegistryList.mockResolvedValue({ success: false, error: 'HTTP 404' })
+    const w = await mountView()
+    const btn = w.findAll('button').find((b: any) => b.text().includes('连接仓库'))
+    await btn!.trigger('click')
     await flushPromises()
-    const { ElMessage } = await import('element-plus')
-    const vm = w.vm as any
-    vm.publishForm.name = 'x'
-    vm.publishForm.description = ''
-    await vm.handlePublish()
-    expect(ElMessage.warning).toHaveBeenCalled()
+    expect(ElMessageMock.error).toHaveBeenCalled()
+    expect(String((ElMessageMock.error as any).mock.calls[0][0])).toContain('404')
   })
 
-  it('handlePublish 完整字段 → 调 IPC + tags 解析', async () => {
-    const w = mount(ClawHub, { global: { plugins: [i18n], stubs: elementPlusStubs } })
+  it('没连接时提示基址与公钥怎么配(用户才知道下一步做什么)', async () => {
+    ;(window as any).electronAPI.channel.clawhubRegistryList.mockResolvedValue({ success: true, data: [] })
+    const w = await mountView()
+    const btn = w.findAll('button').find((b: any) => b.text().includes('连接仓库'))
+    await btn!.trigger('click')
     await flushPromises()
-    const vm = w.vm as any
-    vm.publishForm.name = 'New Skill'
-    vm.publishForm.description = 'a new skill'
-    vm.publishForm.category = 'dev'
-    vm.publishForm.tagsText = 'tag1, tag2,tag3'
-    vm.publishForm.manifestPath = '/p/skill.md'
-    await vm.handlePublish()
-    const call = (window as any).electronAPI.channel.clawhubPublish.mock.calls[0][0]
-    expect(call.name).toBe('New Skill')
-    expect(call.tags).toEqual(['tag1', 'tag2', 'tag3'])
-  })
-})
-
-describe('P1-04: ClawHub 审核', () => {
-  it('handleReview(true) → approved', async () => {
-    const w = mount(ClawHub, { global: { plugins: [i18n], stubs: elementPlusStubs } })
-    await flushPromises()
-    const vm = w.vm as any
-    await vm.handleReview({ id: 'p1' }, true)
-    const call = (window as any).electronAPI.channel.clawhubReview.mock.calls[0][0]
-    expect(call.approve).toBe(true)
-    expect(call.skillId).toBe('p1')
-  })
-
-  it('handleReview(false) 调 IPC 时 approve=false', async () => {
-    const w = mount(ClawHub, { global: { plugins: [i18n], stubs: elementPlusStubs } })
-    await flushPromises()
-    vi.clearAllMocks()
-    const vm = w.vm as any
-    await vm.handleReview({ id: 'p1' }, false)
-    const call = (window as any).electronAPI.channel.clawhubReview.mock.calls[0][0]
-    expect(call.approve).toBe(false)
-  })
-
-  it('openRejectDialog 设置 rejectingSkill + 打开 dialog', async () => {
-    const w = mount(ClawHub, { global: { plugins: [i18n], stubs: elementPlusStubs } })
-    await flushPromises()
-    const vm = w.vm as any
-    vm.openRejectDialog({ id: 'p1' })
-    expect(vm.rejectingSkill).toEqual({ id: 'p1' })
-    expect(vm.rejectDialogVisible).toBe(true)
-    // rejectReason 重置
-    expect(vm.rejectReason).toBe('')
-  })
-})
-
-describe('P1-06: ClawHub 评分', () => {
-  it('handleRate 调 IPC', async () => {
-    const w = mount(ClawHub, { global: { plugins: [i18n], stubs: elementPlusStubs } })
-    await flushPromises()
-    const vm = w.vm as any
-    vm.ratingSkill = { id: 's1', name: 'Code Helper' }
-    vm.rateForm.score = 4
-    vm.rateForm.review = 'good'
-    await vm.handleRate()
-    const call = (window as any).electronAPI.channel.clawhubRate.mock.calls[0][0]
-    expect(call.score).toBe(4)
-    expect(call.review).toBe('good')
-    expect(call.skillId).toBe('s1')
-  })
-})
-
-describe('P2-03: ClawHub 技能模板', () => {
-  it('loadTemplates 调 listTemplates + listCategories', async () => {
-    const w = mount(ClawHub, { global: { plugins: [i18n], stubs: elementPlusStubs } })
-    await flushPromises()
-    const vm = w.vm as any
-    await vm.loadTemplates()
-    expect((window as any).electronAPI.channel.clawhubListTemplates).toHaveBeenCalled()
-    expect((window as any).electronAPI.channel.clawhubListTemplateCategories).toHaveBeenCalled()
-    expect(vm.templates.length).toBe(2)
-    expect(vm.templateCategories).toEqual(['productivity', 'developer'])
-  })
-
-  it('loadTemplates 传 category + query', async () => {
-    const w = mount(ClawHub, { global: { plugins: [i18n], stubs: elementPlusStubs } })
-    await flushPromises()
-    const vm = w.vm as any
-    vm.templateCategory = 'developer'
-    vm.templateQuery = 'review'
-    await vm.loadTemplates()
-    const call = (window as any).electronAPI.channel.clawhubListTemplates.mock.calls.pop()[0]
-    expect(call).toEqual({ category: 'developer', query: 'review' })
-  })
-
-  it('loadTemplates 失败 → 静默处理(不抛)', async () => {
-    ;(window as any).electronAPI.channel.clawhubListTemplates = vi.fn().mockRejectedValue(new Error('IPC fail'))
-    const w = mount(ClawHub, { global: { plugins: [i18n], stubs: elementPlusStubs } })
-    await flushPromises()
-    const vm = w.vm as any
-    await vm.loadTemplates()
-    expect(vm.templates).toEqual([])
-  })
-
-  it('openInstantiateDialog 设置 instantiatingTemplate + 打开 dialog', async () => {
-    const w = mount(ClawHub, { global: { plugins: [i18n], stubs: elementPlusStubs } })
-    await flushPromises()
-    const vm = w.vm as any
-    vm.openInstantiateDialog({ id: 'tpl-x', name: '模板 X' })
-    expect(vm.instantiatingTemplate.id).toBe('tpl-x')
-    expect(vm.instantiateDialogVisible).toBe(true)
-  })
-
-  it('handleInstantiate 缺作者 ID → warning 不调 IPC', async () => {
-    const { ElMessage } = await import('element-plus')
-    const w = mount(ClawHub, { global: { plugins: [i18n], stubs: elementPlusStubs } })
-    await flushPromises()
-    const vm = w.vm as any
-    vm.instantiatingTemplate = { id: 'tpl-x', name: 'X' }
-    vm.instantiateForm.authorId = ''
-    vm.instantiateForm.authorName = 'You'
-    await vm.handleInstantiate()
-    expect(ElMessage.warning).toHaveBeenCalled()
-    expect((window as any).electronAPI.channel.clawhubInstantiateTemplate).not.toHaveBeenCalled()
-  })
-
-  it('handleInstantiate 缺作者名 → warning 不调 IPC', async () => {
-    const { ElMessage } = await import('element-plus')
-    const w = mount(ClawHub, { global: { plugins: [i18n], stubs: elementPlusStubs } })
-    await flushPromises()
-    const vm = w.vm as any
-    vm.instantiatingTemplate = { id: 'tpl-x', name: 'X' }
-    vm.instantiateForm.authorId = 'u1'
-    vm.instantiateForm.authorName = ''
-    await vm.handleInstantiate()
-    expect(ElMessage.warning).toHaveBeenCalled()
-  })
-
-  it('handleInstantiate 成功 → 调 IPC + 关 dialog + 刷新 pending', async () => {
-    const w = mount(ClawHub, { global: { plugins: [i18n], stubs: elementPlusStubs } })
-    await flushPromises()
-    const vm = w.vm as any
-    vm.instantiatingTemplate = { id: 'tpl-x', name: 'X' }
-    vm.instantiateForm.customName = '我的 X'
-    vm.instantiateForm.authorId = 'u1'
-    vm.instantiateForm.authorName = 'Alice'
-    vi.clearAllMocks()
-    ;(window as any).electronAPI.channel.clawhubListPending = vi.fn().mockResolvedValue({ success: true, data: [] })
-    await vm.handleInstantiate()
-    const call = (window as any).electronAPI.channel.clawhubInstantiateTemplate.mock.calls[0][0]
-    expect(call.templateId).toBe('tpl-x')
-    expect(call.customName).toBe('我的 X')
-    expect(call.authorId).toBe('u1')
-    expect(call.authorName).toBe('Alice')
-    expect(vm.instantiateDialogVisible).toBe(false)
-  })
-
-  it('handleInstantiate 不传 customName → IPC 参数不带 customName', async () => {
-    const w = mount(ClawHub, { global: { plugins: [i18n], stubs: elementPlusStubs } })
-    await flushPromises()
-    const vm = w.vm as any
-    vm.instantiatingTemplate = { id: 'tpl-x', name: 'X' }
-    vm.instantiateForm.customName = '   ' // 空白 → 不传
-    vm.instantiateForm.authorId = 'u1'
-    vm.instantiateForm.authorName = 'Alice'
-    vi.clearAllMocks()
-    await vm.handleInstantiate()
-    const call = (window as any).electronAPI.channel.clawhubInstantiateTemplate.mock.calls[0][0]
-    expect(call.customName).toBeUndefined()
-  })
-
-  it('handleInstantiate 失败 → 不关 dialog', async () => {
-    ;(window as any).electronAPI.channel.clawhubInstantiateTemplate = vi.fn().mockResolvedValue({ success: false, error: '模板不存在' })
-    const w = mount(ClawHub, { global: { plugins: [i18n], stubs: elementPlusStubs } })
-    await flushPromises()
-    const vm = w.vm as any
-    vm.instantiatingTemplate = { id: 'tpl-x', name: 'X' }
-    vm.instantiateDialogVisible = true
-    vm.instantiateForm.authorId = 'u1'
-    vm.instantiateForm.authorName = 'Alice'
-    await vm.handleInstantiate()
-    expect(vm.instantiateDialogVisible).toBe(true)
-  })
-
-  it('Tab 切换:4 个 tab 名称正确', async () => {
-    const w = mount(ClawHub, { global: { plugins: [i18n], stubs: elementPlusStubs } })
-    await flushPromises()
-    const html = w.html()
-    expect(html).toContain('浏览市场')
-    expect(html).toContain('发布技能')
-    expect(html).toContain('审核队列')
-    expect(html).toContain('技能模板')
+    const text = w.text()
+    expect(text).toContain('PIPICLAW_CLAWHUB_REGISTRY')
+    expect(text).toContain('PIPICLAW_CLAWHUB_PUBKEY')
   })
 })

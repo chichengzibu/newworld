@@ -853,6 +853,33 @@ agent 路径**,基准四条约束:技能 **id ≠ name**(复现真实缺陷)· �
 **安全边界**：下载的技能包可能含可执行脚本，用户 2026-11-19 明确授权「装完整包」；
 执行仍走既有的 Bash 白名单 + 用户确认门，本批**没有**新增任何绕过确认的路径。
 
+### 🧹 清掉与「开源技能库」重叠的两个旧界面(M4-Y)
+
+M4-X 交付后,用户指出 **ClawHub 本地模拟市场**与 **SkillMarket 死页**和新卡片功能重叠 ——
+而且用户会同时看到「本地演示模式」和真能用的开源库两套东西,**容易以为后者也是假的**。
+
+**逐条查过读写路径才敢删**(不是"看着像死代码"):
+
+- **SkillMarket.vue —— 整页是死的**：「我的技能」在 `onMounted` 里 `setSkills([])` 恒空、
+  推荐列表是**写死的 `PRESET_SKILLS`**、安装按钮**没有 @click**、「一键执行」只弹 toast;
+  路由 `/skill-market` **全仓无任何入口**指向它。整页 + 其 Pinia store 一并删。
+- **ClawHub.vue 的 4 个本地演示页签**：下载按钮是 **stub**(只弹 toast)、
+  发布/审核写的是 `userData/clawhub-skills.json` 而**审核通过的条目永远装不上**、
+  「一键实例化」写到 `userData/templates/` —— **SkillLoader 从不扫那个目录**
+  (它只扫技能目录 + 用户自加目录),SelfLearner 也不读模板 → 整条链是死的。
+  连带删掉后端 `ClawHubManager.ts`(757 行)与 9 个 IPC + 9 个 preload 方法 + 9 个通道常量。
+
+**保留 `ClawHubRegistry`(远程仓库)** —— 它是**信任模型不同**的能力:
+自建仓库的包由作者私钥签名、应用验签,与开源技能库那些无签名的公开集合不是一回事,
+**不构成重叠**。`/clawhub` 路由保留,页面改名**「私有技能仓库」**,只留这一块,
+并说清与开源技能库的区别。
+
+**入口一并修正**(不留指向已删页面的链接):技能页头部「浏览 ClawHub 市场」按钮删除
+(开源技能库卡片就在本页)、命令面板改标题、模型对比页的链接删除、路由与 i18n 文案对齐。
+
+**回归钉**:`tests/unit/views/ClawHub.test.ts` 重写为「私有技能仓库」6 例;
+`tests/unit/ClawHubManager.test.ts`(691 行)随模块删除 —— 测一个不存在的模块没有意义。
+
 ### 📊 验证
 
 
@@ -867,7 +894,7 @@ agent 路径**,基准四条约束:技能 **id ≠ name**(复现真实缺陷)· �
 
 
 
-vitest **144 files / 1619 passed / 0 FAIL / 17 skipped** · vue-tsc 0 error · 后端 tsc **0 error**
+vitest **143 files / 1556 passed / 0 FAIL / 17 skipped** · vue-tsc 0 error · 后端 tsc **0 error**
 `npm run build` 通过(5 步 · 两道类型检查门禁)并产出安装包 · smoke-test 22 passed / 0 failed
 **实跑**:裁判校准**离线复算**(480 次已落盘裁决)→ 两项新指标复现一致;
 应用启动正常,控制台警告 **33 条 → 1 条**(剩下那条是 Electron 的 CSP 开发提示)

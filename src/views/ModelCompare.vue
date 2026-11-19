@@ -54,7 +54,7 @@
 
         <p class="legend">
           * 价格/延迟/吞吐量为自建基准测试数据 + 第三方 API(参考 OpenRouter)<br />
-          社区评分由用户提交,见 <router-link to="/clawhub">ClawHub 技能市场</router-link> 了解同体系
+          社区评分由用户提交(【M4-X】原指向 ClawHub 本地模拟市场的链接已删 —— 那套是死的)
         </p>
       </el-tab-pane>
 

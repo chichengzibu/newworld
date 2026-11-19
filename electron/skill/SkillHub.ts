@@ -6,7 +6,8 @@
  * 联网下载」。
  *
  * 此前**没有一条能用的路**：
- *   - `ClawHubManager` 是**本地模拟市场**（数据在 userData/clawhub-skills.json），
+ *   - 原有 `ClawHubManager` 是**本地模拟市场**（数据在 userData/clawhub-skills.json，
+ *     界面明写「本地演示模式」，「下载」按钮是 stub）—— **M4-X 已连同其界面一并删除**；
  *     界面上明写「本地演示模式」；「下载」按钮是个 **stub**（只弹 toast）。
  *   - `ClawHubRegistry` 是唯一走网络的，但它指向 `https://example.com/...`
  *     —— **占位符，永远不可达**；而且它的 index.json 规范要求

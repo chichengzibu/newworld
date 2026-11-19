@@ -71,7 +71,7 @@ export default {
     imAccounts: '即时通讯账号',
     llmConfig: 'LLM 配置',
     imManagement: 'IM 管理',
-    clawhub: '技能市场',
+    clawhub: '私有技能仓库',
     modelCompare: '模型对比',
     search: '搜索',
     voice: '语音',

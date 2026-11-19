@@ -93,12 +93,6 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '计划任务', icon: 'Calendar' }
   },
   {
-    path: '/skill-market',
-    name: 'SkillMarket',
-    component: () => import('@/views/SkillMarket.vue'),
-    meta: { title: '技能市场', icon: 'Goods' }
-  },
-  {
     path: '/tasks',
     name: 'Tasks',
     component: () => import('@/views/Tasks.vue'),
@@ -149,7 +143,8 @@ const routes: RouteRecordRaw[] = [
     path: '/clawhub',
     name: 'ClawHub',
     component: () => import('@/views/ClawHub.vue'),
-    meta: { title: 'ClawHub 技能市场', icon: 'Goods' },
+    // 【M4-X】本地模拟市场已删 → 这页现在是「私有技能仓库」(自建仓库,带签名)
+    meta: { title: '私有技能仓库', icon: 'Goods' },
   },
   {
     path: '/model-compare',

@@ -265,15 +265,6 @@ const IpcChannels = {
   PERMISSION_IMPORT: 'permission:import',
 
   // ClawHub 技能市场
-  CLAWHUB_PUBLISH: 'clawhub:publish',
-  CLAWHUB_REVIEW: 'clawhub:review',
-  CLAWHUB_SEARCH: 'clawhub:search',
-  CLAWHUB_RATE: 'clawhub:rate',
-  CLAWHUB_LIST_PENDING: 'clawhub:list-pending',
-  CLAWHUB_LIST_TEMPLATES: 'clawhub:list-templates',
-  CLAWHUB_GET_TEMPLATE: 'clawhub:get-template',
-  CLAWHUB_LIST_TEMPLATE_CATEGORIES: 'clawhub:list-template-categories',
-  CLAWHUB_INSTANTIATE_TEMPLATE: 'clawhub:instantiate-template',
 
   // ClawHub 远程仓库 (registry)
   CLAWHUB_REGISTRY_LIST: 'skills:clawhub:registry:list',
@@ -1279,28 +1270,6 @@ const electronAPI = {
     permissionExport: (): Promise<IpcResponse<string>> => ipcRenderer.invoke(IpcChannels.PERMISSION_EXPORT),
     permissionImport: (args: { json: string; mode?: 'merge' | 'replace' }): Promise<IpcResponse<any>> =>
       ipcRenderer.invoke(IpcChannels.PERMISSION_IMPORT, args),
-
-    // P1-03~06 ClawHub 技能市场
-    clawhubPublish: (args: any): Promise<IpcResponse<any>> => ipcRenderer.invoke(IpcChannels.CLAWHUB_PUBLISH, args),
-    clawhubReview: (args: { skillId: string; approve: boolean; reviewerId: string; reason?: string }): Promise<IpcResponse<any>> =>
-      ipcRenderer.invoke(IpcChannels.CLAWHUB_REVIEW, args),
-    clawhubSearch: (opts?: any): Promise<IpcResponse<any[]>> => ipcRenderer.invoke(IpcChannels.CLAWHUB_SEARCH, opts || {}),
-    clawhubRate: (args: any): Promise<IpcResponse<any>> => ipcRenderer.invoke(IpcChannels.CLAWHUB_RATE, args),
-    clawhubListPending: (): Promise<IpcResponse<any[]>> => ipcRenderer.invoke(IpcChannels.CLAWHUB_LIST_PENDING),
-
-    // P2-03 技能模板
-    clawhubListTemplates: (opts?: { category?: string; query?: string }): Promise<IpcResponse<any[]>> =>
-      ipcRenderer.invoke(IpcChannels.CLAWHUB_LIST_TEMPLATES, opts || {}),
-    clawhubGetTemplate: (id: string): Promise<IpcResponse<any>> =>
-      ipcRenderer.invoke(IpcChannels.CLAWHUB_GET_TEMPLATE, id),
-    clawhubListTemplateCategories: (): Promise<IpcResponse<string[]>> =>
-      ipcRenderer.invoke(IpcChannels.CLAWHUB_LIST_TEMPLATE_CATEGORIES),
-    clawhubInstantiateTemplate: (args: {
-      templateId: string
-      customName?: string
-      authorId: string
-      authorName: string
-    }): Promise<IpcResponse<any>> => ipcRenderer.invoke(IpcChannels.CLAWHUB_INSTANTIATE_TEMPLATE, args),
 
     // ClawHub 远程仓库 (registry): 检查更新 / 一键安装
     clawhubRegistryList: (baseUrl?: string): Promise<IpcResponse<any[]>> =>

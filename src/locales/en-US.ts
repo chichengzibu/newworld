@@ -57,7 +57,7 @@ export default {
     imAccounts: 'IM Accounts',
     llmConfig: 'LLM Config',
     imManagement: 'IM Management',
-    clawhub: 'ClawHub',
+    clawhub: 'Private Registry',
     modelCompare: 'Model Compare',
     search: 'Search',
     voice: 'Voice',

@@ -51,7 +51,6 @@ export interface NovaBootBridge {
   markSkipped(): void;
 }
 import { ChannelRouter } from '../channel/ChannelRouter';
-import { ClawHubManager } from '../skill/ClawHubManager';
 import { ClawHubRegistry } from '../skill/ClawHubRegistry';
 import { ModelRatingManager } from '../models/ModelRatingManager';
 import { ModelUsageTracker } from '../models/ModelUsageTracker';
@@ -549,7 +548,8 @@ export class IpcServer {
      * 【M4-X】开源技能库 —— 搜索 / 推荐 / 下载安装。
      *
      * 【为什么要有它】
-     * 此前**没有一条能用的路**:ClawHubManager 是本地模拟市场(「下载」按钮是 stub),
+     * 此前**没有一条能用的路**:原有 ClawHubManager 是本地模拟市场(「下载」按钮是 stub,
+     * 且其 4 个页签与后端已于 M4-X 删除),
      * ClawHubRegistry 指向 example.com 占位符。技能要么用户手工导入,
      * 要么没有 —— "联网自动去开源技能库寻找"这条需求是空的。
      *
@@ -2590,106 +2590,6 @@ export class IpcServer {
         return { success: false, error: String(error) }
       }
     })
-
-    // P1-03~06 ClawHub 技能市场
-    ipcMain.handle('clawhub:publish', (_, args: any) => {
-      try {
-        const mgr = ClawHubManager.getInstance()
-        const skill = mgr.publish(args)
-        return { success: true, data: skill }
-      } catch (error) {
-        this.log.error('clawhub:publish 失败', error)
-        return { success: false, error: String(error) }
-      }
-    })
-
-    ipcMain.handle('clawhub:review', (_, args: { skillId: string; approve: boolean; reviewerId: string; reason?: string }) => {
-      try {
-        const mgr = ClawHubManager.getInstance()
-        const skill = mgr.review(args.skillId, args.approve, args.reviewerId, args.reason)
-        return { success: !!skill, data: skill }
-      } catch (error) {
-        this.log.error('clawhub:review 失败', error)
-        return { success: false, error: String(error) }
-      }
-    })
-
-    ipcMain.handle('clawhub:search', (_, opts: any = {}) => {
-      try {
-        const mgr = ClawHubManager.getInstance()
-        return { success: true, data: mgr.search(opts) }
-      } catch (error) {
-        this.log.error('clawhub:search 失败', error)
-        return { success: false, error: String(error) }
-      }
-    })
-
-    ipcMain.handle('clawhub:rate', (_, args: any) => {
-      try {
-        const mgr = ClawHubManager.getInstance()
-        const review = mgr.rate(args)
-        return { success: !!review, data: review }
-      } catch (error) {
-        this.log.error('clawhub:rate 失败', error)
-        return { success: false, error: String(error) }
-      }
-    })
-
-    ipcMain.handle('clawhub:list-pending', () => {
-      try {
-        const mgr = ClawHubManager.getInstance()
-        return { success: true, data: mgr.listPending() }
-      } catch (error) {
-        this.log.error('clawhub:list-pending 失败', error)
-        return { success: false, error: String(error) }
-      }
-    })
-
-    // P2-03 技能模板
-    ipcMain.handle('clawhub:list-templates', (_, opts: { category?: string; query?: string } = {}) => {
-      try {
-        const mgr = ClawHubManager.getInstance()
-        return { success: true, data: mgr.listTemplates(opts) }
-      } catch (error) {
-        this.log.error('clawhub:list-templates 失败', error)
-        return { success: false, error: String(error) }
-      }
-    })
-
-    ipcMain.handle('clawhub:get-template', (_, id: string) => {
-      try {
-        const mgr = ClawHubManager.getInstance()
-        const tpl = mgr.getTemplate(id)
-        return { success: !!tpl, data: tpl }
-      } catch (error) {
-        this.log.error('clawhub:get-template 失败', error)
-        return { success: false, error: String(error) }
-      }
-    })
-
-    ipcMain.handle('clawhub:list-template-categories', () => {
-      try {
-        const mgr = ClawHubManager.getInstance()
-        return { success: true, data: mgr.listTemplateCategories() }
-      } catch (error) {
-        this.log.error('clawhub:list-template-categories 失败', error)
-        return { success: false, error: String(error) }
-      }
-    })
-
-    ipcMain.handle(
-      'clawhub:instantiate-template',
-      (_, args: { templateId: string; customName?: string; authorId: string; authorName: string }) => {
-        try {
-          const mgr = ClawHubManager.getInstance()
-          const skill = mgr.instantiateTemplate(args)
-          return { success: true, data: skill }
-        } catch (error) {
-          this.log.error('clawhub:instantiate-template 失败', error)
-          return { success: false, error: String(error) }
-        }
-      },
-    )
 
     // ClawHub 远程仓库 (registry): 列出可安装/可更新的技能
     ipcMain.handle('skills:clawhub:registry:list', async (_, baseUrl?: string) => {

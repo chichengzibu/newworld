@@ -167,8 +167,8 @@ const navigationCommands = computed<CommandItem[]>(() => {
       action: () => router.push('/skills'),
     },
     {
-      id: 'nav-clawhub', kind: 'nav', title: 'ClawHub 技能市场', subtitle: '浏览 / 发布 / 审核技能', icon: 'Box',
-      keywords: ['clawhub', 'market', '市场', '模板'],
+      id: 'nav-clawhub', kind: 'nav', title: '私有技能仓库', subtitle: '自建仓库 · 签名包', icon: 'Box',
+      keywords: ['clawhub', 'registry', '仓库', '私有'],
       action: () => router.push('/clawhub'),
     },
     {

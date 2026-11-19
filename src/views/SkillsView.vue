@@ -14,15 +14,10 @@
           <el-icon><Upload /></el-icon>
           导入技能
         </el-button>
-        <!-- 【M4-M】ClawHub 市场入口:原来只藏在「导入技能」对话框的页签里(2 层深),
-             想去市场的人得先知道"导入"这个动作。现在提到一级按钮,就在技能页的头上。
-             侧栏**不加图标**:那条 rail 是无文字的,加到 9~10 个图标会让
-             「哪个图标是哪个」的识别成本上升(参考 OpenChat:主导航只留高频目的地,
-             低频功能放二级 —— 见 docs/NOVA-#009-m4m-entry-points-design.md) -->
-        <el-button @click="router.push('/clawhub')">
-          <el-icon><Goods /></el-icon>
-          浏览 ClawHub 市场
-        </el-button>
+        <!-- 【M4-X】原「浏览 ClawHub 市场」按钮已删:
+             ① 它指向的本地模拟市场没了(那套是死的);
+             ② 「开源技能库」卡片**就在本页**,按钮是多余的一跳;
+             ③ 自建仓库(私有技能仓库)是另一件事 —— 低频,放到侧栏/命令面板即可。 -->
       </div>
     </div>
     
@@ -601,7 +596,7 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onUnmounted } from 'vue';
-import { Upload, MagicStick, Box, SuccessFilled, Plus, Goods, Refresh, Search } from '@element-plus/icons-vue';
+import { Upload, MagicStick, Box, SuccessFilled, Plus, Refresh, Search } from '@element-plus/icons-vue';
 import { useRouter } from 'vue-router';
 import { ElMessage } from "element-plus/es/components/message/index"
 // #007 H1: 提案超时阈值 (30 分钟, 订单既定)
