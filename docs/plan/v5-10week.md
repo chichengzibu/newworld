@@ -74,6 +74,7 @@
 | **M4-Q** | **e2e 进 CI 门禁**（CI 的 Playwright 步骤此前**只跑 4 个 spec 文件** —— 近几批挖到的 P0 全都不在那四个里,「跑」没有变成「门禁」。现改跑**全量**(ubuntu + xvfb,依赖 LLM 端点的 spec 用仓库自带的 mock 顶在 11434,不装 6GB 真模型）。过程中挖出一条**一直在假通过**的 e2e:sendMessage 收了 providerId 却**不写回会话**(产品缺陷 → 经 IPC 发消息时 agent 永远拿不到 provider → 学习闭环记到的全是失败)· mock 不支持 SSE(内容一行都进不来)· 断言只断「消息条数 > 0」(用户消息就够数) | `NOVA-#009-m4q-e2e-ci-gate-design.md` |
 | **M4-R** | **剩余界面实跑**（M4-K 遗留 #3:首屏之外的 Skills / Models / IM / Schedule / Settings / DevPanel 展开态**只过 typecheck 与组件测试**,而近几批的 P0 全是实跑才看见的。现新增 e2e(7 例)逐页真跑:根容器渲染 / 关键内容在 / 无红屏兜底 / 关键元素完整落在视口内;**本批未发现新的产品缺陷** —— 5 页 + DevPanel + 5 个设置页签全部正常 | `NOVA-#009-m4r-pages-verification-design.md` |
 | **M4-S** | **e2e 隔离补强**（M4-R 顺手挖出:M4-K 的隔离修复把 userData 建在**模块级**,而 Playwright 同 worker 顺序跑多个 spec 时 helper **只加载一次** → **所有 spec 文件共用一个 userData** → 状态跨文件泄漏(实测 `ui-smoke` 切到 English 没切回来 → 后续 spec 全红)。现:userData **每个测试一个** + 清理加护栏;连带暴露一批**顺序依赖**的 spec(`settings-full-crud` CR2~CR7 依赖 CR1、`network-failure` NW4 依赖 NW1/NW3 —— **单跑必红**)→ 改为各自自建前提 | `NOVA-#009-m4r-pages-verification-design.md` |
+| **M4-T** | **学习闭环端到端**（「自我学习」是本项目对标 Hermes / Claude Code 的**核心差异点**,但从没被端到端验过「它真的在记东西」;且 M4-Q 修掉的那个 bug(`sendMessage` 收 providerId 不写回会话)**本来会让闭环记到的全是失败**)。现新增 e2e(2 例)验成事实:成功的对话 → 观察落盘(outcome='ok')· 工具调用链(mock 加工具调用模式 → agent 真的调了 → 观察里有 Glob 步骤 → tracker 有工具级记录)。**未发现新的产品缺陷** —— 但它是 M4-Q 修复的**回归守卫** | `NOVA-#009-m4s-learning-loop-e2e-design.md` |
 
 **构建门禁**（M3-F 引入，此后每批都守着）：
 `[1/5] 主进程 typecheck → [2/5] 渲染进程 typecheck → [3/5] vite build → [4/5] electron-builder → [5/5] build-report`

@@ -671,7 +671,28 @@ Settings / DevPanel 展开态)**仍只过 typecheck 与组件测试**」。
     依赖 NW1/NW3 建的。**这些用例单跑必红,以前只是靠「跑全量时前面刚好有」才绿** ——
     共享 profile 把「用例依赖彼此」这件事藏住了。现:每个测试自建前提 → 用例彻底无关
 
+### 🧠 学习闭环端到端(M4-S)
+
+「自我学习」是本项目对标 Hermes / Claude Code 的**核心差异点**,也是一直属于
+「声称在工作」的那一类 —— 链路代码齐全,但**从没被端到端验过「它真的在记东西」**。
+而且 M4-Q 刚修掉一个会让它**变假**的东西(`sendMessage` 收了 providerId 却不写回会话
+→ agent 路径永远拿不到 provider → 学习闭环记到的全是失败),修完不等于闭环就通。
+
+新增 e2e(2 例)把它验成事实:
+- **一次成功的对话** → agent 路径真的成功(气泡里是 mock 的真回复,**不得**出现
+  「no LLM provider configured」)→ `observations.json` 落盘一条观察(instruction 对得上、
+  outcome='ok')→ 且**没有工具调用时 `skill-stats.json` 就不该存在**
+  (否则「没记录」和「记录了但是坏的」分不清)
+- **工具调用链**(「Agent runtime 跟 ClaudeCode 对齐」这条核心主张,同样没端到端跑过):
+  mock 新增工具调用模式(带 `__TOOL_CALL__` → 首轮回 `Glob` 的 tool_calls,
+  次轮回正文)→ agent 真的调了工具 → 观察的 steps 里有 `Glob` →
+  `skill-stats.json` 有工具级记录(`unitType='tool'`)
+
+**未发现新的产品缺陷** —— 但这个「没有」有价值:它是 M4-Q 那个修复的**回归守卫**
+(修之前这条用例必然红)。
+
 ### 📊 验证
+
 
 
 

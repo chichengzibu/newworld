@@ -1918,3 +1918,41 @@ sendMessage(convId, msg, providerId, modelId)
   (正好是页面内边距)→ 不是缺陷。教训同 M4-O:**量,别看截图猜**。
   但顺手把「关键元素必须完整落在视口内」写成了断言(防同类回归)。
 - **留了存档图**:`test-results/page-*.png`(每页一张,人工可查)
+
+---
+
+## W5 接线批偏差登记 · M4-S 学习闭环端到端（2026-11-13）
+
+> 「自我学习」是本项目对标 Hermes / Claude Code 的**核心差异点**,也是一直属于
+> 「声称在工作」的那一类:观察→分析→提案→人审门→落地 的链路代码齐全,
+> 但**从没被端到端验过「它真的在记东西」**。
+> 编号自 DEV-166 起。完整设计见 `docs/NOVA-#009-m4s-learning-loop-e2e-design.md`。
+
+| ID | 状态 | 摘要 |
+|---|---|---|
+| DEV-166 | 已修 | **学习闭环从没被端到端验过「它真的在记东西」** · 新增 e2e `learning-loop.spec.ts`(2 例):① 一次成功的对话 → agent 路径真的成功(气泡里是 mock 的真回复,**不得**出现「no LLM provider configured」)→ `<userData>/hermes-learning/observations.json` 落盘一条观察(instruction 是发的那条、outcome='ok')→ 且**没有工具调用时 `skill-stats.json` 就不该存在**(否则"没记录"和"记录了但是坏的"分不清);② **工具调用链**:mock 新增工具调用模式(带 `__TOOL_CALL__` → 首轮回 `Glob` 的 tool_calls,次轮回正文)→ agent 真的调了工具 → 观察的 steps 里有 `Glob` → `skill-stats.json` 有工具级记录(`unitType='tool'`)。**未发现新的产品缺陷** —— 但这个"没有"有价值:它是 **M4-Q 那个修复的回归守卫**(修之前必然红:agent 拿不到 provider → 等不到 mock 回复 → 超时) |
+
+### 关单（W5 接线批 · M4-S 学习闭环端到端，2026-11-13）
+
+- **范围**：DEV-166（1 条）
+- **验证**：
+  - e2e 全量：**144 passed / 0 failed / 33 skipped**（12.3 分钟）
+  - vitest: Test Files **135 passed (135)** / Tests **1549 passed | 15 skipped (1564)** / **0 FAIL**
+  - vue-tsc **0** · 后端 tsc **0 error** · `npm run build` 门禁 **5 步通过**
+  - 新增 e2e `tests/e2e/learning-loop.spec.ts`（2 例）
+
+### DEV-166 明细（把「自我学习」从声称变成事实）
+
+| 环节 | 怎么验的 | 结果 |
+|---|---|---|
+| agent 路径 | 助手气泡里有 mock 的真回复标记,且**不得**出现 provider 未配置的报错 | ✓ |
+| 观察落盘 | 读 `observations.json`:有观察、instruction 对得上、outcome='ok' | ✓ |
+| 效果统计口径 | 没工具调用 → `skill-stats.json` **不该存在** | ✓ |
+| 工具调用 | mock 要 Glob → agent 真的调了 → 观察的 steps 里有 Glob | ✓ |
+| tracker 记录 | `skill-stats.json` 有 `skillName='Glob'`、`unitType='tool'` 的记录 | ✓ |
+
+- **为什么用得着读文件**:e2e 的 profile 现在**每个测试独立**(`freshUserData` 给的就是那个路径)
+  → 断的是「**数据真的到磁盘上了**」,不是「内存里有」。
+- **mock 加了工具调用模式**(`scripts/mock-llm-server.mjs`):
+  用户消息带 `__TOOL_CALL__` → 首轮回 `Glob` 的 tool_calls(非流式 JSON 不行,
+  适配器只解析 `data:` 行 —— 见 DEV-161),第二轮(带 tool 结果回来)再回正文。

@@ -58,7 +58,8 @@ const server = createServer((req, res) => {
       }
 
       // 取出 user message,生成可验证的 echo 响应
-      const userMsg = (payload.messages || []).find((m) => m.role === 'user')?.content || ''
+      const userMsg = (payload.messages || []).find((m) => m.role === 'user')?.content || '';
+      const hasToolResult = (payload.messages || []).some((m) => m.role === 'tool');
       const marker = `MOCK_LLM_OK_${requestCount}_${userMsg.length > 0 ? 'WITH_INPUT' : 'NO_INPUT'}`
       const responseContent = `${marker}: 收到 "${userMsg.slice(0, 50)}"`
 
@@ -71,6 +72,46 @@ const server = createServer((req, res) => {
       // (openai-compatible.ts:「if (!trimmed.startsWith('data:')) continue」)。
       // mock 原来只回普通 JSON → 一行 data: 都解析不到 → **内容永远进不来**
       // (助手气泡只有时间戳)→ 依赖 mock 的 e2e 一直在假通过。
+      // 【M4-S】工具调用模式:用户消息里带 __TOOL_CALL__ → 首轮回一个 tool_calls
+      // (让 agent 真的去调工具),第二轮(带 tool 结果回来)再回正文。
+      // 用途:端到端验「LLM → 工具调用 → 工具执行 → 观察落盘 → tracker 记录」
+      // 这条链 —— 否则 mock 只会回文本,agent 的 tool loop 永远走不到。
+      const wantsToolCall = !hasToolResult && String(userMsg).includes('__TOOL_CALL__');
+      if (wantsToolCall) {
+        res.setHeader('Content-Type', 'text/event-stream');
+        res.setHeader('Cache-Control', 'no-cache');
+        res.setHeader('Connection', 'keep-alive');
+        const toolArgs = JSON.stringify({ pattern: '**/*.md' });
+        res.write(`data: ${JSON.stringify({
+          id: `mock-chatcmpl-${requestCount}`,
+          object: 'chat.completion.chunk',
+          created: Math.floor(Date.now() / 1000),
+          model: payload.model || 'mock-gpt',
+          choices: [{
+            index: 0,
+            delta: {
+              tool_calls: [{
+                index: 0,
+                id: `call_mock_${requestCount}`,
+                type: 'function',
+                function: { name: 'Glob', arguments: toolArgs },
+              }],
+            },
+            finish_reason: null,
+          }],
+        })}\n\n`);
+        res.write(`data: ${JSON.stringify({
+          id: `mock-chatcmpl-${requestCount}`,
+          object: 'chat.completion.chunk',
+          created: Math.floor(Date.now() / 1000),
+          model: payload.model || 'mock-gpt',
+          choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }],
+        })}\n\n`);
+        res.write('data: [DONE]\n\n');
+        res.end();
+        return;
+      }
+
       if (payload.stream === true) {
         res.setHeader('Content-Type', 'text/event-stream');
         res.setHeader('Cache-Control', 'no-cache');
