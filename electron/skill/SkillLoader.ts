@@ -698,6 +698,8 @@ export class SkillLoader {
     let index = 1;
     for (const skill of this.skills.values()) {
       summary += `${index}. **${skill.name}**\n`;
+      // 【M4-W】带出 skill_id —— 展示名与 id 不同是常态,而 id 才是工具认的那个
+      summary += `   - skill_id: ${skill.id}\n`;
       summary += `   - 描述: ${skill.description}\n`;
       // 【M4-A】触发条件是路由关键信息 —— 模型的匹配依据。
       // 此前摘要里没有它,导致"什么时候该用这个技能"这个最关键的问题
@@ -1113,7 +1115,17 @@ export class SkillLoader {
     if (enabled.length === 0) return '';
     const lines: string[] = [];
     for (const s of enabled) {
-      const parts = [`- ${s.name}: ${s.description}`];
+      // 【M4-W】摘要里必须带 **skill_id**。
+      //
+      // 【为什么】模型判断完"该用哪个技能"之后,要调 load_skill(skill_id) 才能拿到正文。
+      // 而 skill_id 是**目录名**,展示名是 frontmatter 里的 name —— 两者常常不同
+      // (例:目录 `sample-web-summary` / 名称 `Web Page Summarizer`)。
+      // 此前摘要只给 name,模型就只会把 name 当 id 传 → 工具报「技能不存在」→
+      // 白白多花一次模型往返(读错误信息再改用 id 重试)。
+      // 实跑(M4-W 路由基准):**每次加载都先失败一次**。
+      //
+      // 故:摘要里把 id 写出来 —— 它才是模型该传给工具的东西。
+      const parts = [`- ${s.name} (skill_id: ${s.id}): ${s.description}`];
       if (s.whenToUse) parts.push(`  (适用:${s.whenToUse})`);
       lines.push(parts.join(''));
     }
@@ -1127,10 +1139,14 @@ export class SkillLoader {
    * 返回正文 + 附属资源指引(references/scripts 在磁盘上,按需 Read/Bash)。
    */
   public getSkillBody(skillId: string): string {
-    const s = this.skills.get(skillId);
+    const s = this.findSkillByIdOrName(skillId);
     if (!s) {
-      const available = Array.from(this.skills.keys()).join(', ');
-      return `技能 "${skillId}" 不存在。可用技能:${available || '(无)'}`;
+      // 【M4-W】错误信息里写清"该传什么" —— 原来的「可用技能:xxx」只列 id,
+      // 模型得自己猜哪个是展示名、哪个是 id。直接给出 id + 名称对照。
+      const available = Array.from(this.skills.values())
+        .map(x => `${x.id}（${x.name}）`)
+        .join(', ');
+      return `技能 "${skillId}" 不存在。可用技能的 skill_id:${available || '(无)'}。请用上面括号前的 skill_id 调用。`;
     }
     const extra: string[] = [];
     if (s.hasReferences) extra.push('  references/ 目录含详细文档,需要时用 Read 读取对应文件。');
@@ -1138,6 +1154,42 @@ export class SkillLoader {
     if (s.hasAssets) extra.push('  assets/ 目录含模板与素材文件。');
     const tail = extra.length ? `\n\n可用资源:\n${extra.join('\n')}` : '';
     return `${s.fullInstructions}${tail}`;
+  }
+
+  /**
+   * 按 id 找技能；找不到时**按名称兜底**。
+   *
+   * 【M4-W 为什么要有兜底】
+   * 展示名与 id 不同是常态(目录名 vs frontmatter 的 name)。
+   * 摘要里已经同时给了两者,但模型仍可能只记得名字 —— 或者用户/脚本直接传名字。
+   * 既然两种叫法指的是同一个技能,就该都能加载,而不是让模型白跑一轮。
+   */
+  private findSkillByIdOrName(key: string): SkillState | undefined {
+    const direct = this.skills.get(key);
+    if (direct) return direct;
+    const norm = (key ?? '').trim().toLowerCase();
+    if (!norm) return undefined;
+    for (const s of this.skills.values()) {
+      if (s.name.trim().toLowerCase() === norm) return s;
+    }
+    return undefined;
+  }
+
+  /**
+   * 把「模型可能传的名字」解析成**规范的 skill id**。
+   *
+   * 【M4-W 为什么必须解析成 id】
+   * 学习闭环记的是「技能 S 被应用了」—— 记的必须是**真实 id**。
+   * 若模型传的是展示名(`Web Page Summarizer`),而记录里写的是展示名,
+   * 那 `skill-stats.json` 里的技能名就与 `load_skill` 寻址用的 id 对不上:
+   * 效用统计会按一个**不存在的 id** 聚合,查不到、也对不上账。
+   *
+   * 【为什么叫 resolveCanonicalSkillId 而不是 resolveSkillId】
+   * 本类里已有一个 `resolveSkillId(skillDocPath)` —— 那是**导入**时
+   * 从文档路径推导新 id 用的,两码事。同名会让人(和编译器)搞混。
+   */
+  public resolveCanonicalSkillId(key: string): string | undefined {
+    return this.findSkillByIdOrName(key)?.id;
   }
 
   /**

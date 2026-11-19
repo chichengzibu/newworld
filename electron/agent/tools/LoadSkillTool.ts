@@ -29,7 +29,9 @@ export const LoadSkillToolMetadata = {
   description:
     '加载某个技能的完整操作说明。当用户的需求与某个可用技能相关时调用它,' +
     '以获取该技能的具体步骤与约束。当前可用技能见系统提示中的"可用技能"清单。' +
-    '不要凭猜测执行技能步骤 —— 先加载,再照着做。',
+    '不要凭猜测执行技能步骤 —— 先加载,再照着做。' +
+    '【M4-W】判断相关性**优先于**动手:相关就**第一步**加载,别先去找文件;' +
+    'skill_id 用清单里给出的那个(不是技能展示名)。',
   parametersJson: {
     type: 'object',
     properties: {
@@ -65,26 +67,37 @@ export class LoadSkillTool implements PiPiTool {
      *
      * 拒绝时要说清原因:模型需要知道「这个技能不可用」而不是「工具坏了」,
      * 否则它会反复重试或改走别的路径,把对照做脏。
+     *
+     * 【M4-W】**必须同时按规范 id 与原样参数比对**。
+     * 此前只比对传入的 skill_id;而模型可能传的是**展示名**
+     * (摘要里两者都有)—— 那时抑制就漏了,对照组照样能加载到技能,
+     * 整个对照实验的差值会被做成 0。故这里把两个键都比。
      */
-    if (ctx?.suppressedSkills?.includes(skillId)) {
+    const loader = SkillLoader.getInstance()
+    const canonicalId = loader.resolveCanonicalSkillId(skillId)
+    const suppressed = ctx?.suppressedSkills ?? []
+    if (suppressed.includes(skillId) || (canonicalId && suppressed.includes(canonicalId))) {
       return {
         ok: false,
         result: '',
-        error: `技能 "${skillId}" 在本次运行中被禁用(对照实验分组),请直接完成任务`,
+        error: `技能 "${canonicalId ?? skillId}" 在本次运行中被禁用(对照实验分组),请直接完成任务`,
       }
     }
     try {
-      const body = SkillLoader.getInstance().getSkillBody(skillId)
+      const body = loader.getSkillBody(skillId)
       // 技能不存在时 getSkillBody 返回的是提示文案而非正文 —— 明确标为失败,
       // 让模型知道要换个 id 重试,而不是把提示当成技能内容照做。
       if (body.startsWith('技能 "') && body.includes('不存在')) {
         this.log.warn(`LoadSkillTool: 技能不存在 ${skillId}`)
         return { ok: false, result: '', error: body }
       }
-      this.log.info(`LoadSkillTool: 已加载技能 ${skillId}`)
+      // 【M4-W】解析成**规范 id** —— 模型可能传的是展示名。
+      // 学习闭环记的必须是真实 id,否则效用统计会按一个对不上的名字聚合。
+      const appliedId = canonicalId ?? skillId
+      this.log.info(`LoadSkillTool: 已加载技能 ${appliedId}`)
       // 【M4-D】声明本次作用在哪个技能上 —— 学习闭环据此记录
       // 「技能 S 被应用了」,这是技能级效用信号的前提。
-      return { ok: true, result: body, appliedEntity: { kind: 'skill', id: skillId } }
+      return { ok: true, result: body, appliedEntity: { kind: 'skill', id: appliedId } }
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e)
       this.log.warn(`LoadSkillTool: 加载失败 ${skillId} — ${msg}`)
