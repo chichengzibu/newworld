@@ -251,8 +251,9 @@ export class InstructionGenerator {
     model: any,
     history?: Array<{ role: string; content: string }>,
   ): Promise<GeneratedStep[] | null> {
-    // 获取技能摘要和匹配的技能
-    const skillSummaries = this.skillLoader.getAllSkillSummaries();
+    // 【M4-AA】技能上下文统一由 getSkillContext 提供 —— 它已含清单(+预算内的正文)。
+    // 此前这里还额外取一次 getAllSkillSummaries() 并注入，导致**清单出现两遍**，
+    // 且两份口径不同(一份含禁用技能、一份不含)。
     // 【M2-C 修复】此前缺 await: getSkillContext 是 async,返回 Promise。
     //   漏 await → matchedSkillContext 恒为 Promise 对象(非空)→ L311 的
     //   if 恒为真 → 字符串插值出字面量 "[object Promise]" 注入 systemPrompt。
@@ -284,17 +285,14 @@ export class InstructionGenerator {
 - browser_wait_for: 等待元素，参数: selector, timeout (可选), sessionId (可选)
 - browser_screenshot: 截图，参数: path (可选), sessionId (可选)
 
-【技能系统 - 优先使用】
-${skillSummaries}
-
 要求：
-1. 首先检查用户消息是否匹配上述任何技能的触发关键词
-2. 如果匹配到技能，严格按照该技能的操作步骤来生成结构化指令
-3. 当操作需要文件内容时（如 write_file），必须在 params 中包含 content 字段并填入完整的文本内容
-4. 对于任何要求写入内容的指令（如九九乘法表、文章、代码等），必须一次性在 content 中生成完整结果，不得留空或只写标题
-5. 必须只返回纯 JSON 数组，不要任何解释、说明、markdown 等
-6. 路径要使用用户实际描述的位置
-7. 如果无法理解用户指令，返回空数组 []
+1. 先判断用户需求是否与某个技能相关（依据下面给出的技能清单里的描述与适用场景），
+   相关就按该技能的操作步骤生成；不相关就按通用流程生成 —— 不要生搬硬套
+2. 当操作需要文件内容时（如 write_file），必须在 params 中包含 content 字段并填入完整的文本内容
+3. 对于任何要求写入内容的指令（如九九乘法表、文章、代码等），必须一次性在 content 中生成完整结果，不得留空或只写标题
+4. 必须只返回纯 JSON 数组，不要任何解释、说明、markdown 等
+5. 路径要使用用户实际描述的位置
+6. 如果无法理解用户指令，返回空数组 []
 
 重要：文件操作安全规则（必须严格遵守！）
 规则1：执行任何文件操作时，如果用户没有明确指定文件扩展名，必须优先使用 list_directory 查看目标目录，匹配已有的文件名和扩展名，严禁在找不到文件时擅自创建新文件名。
@@ -311,10 +309,15 @@ ${skillSummaries}
 用户指令："在桌面创建 test.txt，内容是九九乘法表"
 返回：[{"action":"write_file","params":{"filePath":"桌面/test.txt","content":"【这里必须填入用户要求的完整文本内容，不得省略】"}}]`;
 
-    // 如果匹配到特定技能，将技能的完整步骤注入到提示词中
+    // 【M4-AA / D8】技能上下文原样注入，**不做选择**。
+    // 此前这段的标题是「检测到匹配的技能」—— 那是个谎：匹配早已由代码做过
+    // (额外 LLM 排序 + 关键词降级)。现在把清单(以及预算内的全文)整份给模型，
+    // 由它自己判断用不用。
     if (matchedSkillContext) {
-      systemPrompt += `\n\n【检测到匹配的技能】\n${matchedSkillContext}\n\n请严格按照上述技能的操作步骤生成结构化指令。`;
-      this.log.info('[InstructionGenerator] 注入匹配技能到提示词');
+      systemPrompt += `\n\n【技能清单】\n${matchedSkillContext}\n\n` +
+        '若你判断某个技能与用户需求相关，严格按它的操作步骤生成；' +
+        '清单里没有正文的技能，不要臆造它的步骤。';
+      this.log.info('[InstructionGenerator] 注入技能清单(不代模型选择)');
     }
 
     // DEV-020 修冷启动: 拼多轮历史段 [system, ...history, 当前user]

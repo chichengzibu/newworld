@@ -6,7 +6,7 @@
  * 1. 观察用户的操作并收集到观察列表
  * 2. 达到阈值时调用大模型分析行为模式
  * 3. 生成泛化的技能提案（语义理解→抽象模式→创建技能）
- * 4. 为语义匹配提供素材(匹配本身在 SkillLoader.rankSkillsByRelevance:
+ * 4. 【M4-AA 已删】为语义匹配提供素材(匹配本身在 SkillLoader.rankSkillsByRelevance:
  *    一次 LLM 调用批量排序;agent loop 路径则由模型按 description 自行路由)
  *
  * ── #006 X1 反向注释 (与 MemoryVectorStore 正反向一致) ─────────
@@ -1241,56 +1241,6 @@ export class SelfLearner {
   }
 
 
-  /**
-   * 【M4-A】批量技能排序 —— 单次 LLM 调用返回相关技能 id 列表。
-   *
-   * 【为什么加这个】
-   * 旧的 checkSkillMatch(已于 M3-F 删除)是"一个技能一次 LLM 调用"。N 个技能 = N 次往返,
-   * 技能一多(比如 20 个)每次规划都要等 20 个网络往返,而结果只是拿到
-   * 一堆 true/false。批量一次调用把成本降到 1/N,且能得到【排序】而非
-   * 二元判断 —— 旧实现取前 3 个时,顺序其实是遍历顺序,不是相关度顺序。
-   *
-   * 依据 Anthropic Agent Skills 的渐进披露:匹配决策本就该交给模型
-   * (它比关键词更懂用户意图),我们只需给它一张技能清单和用户输入。
-   *
-   * @param userInstruction 用户当前输入
-   * @param skillList 形如 "- id: 描述 (适用:...)" 的清单行
-   * @returns 按相关度降序的技能 id 数组(解析失败返回空数组)
-   */
-  public async rankSkillsByRelevance(
-    userInstruction: string,
-    skillList: string,
-  ): Promise<string[]> {
-    try {
-      const enabledProviders = this.modelManager.getEnabledProviders();
-      if (enabledProviders.length === 0) return [];
-
-      const provider = enabledProviders[0];
-      const modelId = provider.defaultModel || provider.models[0]?.id;
-      if (!modelId) return [];
-
-      const prompt = `用户当前指令：${userInstruction}
-
-可用技能清单：
-${skillList}
-
-请判断哪些技能与该指令相关,并按相关度从高到低排列。
-只输出技能 id,每行一个,最多 5 个,不要输出任何其他文字。
-若都不相关,输出 NONE。`;
-
-      const response = await this.makeChatCompletionRequest(provider, modelId, prompt);
-      if (!response) return [];
-
-      return response
-        .split('\n')
-        .map(l => l.trim().replace(/^[-*\d.\s]+/, '').replace(/^['"]|['"]$/g, '').trim())
-        .filter(l => l && l.toUpperCase() !== 'NONE')
-        .slice(0, 5)
-    } catch (error) {
-      this.log.warn('[SelfLearner] 批量技能排序失败', error);
-      return []
-    }
-  }
 
   /**
    * 检查新提案是否与现有技能重复

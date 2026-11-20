@@ -16,7 +16,6 @@ import { getHost } from '../platform/runtime';
 import { LogManager } from '../core/LogManager';
 import { ConfigStore } from '../core/ConfigStore';
 import { ModelManager } from '../models/ModelManager';
-import { SelfLearner } from '../learning/SelfLearner';
 import { SkillManager } from './SkillManager';
 
 /**
@@ -72,6 +71,14 @@ export interface SkillState {
   hasAssets: boolean;
 }
 
+/**
+ * 【M4-AA】旧管道注入技能正文的字符预算。
+ *
+ * 超了就只给清单 —— 而不是"挑几个注入"。挑就是替 AI 做决定(D8 禁止),
+ * 塞一部分又会让模型以为拿全了。16k 字约 4~5k token,对规划提示词是可接受的上限。
+ */
+const LEGACY_SKILL_BODY_BUDGET = 16000;
+
 export class SkillLoader {
   private static instance: SkillLoader;
   private log = LogManager.getInstance();
@@ -79,23 +86,10 @@ export class SkillLoader {
   private skills: Map<string, SkillState> = new Map();
   private configStore: ConfigStore;
   private modelManager: ModelManager;
-  private _selfLearner: SelfLearner | null = null;
-  
-  // 延迟加载 SelfLearner
-  private get selfLearner(): SelfLearner {
-    if (!this._selfLearner) {
-      this._selfLearner = SelfLearner.getInstance();
-    }
-    return this._selfLearner;
-  }
 
   private constructor() {
     this.configStore = ConfigStore.getInstance();
     this.modelManager = ModelManager.getInstance();
-    
-    // 延迟初始化 SelfLearner，避免循环依赖
-    // this.selfLearner 现在只会在需要时才加载
-    // this.selfLearner = SelfLearner.getInstance();
     
     // 使用 SkillManager.getSkillsDir() 作为路径单点(W7.0.4)
     // 【M4-X】该目录现在是**应用自身结构目录**下的 skills(不可写时落回 userData),
@@ -680,14 +674,18 @@ export class SkillLoader {
    * 获取所有技能的摘要清单
    */
   public getAllSkillSummaries(): string {
-    if (this.skills.size === 0) {
+    // 【M4-AA】只列**启用**的技能 —— 此前把禁用的也列出来,
+    // 于是模型会看到"可用技能"里混着用户明确关掉的那些。
+    // (getSkillSummaries() 一直是过滤的,两者口径必须一致。)
+    const enabled = Array.from(this.skills.values()).filter(s => s.enabled);
+    if (enabled.length === 0) {
       return '暂无可使用的技能';
     }
 
     let summary = '## 可用技能列表\n\n';
 
     let index = 1;
-    for (const skill of this.skills.values()) {
+    for (const skill of enabled) {
       summary += `${index}. **${skill.name}**\n`;
       // 【M4-W】带出 skill_id —— 展示名与 id 不同是常态,而 id 才是工具认的那个
       summary += `   - skill_id: ${skill.id}\n`;
@@ -1197,82 +1195,49 @@ export class SkillLoader {
    *   L2 按需 —— 模型判断相关时调 load_skill 工具取全文
    * 匹配决策交给模型(它比我们更懂用户意图),且省掉 N 次 LLM 往返。
    *
-   * 本方法保留供【旧管道】(InstructionGenerator → TaskExecutor)使用:
-   * 那里没有 tool loop,模型无法主动加载技能,故仍做一次批量匹配,
-   * 但改为【单次】LLM 调用排序(而非 N 次),并使用真实的 whenToUse。
+   * 本方法保留供【旧管道】(InstructionGenerator → TaskExecutor)使用。
+   *
+   * 【M4-AA / D8 重写 —— 这里**不做任何选择**】
+   * D8 明确:技能由 AI 自行判断选用,代码里不做关键词/相似度匹配替它决定。
+   * 此前这段在 >5 个技能时会**额外发一次 LLM 调用**去排序(失败再降级关键词匹配),
+   * 拿前 3 名注入 —— 那是"另一个模型替干活的模型选",而且每次规划都多付一次往返。
+   *
+   * 现在只有两种行为,都不含"选择":
+   *   ① 全部技能正文加起来**在预算内** → 全量注入。不是"代码挑了哪些",
+   *      而是"把全部摆出来,由模型自己决定用不用"。
+   *   ② 超出预算 → **只给清单**,并如实说明这条路径拿不到全文。
+   *      (旧管道没有 tool loop,模型无法像 agent 路径那样按需 load_skill ——
+   *       这一点必须说清,而不是塞一份"看起来能用"的残缺上下文。)
    */
-  public async getSkillContext(userMessage: string): Promise<string> {
+  public async getSkillContext(_userMessage: string): Promise<string> {
     try {
       const enabledSkills = Array.from(this.skills.values()).filter(s => s.enabled);
       if (enabledSkills.length === 0) return '';
 
-      // L1: 总是给摘要 —— 这是模型的路由依据
-      let finalContent = `## 可用技能(按需加载完整说明)
-${this.getSkillSummaries()}
-`;
+      const summaries = this.getSkillSummaries();
+      const totalBodyChars = enabledSkills.reduce((n, s) => n + s.fullInstructions.length, 0);
 
-      // L2: 旧管道需要"直接可执行的全文",故在此批量匹配一次
-      if (enabledSkills.length <= 5) {
-        // 技能少:直接给全部全文(成本可控)
-        for (const s of enabledSkills) {
-          finalContent += `
+      if (totalBodyChars <= LEGACY_SKILL_BODY_BUDGET) {
+        const bodies = enabledSkills.map(s => `
 ${s.fullInstructions}
-`
-        }
-        return finalContent
+`).join('');
+        return `## 可用技能(完整步骤已附在下方 —— 是否使用由你判断)
+${summaries}
+${bodies}`;
       }
 
-      // 技能多:【单次】LLM 调用批量排序(旧实现是 N 次串行调用)
-      const ranked = await this.rankSkillsOnce(userMessage, enabledSkills);
-      const top = ranked.slice(0, 3);
-      for (const s of top) {
-        finalContent += `
-${s.fullInstructions}
-`
-      }
-      finalContent += `
-(其余 ${enabledSkills.length - top.length} 个技能仅列摘要,需要时用 load_skill 工具加载)
-`
-      return finalContent
+      return [
+        '## 可用技能(仅清单)',
+        summaries,
+        '',
+        `> 这些技能的正文合计 ${totalBodyChars} 字,超过本路径的注入预算(${LEGACY_SKILL_BODY_BUDGET} 字),故未附带全文。`,
+        '> 本路径没有工具循环,无法按需加载技能正文 —— 请按清单里的描述判断是否相关;',
+        '> 需要严格按技能步骤执行时,请切到「计划/全量」执行模式(那条路径由 agent 按需加载)。',
+      ].join('\n');
     } catch (error) {
       this.log.error('[SkillLoader] 获取技能上下文失败', error);
       return '';
     }
   }
 
-  /**
-   * 【M4-A】单次 LLM 调用批量排序技能 —— 替代旧实现的 N 次串行 checkSkillMatch。
-   *
-   * 旧实现对每个技能单独调一次 LLM,N 个技能 = N 次往返(技能一多,
-   * 每次规划都要等 N 个网络往返)。改为一次调用返回排序。
-   */
-  private async rankSkillsOnce(
-    userMessage: string,
-    skills: SkillState[],
-  ): Promise<SkillState[]> {
-    const list = skills
-      .map(s => `- ${s.id}: ${s.description}${s.whenToUse ? ` (适用:${s.whenToUse})` : ''}`)
-      .join('\n');
-    try {
-      const ranked = await this.selfLearner.rankSkillsByRelevance(userMessage, list);
-      if (ranked && ranked.length > 0) {
-        const byId = new Map(skills.map(s => [s.id, s]));
-        const picked = ranked
-          .map(id => byId.get(id))
-          .filter((s): s is SkillState => !!s);
-        if (picked.length > 0) return picked
-      }
-    } catch (e) {
-      this.log.warn('[SkillLoader] 技能批量排序失败,降级为按描述关键词匹配');
-    }
-    // 降级:纯关键词匹配(零 LLM 成本,确定性强)
-    const lower = userMessage.toLowerCase()
-    const scored = skills.map(s => {
-      const kws = [...s.triggerKeywords, ...(s.whenToUse ? [s.whenToUse] : [])]
-      const hits = kws.filter(k => k && lower.includes(k.toLowerCase())).length
-      return { s, hits }
-    })
-    scored.sort((a, b) => b.hits - a.hits)
-    return scored.map(x => x.s)
-  }
 }

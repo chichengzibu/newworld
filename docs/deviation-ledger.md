@@ -2282,3 +2282,44 @@ sendMessage(convId, msg, providerId, modelId)
 **那个外部文件锁还在**（需重启释放）。故本批的完整门禁（含 electron-builder）
 在当前机器上**跑不成绿**；已验证：分步 1/2/3/5 全过、electron-builder 换输出目录
 成功产出安装包。重启后 `npm run build` 应恢复全绿 —— **需要实跑确认**。
+
+---
+
+## M4-AA 批：旧管道对齐 D8 —— 技能不再由代码替 AI 选
+
+> 起因：D8 已定「技能由 **AI 自行判断**选用，代码里不做关键词/相似度匹配替它决定」。
+> agent 路径（M4-A + M4-W）已经是这个形态，但**旧管道没对齐** ——
+> 它仍在"代码/另一个模型替干活的模型选技能"。本批把它补上。
+
+| ID | 状态 | 摘要 |
+|---|---|---|
+| DEV-177 | 已修 | **旧管道仍在替 AI 选技能，且清单注入两遍** · ① `SkillLoader.getSkillContext()` 在技能 >5 个时**额外发一次 LLM 调用**排序（`rankSkillsOnce` → `SelfLearner.rankSkillsByRelevance`），失败再**降级关键词匹配**，取前 3 名注入 —— 违反 D8，且每次规划多付一次往返；② `InstructionGenerator.callModel()` 把技能清单**注入两遍**（`getAllSkillSummaries()` 一份 + `getSkillContext()` 内含一份），两份口径还不同；③ 追加段标题写「检测到匹配的技能」—— 而"匹配"是代码做的，不是模型做的；④ `getAllSkillSummaries()` 把**禁用**技能也列出来（`getSkillSummaries()` 一直过滤，两者口径不一致）。修：`getSkillContext` 重写为**两种行为且都不含选择** —— 正文合计 ≤16000 字则**全量注入**（把全部摆出来，由模型自己决定用不用），超预算则**只给清单并如实说明**拿不到全文；删除 `rankSkillsOnce` / `rankSkillsByRelevance` 与为它们服务的 `selfLearner` 死依赖；摘要只列启用技能；`InstructionGenerator` 去掉第二份清单、提示词改为「先判断是否相关」、追加段改为中性「技能清单」并禁止臆造步骤 |
+
+### 为什么是"不做选择"而不是"选得更准"
+
+D8 禁止的是**选择这个动作本身**，不是"选得不准"。所以本批不是改进排序算法，
+而是把排序整个删掉：
+
+- **挑几个 = 替 AI 做决定**（D8 直接禁止）
+- **挑一部分塞进去更糟**：模型会以为拿全了，按残缺上下文规划 ——
+  比"没有技能"更容易出错
+- 故超预算时**明说拿不到**，而不是给一份"看起来能用"的残缺上下文
+
+### 影响面（诚实说明）
+
+- **agent 路径完全不受影响** —— 本来就不走 `getSkillContext`。
+- **旧管道**（agent loop 不可用时：safe 模式 / 无 provider / 未注册 agent）：
+  技能正文从"前 3 名"变成"全部（≤16k 字）或没有（>16k）" ——
+  即技能很多且正文很长时，回退路径下的技能**退化为只有清单**。这是有意的取舍。
+- **每次规划少一次 LLM 往返**（排序调用没了）。
+
+### 回归钉
+
+`tests/unit/skill-context-d8.test.ts`（5 例）：预算内全量给出 / 超预算只给清单且如实说明 /
+**排序器已不存在**（`rankSkillsOnce`、`rankSkillsByRelevance` 均应为 undefined）/
+禁用技能不出现在清单 / `InstructionGenerator` 不再注入第二份清单、不再声称"检测到匹配"。
+
+### 遗留
+
+旧管道仍无法"按需加载正文"（它没有 tool loop）—— 真正解法是让这条回退路径也用
+agent 循环，或随旧管道退场一并删除。预算 16k 字是拍定的，应结合实测调整。
