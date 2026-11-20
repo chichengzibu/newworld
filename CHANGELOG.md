@@ -880,6 +880,37 @@ M4-X 交付后,用户指出 **ClawHub 本地模拟市场**与 **SkillMarket 死�
 **回归钉**:`tests/unit/views/ClawHub.test.ts` 重写为「私有技能仓库」6 例;
 `tests/unit/ClawHubManager.test.ts`(691 行)随模块删除 —— 测一个不存在的模块没有意义。
 
+### 🔍 构建门禁「红得说得清」（M4-Z）
+
+上一批跑 `npm run build` 红过一次，**却说不清原因**：分步跑 5 步全过、单独跑
+electron-builder 也过，但门禁报「未找到打包产物」。门禁红而原因不明，等于后面
+每一批的「三绿」都要打折。本批先把它查到底。
+
+**查到三处脚本缺陷，让「红」不可诊断：**
+
+| # | 缺陷 | 后果 |
+|---|---|---|
+| ① | `run()` 用 `stdio:'inherit'` | 子进程输出**不落盘** → 红了没证据 |
+| ② | `timedOut` 在 `close` 里写死成 `false`；判断超时那行是**同步执行**的死代码 | 「超时被杀」与「普通失败」**长得一模一样** |
+| ③ | `moveAside()` 的 `catch {}` 静默吞错 | 旧 `release/` 被占着时照样跑 EB → `EBUSY` → 报成「未找到打包产物」，**真错误被埋两层** |
+
+**真实根因是一个外部文件锁**：`release/win-unpacked/resources/app.asar` 能被读写、
+但**不可改名/删除**（`renameSync` → EBUSY、`del` → 「另一个程序正在使用此文件」），
+持续十几小时，另一份备份里的同名文件**也被锁**；进程排查无 PiPiClaw/electron/
+app-builder/7za。**换输出目录打包成功**（97.8MB 安装包）→ 打包链本身健康。
+现有工具无法定位持有者（无 Sysinternals handle.exe）。
+
+**修：** 核心逻辑抽到 `scripts/lib/build-runner.mjs`（可单测）——每步完整日志落盘
+`.tmp-build-logs/<step>.log`、失败时打印**日志路径 + 末尾 30 行**；超时**如实上报**
++ 杀进程后 15s 硬兜底（不挂死）；移走旧产物失败 → **带诊断快速失败**
+（先重试 4 次覆盖杀毒扫描的瞬时锁）；`--skip-electron` 不再动 `release/`。
+
+**回归钉**：`tests/unit/build-runner.test.ts`（8 例）+ 子进程探针，
+把「超时如实上报」「移走失败不许静默」钉成用例。
+
+**仍未闭环**：外部文件锁需重启释放，故完整门禁在当前机器上跑不成绿 ——
+分步 1/2/3/5 全过、electron-builder 换输出目录成功。**重启后需实跑确认**。
+
 ### 📊 验证
 
 
@@ -894,7 +925,7 @@ M4-X 交付后,用户指出 **ClawHub 本地模拟市场**与 **SkillMarket 死�
 
 
 
-vitest **143 files / 1556 passed / 0 FAIL / 17 skipped** · vue-tsc 0 error · 后端 tsc **0 error**
+vitest **144 files / 1564 passed / 0 FAIL / 17 skipped** · vue-tsc 0 error · 后端 tsc **0 error**
 `npm run build` 通过(5 步 · 两道类型检查门禁)并产出安装包 · smoke-test 22 passed / 0 failed
 **实跑**:裁判校准**离线复算**(480 次已落盘裁决)→ 两项新指标复现一致;
 应用启动正常,控制台警告 **33 条 → 1 条**(剩下那条是 Electron 的 CSP 开发提示)

@@ -15,37 +15,69 @@
  *           - 在进程树内设置 CODEBUDDY_SAFE_DELETE_DISABLED=1(无该 guard 的环境为 no-op)
  *           - electron-builder 用 spawn + 超时保护: 若其打包后清理临时目录被 safe-delete 挂起,
  *             超时杀进程,以「产物 exe/app 是否存在」判断成功,而非依赖其退出码
+ *
+ * ─────────────────────────────────────────────────────────────────────
+ * 【M4-Z 修】门禁红过一次但说不清原因 —— 三个缺陷都在本文件里
+ *
+ * ① **日志没落盘**:`run()` 用 `stdio:'inherit'` 把子进程输出直接丢给控制台,
+ *    不存文件。门禁一红,证据就没了 —— 只能靠"分步再跑一遍"去猜。
+ * ② **超时永远报不出来**:`timedOut` 只在 `close` 回调里被写死成 `false`,
+ *    而真正判断超时的那行 `if (timedOut) resolve(...)` 是**同步执行**的,
+ *    那一刻必然为 false(死代码)。于是"超时被杀"和"正常失败"长得一模一样。
+ * ③ **移走旧产物失败被静默吞掉**:`moveAside()` 的 `catch {}` 什么都不说。
+ *    当旧 `release/` 被某个进程占着(Windows 上 `EBUSY`/`EPERM`),
+ *    它照样继续跑 electron-builder → EB 在 unlink `app.asar` 时炸 →
+ *    最终报成「未找到打包产物」,而**真正的错误被埋了两层**。
+ *
+ * 现:每一步完整日志落盘 `.tmp-build-logs/<step>.log`;超时如实上报;
+ * 移走旧产物失败 → **带诊断信息快速失败**,不再让构建走进注定失败的路径。
+ * 可测的核心逻辑在 `scripts/lib/build-runner.mjs`(有单测)。
  */
 
-import { spawn, spawnSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
 import path from 'node:path';
 
+import { moveAside, runStep, readTail, findArtifact } from './lib/build-runner.mjs';
+
 // 让 vite emptyDir 等的 rm 操作不再被 safe-delete 拦截(无该 guard 的环境为 no-op)
 process.env.CODEBUDDY_SAFE_DELETE_DISABLED = '1';
 
+const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
 const CI = args.includes('--ci');
 const SKIP_EB = args.includes('--skip-electron');
 const platformArg = args.find((a) => a.startsWith('--platform='))?.split('=')[1];
+
+/**
+ * 每一步的完整日志目录。
+ *
+ * 【为什么必须落盘】门禁红的时候,控制台早就滚过去了 ——
+ * 没有文件就没有证据,只能靠"再跑一遍"去猜(上一次就是这么浪费了两轮构建)。
+ */
+const BUILD_LOG_DIR = path.join(repoRoot, '.tmp-build-logs');
+
+/** electron-builder 的超时。冷构建(rebuild + 依赖搜索 + NSIS + 签名)实测可达数分钟 */
+const EB_TIMEOUT_MS = Number(process.env.PIPICLAW_BUILD_EB_TIMEOUT_MS) || 600000;
 
 function binName(name) {
   const base = path.join('node_modules', '.bin', name);
   return process.platform === 'win32' ? base + '.cmd' : base;
 }
 
-// 构建前用 rename 移走旧产物 —— rename 不走 safe-delete 拦截的 rm 路径,
-// 这样 vite/electron-builder 后续清空操作不会触发「批量删除确认」而卡死。
-function moveAside(dir) {
-  if (!fs.existsSync(dir)) return;
-  const tmp = `${dir}.bak-${Date.now()}`;
-  try {
-    fs.renameSync(dir, tmp);
-  } catch {
-    // 忽略: 若 rename 也失败,交给后续步骤自行处理
-  }
+/** 统一调用:日志目录固定,重试提示固定 */
+function run(label, cmd, cmdArgs, timeoutMs = 180000) {
+  return runStep(label, cmd, cmdArgs, timeoutMs, { logDir: BUILD_LOG_DIR });
 }
+
+/** 给「移走旧产物失败」一个能照着做的说明,而不是一句"失败了" */
+function explainLockedDir(dir, err) {
+  const code = err?.code || 'UNKNOWN';
+  const detail = String(err?.message || err).slice(0, 200);
+  console.error(`  · ${dir}/  →  ${code}: ${detail}`);
+}
+
 // 【M4-U】构建前先剪掉历史备份(每个产物目录只留最近 1 代)。
 //
 // 为什么:moveAside() 每次构建把旧产物**改名**成 `<dir>.bak-<时间戳>`
@@ -67,70 +99,47 @@ function moveAside(dir) {
   }
 }
 
-moveAside('dist');
-moveAside('dist-electron');
-moveAside('release');
-
-// spawn + 超时保护。超时杀进程树(避免 safe-delete 清理挂起导致无限阻塞)。
-function run(cmd, cmdArgs, timeoutMs = 180000) {
-  return new Promise((resolve) => {
-    const child = spawn(cmd, cmdArgs, {
-      stdio: 'inherit',
-      env: process.env,
-      shell: process.platform === 'win32',
+// 【M4-Z】移走失败 → 快速失败,不再走进注定失败的 electron-builder
+{
+  const locked = [];
+  // 【M4-Z】--skip-electron 时不碰 release/ —— EB 根本不跑,
+  // 移它没有意义,反而会被"被占用"挡住(如 ohos 打包前置只需 dist/dist-electron)。
+  const dirsToMove = ['dist', 'dist-electron', ...(SKIP_EB ? [] : ['release'])];
+  for (const dir of dirsToMove) {
+    const r = moveAside(dir, {
+      onRetry: (d, e, attempt, max, waitMs) => {
+        console.warn(`[build] ${d}/ 被占用(${e.code || 'UNKNOWN'}),${waitMs}ms 后重试(${attempt}/${max})`);
+      },
     });
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      try {
-        if (process.platform === 'win32') {
-          spawnSync('taskkill', ['/T', '/F', '/PID', String(child.pid)], { stdio: 'ignore' });
-        } else {
-          child.kill('SIGKILL');
-        }
-      } catch {
-        /* ignore */
-      }
-    }, timeoutMs);
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      resolve({ status: code, timedOut: false });
-    });
-    child.on('error', (err) => {
-      clearTimeout(timer);
-      resolve({ status: 1, timedOut: false, error: err });
-    });
-    // 超时兜底(极少数情况 close 不触发)
-    child.on('exit', () => clearTimeout(timer));
-    if (timedOut) resolve({ status: null, timedOut: true });
-  });
+    if (!r.ok) locked.push({ dir, err: r.error });
+  }
+  if (locked.length > 0) {
+    console.error('\n✘ 构建中止:旧产物目录无法移开');
+    for (const { dir, err } of locked) explainLockedDir(dir, err);
+    console.error('\n  这通常意味着**有进程正占用其中的文件**:');
+    console.error('    · PiPiClaw / electron 还在运行(包括托盘里没退干净的)');
+    console.error('    · 杀毒软件正在扫描刚生成的 app.asar(~122MB,扫描会持有句柄)');
+    console.error('    · 上一次构建被中断后残留');
+    console.error('\n  处理:① 关掉正在运行的 PiPiClaw ② 稍等十几秒重试');
+    console.error('        ③ 仍不行 → 重启一次(句柄由系统释放)');
+    console.error('  自检:PowerShell 里看谁占着文件 —— 装上 Sysinternals 后执行');
+    console.error(`        handle64.exe "${path.join(repoRoot, locked[0].dir)}"`);
+    process.exit(1);
+  }
 }
 
-// 递归查找产物(packaged artifact),用于以「产物是否存在」判断构建成功
-function findArtifact(dir) {
-  if (!fs.existsSync(dir)) return false;
-  let found = false;
-  const walk = (p) => {
-    let entries = [];
-    try {
-      entries = fs.readdirSync(p);
-    } catch {
-      return;
-    }
-    for (const e of entries) {
-      const fp = path.join(p, e);
-      let st;
-      try {
-        st = fs.statSync(fp);
-      } catch {
-        continue;
-      }
-      if (st.isDirectory()) walk(fp);
-      else if (/\.(exe|app|AppImage|dmg|deb|rpm)$/.test(e)) found = true;
-    }
-  };
-  walk(dir);
-  return found;
+/** 统一的失败汇报:步骤 / 耗时 / 是否超时 / 日志路径 / 日志末尾 */
+function reportStepFailure(label, r, hint) {
+  const secs = (r.durationMs / 1000).toFixed(1);
+  console.error(`\n✘ ${label} 失败${r.timedOut ? '(超时,进程已被终止)' : ''} —— 耗时 ${secs}s`);
+  if (hint) console.error(`  ${hint}`);
+  if (r.error) console.error(`  ${String(r.error.message || r.error).slice(0, 300)}`);
+  if (r.logPath) console.error(`  完整日志: ${r.logPath}`);
+  const tail = r.logPath ? readTail(r.logPath, 30) : '';
+  if (tail) {
+    console.error('  —— 日志末尾 30 行 ——');
+    console.error(tail.split('\n').map((l) => `  | ${l}`).join('\n'));
+  }
 }
 
 /**
@@ -146,9 +155,9 @@ function findArtifact(dir) {
  * vite 只做语法转译,不做类型检查 —— 类型检查必须单独跑,否则等于没有。
  */
 console.log('\n=== [1/5] typecheck (主进程) ===');
-const tsc = await run(binName('tsc'), ['--noEmit', '-p', 'tsconfig.node.json'], 300000);
+const tsc = await run('typecheck-main', binName('tsc'), ['--noEmit', '-p', 'tsconfig.node.json'], 300000);
 if (tsc.status !== 0) {
-  console.error('\n✘ 主进程类型检查失败 —— 构建中止。');
+  reportStepFailure('主进程类型检查', tsc);
   console.error('  注:typecheck 里出现的 "Cannot find module" 通常意味着');
   console.error('      有模块被删但 import 还在 —— 那会让 electron 主进程构建失败。');
   process.exit(1);
@@ -161,16 +170,16 @@ if (tsc.status !== 0) {
  * 里单独跑,构建不碰它。而渲染层的类型错误同样是「构建能过、运行时炸」。
  */
 console.log('\n=== [2/5] typecheck (渲染进程) ===');
-const vueTsc = await run(binName('vue-tsc'), ['--noEmit', '-p', 'tsconfig.json'], 300000);
+const vueTsc = await run('typecheck-renderer', binName('vue-tsc'), ['--noEmit', '-p', 'tsconfig.json'], 300000);
 if (vueTsc.status !== 0) {
-  console.error('\n✘ 渲染进程类型检查失败 —— 构建中止。');
+  reportStepFailure('渲染进程类型检查', vueTsc);
   process.exit(1);
 }
 
 console.log('\n=== [3/5] vite build ===');
-const vite = await run(binName('vite'), ['build'], 180000);
+const vite = await run('vite-build', binName('vite'), ['build'], 180000);
 if (vite.status !== 0) {
-  console.error('\n✘ vite build 失败');
+  reportStepFailure('vite build', vite);
   process.exit(1);
 }
 
@@ -180,31 +189,41 @@ if (!SKIP_EB) {
   console.log('\n=== [4/5] electron-builder ===');
   const ebArgs = ['--publish=never'];
   if (platformArg) ebArgs.push(platformArg);
-  const eb = await run(binName('electron-builder'), ebArgs, 300000);
+  const eb = await run('electron-builder', binName('electron-builder'), ebArgs, EB_TIMEOUT_MS);
   const hasArtifact = findArtifact('release');
   if (!hasArtifact) {
-    if (eb.timedOut) {
-      console.error('\n✘ electron-builder 超时且无打包产物(release/ 下无 exe/app)');
-    } else {
-      console.error('\n✘ 未找到打包产物(release/ 下无 exe/app),electron-builder 失败');
-    }
+    reportStepFailure(
+      'electron-builder',
+      eb,
+      eb.timedOut
+        ? '打包超时且没有产出 —— 看日志确认卡在哪一步(依赖安装 / NSIS / 签名)'
+        : '没有产出打包产物(release/ 下无 exe/app) —— 常见原因见日志末尾',
+    );
     overall = 1;
   } else if (eb.timedOut) {
     console.warn(
-      '\n⚠ electron-builder 超时(多为临时目录清理被 safe-delete 拦截挂起),但已检测到打包产物(release/)。不阻断。'
+      `\n⚠ electron-builder 超时(耗时 ${(eb.durationMs / 1000).toFixed(0)}s),但已检测到打包产物(release/)。不阻断。`,
     );
+    console.warn(`  日志: ${eb.logPath}`);
   } else if (eb.status !== 0) {
     console.warn(
-      '\n⚠ electron-builder 退出码非零,但已检测到打包产物(release/)。多为次要清理失败,不影响产物可用性。'
+      `\n⚠ electron-builder 退出码非零(${eb.status}),但已检测到打包产物(release/)。多为次要清理失败,不影响产物可用性。`,
     );
+    console.warn(`  日志: ${eb.logPath}`);
+  } else {
+    console.log(`  ✓ 打包完成 —— 耗时 ${(eb.durationMs / 1000).toFixed(1)}s`);
   }
 } else {
   console.log('\n=== [4/5] electron-builder (跳过 --skip-electron) ===');
 }
 
 console.log('\n=== [5/5] build-report ===');
-const rep = await run('node', ['scripts/build-report.mjs', ...(CI ? ['--ci'] : [])], 60000);
+const rep = await run('build-report', 'node', ['scripts/build-report.mjs', ...(CI ? ['--ci'] : [])], 60000);
 // build-report 的回归防护/CI 门禁失败 → 整体失败
-if (rep.status !== 0) overall = rep.status ?? 1;
+if (rep.status !== 0) {
+  reportStepFailure('build-report', rep);
+  overall = rep.status ?? 1;
+}
 
+console.log(`\n[build] 各步骤完整日志: ${BUILD_LOG_DIR}`);
 process.exit(overall);

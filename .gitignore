@@ -126,3 +126,6 @@ scripts/.tmp-*
 # 不集成:仓库里不存技能包 —— 目录本身占位,其余是用户下载/手动添加的
 skills/*
 !skills/.gitkeep
+
+# 【M4-Z】构建各步骤的完整日志(门禁红时的证据;不入仓)
+.tmp-build-logs/

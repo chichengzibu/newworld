@@ -2223,3 +2223,62 @@ sendMessage(convId, msg, providerId, modelId)
 标题与区别说明 / 连仓库调 IPC / 列出条目(名称·说明·版本·可更新标记)/
 安装调 IPC / 连不上说清失败 / 没连接时提示基址与公钥怎么配。
 `tests/unit/ClawHubManager.test.ts`(691 行)随模块一并删除 —— 测一个不存在的模块没有意义。
+
+---
+
+## M4-Z 批：构建门禁红了却说不清 —— 三处缺陷 + 一个外部文件锁
+
+> 起因：上一批（M4-Y）跑 `npm run build` 红过一次，但我**说不清原因** ——
+> 分步跑 5 步全过、单独跑 electron-builder 也过。门禁红而原因不明，
+> 等于后面每一批的"三绿"都要打折。本批先把它查到底。
+
+| ID | 状态 | 摘要 |
+|---|---|---|
+| DEV-176 | 已修 | **构建脚本三处缺陷让"红"无法诊断** · ① `run()` 用 `stdio:'inherit'`，子进程输出**不落盘** → 门禁一红证据就没了；② `timedOut` 只在 `close` 回调里被写死成 `false`，而真正判断超时那行是**同步执行**的死代码 → "超时被杀"与"普通失败"长得一模一样；③ `moveAside()` 的 `catch {}` **静默吞掉**旧产物移走失败 → 旧 `release/` 被占着时照样继续跑 electron-builder，EB 在 `unlink app.asar` 撞 `EBUSY`，最终报成「未找到打包产物」，**真错误被埋了两层**。修：核心逻辑抽到 `scripts/lib/build-runner.mjs`（可单测）；每步完整日志落盘 `.tmp-build-logs/<step>.log`；超时如实上报；移走失败 → **带诊断快速失败**（含自检命令）；`--skip-electron` 不再去动 `release/` |
+
+### 复现与证据（这一批最重要的产出）
+
+| 探针 | 结果 |
+|---|---|
+| `npx electron-builder`（默认输出目录） | `⨯ EBUSY: resource busy or locked, unlink 'release\win-unpacked\resources\app.asar'` |
+| `fs.renameSync(app.asar)` | **EBUSY** |
+| `fs.openSync(app.asar, 'r+')` | **成功**（能读能写） |
+| `fs.renameSync('release')` | **EPERM** |
+| `cmd /c del app.asar` | 「另一个程序正在使用此文件，进程无法访问」 |
+| 进程排查 | 无 PiPiClaw / electron / app-builder / 7za / MsMpEng 进程 |
+| 同样的锁 | **另一份** `release.bak-1795073156482/win-unpacked/resources/app.asar` 也被锁 |
+| 换输出目录 `-c.directories.output=release-verify` | ✅ **打包成功**（97.8MB 安装包）→ **打包链本身是健康的** |
+
+**结论**：有一个**外部进程/驱动**持有 `app.asar` 的句柄（可读写、但未带
+`FILE_SHARE_DELETE`，故不可改名/删除），且持续了十几小时、跨两个目录副本。
+用现有工具（无 Sysinternals `handle.exe`）**无法定位持有者**。
+
+**第二层原因（脚本缺陷 ③ 放大的后果）**：上一次构建中止时 `dist-electron/`
+已被移走却未重建 → 此后单独跑 electron-builder 会报
+`Application entry file "dist-electron\main.js" ... was not found` ——
+与锁的问题**叠加**，让人更难看清。
+
+### 修法
+
+1. **日志落盘**：`runStep()` 用 `stdio:'pipe'` + tee，输出同时进控制台与
+   `.tmp-build-logs/<step>.log`（`typecheck-main` / `typecheck-renderer` /
+   `vite-build` / `electron-builder` / `build-report`）。失败时自动打印
+   **日志路径 + 末尾 30 行**。
+2. **超时如实上报**：`timedOut` 作为局部变量在 `close` 时读取；杀进程后加
+   **硬兜底**（15s）保证 `close` 不触发也不会把构建挂死。
+3. **移走旧产物失败 → 快速失败**：先重试 4 次（间隔 1.5/3/4.5s，覆盖杀毒扫描的
+   瞬时锁），仍失败则中止并给出可操作诊断（关应用 / 重试 / 重启 / `handle64.exe` 自检）。
+4. `--skip-electron` 时不再移走 `release/`（EB 不跑，移它没有意义，反而会被锁挡住）。
+
+### 回归钉
+
+`tests/unit/build-runner.test.ts`（8 例）+ `tests/fixtures/build-runner-probe.mjs`：
+正常执行落盘 · **超时如实上报且不挂死** · 移走成功 · 目录不存在跳过 ·
+**移走失败必须返回失败（不许静默）** · `readTail` 取末尾 · `findArtifact` 递归。
+（`.mjs` 在 vitest 里会被当 CJS 加载，故用**子进程探针**跑 —— 也更贴近真实运行方式。）
+
+### 仍未闭环
+
+**那个外部文件锁还在**（需重启释放）。故本批的完整门禁（含 electron-builder）
+在当前机器上**跑不成绿**；已验证：分步 1/2/3/5 全过、electron-builder 换输出目录
+成功产出安装包。重启后 `npm run build` 应恢复全绿 —— **需要实跑确认**。
