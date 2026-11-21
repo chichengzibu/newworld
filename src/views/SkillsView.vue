@@ -160,6 +160,7 @@
     <el-card class="skills-hub-card">
       <div class="dir-header">
         <h3>{{ '开源技能库' }}</h3>
+        <el-button size="small" @click="openSourcesDialog">{{ '管理来源' }}</el-button>
         <el-button size="small" :loading="hubRefreshing" @click="refreshHubIndex">
           <el-icon><Refresh /></el-icon>
           {{ '刷新索引' }}
@@ -217,6 +218,66 @@
         </div>
       </div>
     </el-card>
+
+    <!--
+      【M4-AD】自定义源管理。
+      内置源只读；自定义源可增删，存进配置、重启后仍在。
+      校验放在主进程（源地址会被真的去请求，写错只会让人看到"拉取失败"却不知为何）。
+    -->
+    <el-dialog v-model="sourcesDialog" :title="'技能库来源'" width="640px">
+      <el-table :data="allSources" size="small" style="width: 100%;">
+        <el-table-column prop="name" label="名称" min-width="140" />
+        <el-table-column prop="repo" label="仓库" min-width="160" />
+        <el-table-column label="类型" width="110">
+          <!-- 【注意】不要用 `#default="{ row }"` 解构:el-table-column 若没被注册(某些测试桩),
+               插槽会以 undefined 调用 → 解构直接抛错。用 scope 并做可选链更稳。 -->
+          <template #default="scope">
+            <el-tag size="small" :type="scope?.row?.builtin ? 'info' : 'success'">
+              {{ scope?.row?.builtin ? '内置' : '自定义' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="90">
+          <template #default="scope">
+            <el-button
+              v-if="!scope?.row?.builtin"
+              size="small"
+              text
+              type="danger"
+              @click="removeHubSource(scope?.row?.id)"
+            >删除</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+
+      <el-divider content-position="left">{{ '添加自定义源' }}</el-divider>
+      <el-form :model="sourceForm" label-width="88px" size="small">
+        <el-form-item :label="'名称'">
+          <el-input v-model="sourceForm.name" placeholder="例如：我的团队技能库" />
+        </el-form-item>
+        <el-form-item :label="'仓库'">
+          <el-input v-model="sourceForm.repo" placeholder="owner/name（GitHub 仓库）" />
+        </el-form-item>
+        <el-form-item :label="'分支'">
+          <el-input v-model="sourceForm.branch" placeholder="main" />
+        </el-form-item>
+        <el-form-item :label="'索引地址'">
+          <el-input v-model="sourceForm.indexUrl" placeholder="https://raw.githubusercontent.com/.../index.json" />
+        </el-form-item>
+        <el-form-item :label="'索引格式'">
+          <el-select v-model="sourceForm.kind" style="width: 100%;">
+            <el-option label="Skill-Shelf 格式（index.json，自带描述）" value="shelf-index" />
+            <el-option label="Claude 市场格式（marketplace.json，目录路径）" value="anthropic-marketplace" />
+          </el-select>
+        </el-form-item>
+        <el-form-item>
+          <el-button type="primary" :loading="sourceSaving" @click="addHubSource">{{ '保存' }}</el-button>
+          <span class="dir-empty" style="margin-left: 8px;">
+            {{ '保存后点「刷新索引」才会生效' }}
+          </span>
+        </el-form-item>
+      </el-form>
+    </el-dialog>
 
     <!--
       【M4-B】效果判定面板
@@ -595,7 +656,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted } from 'vue';
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue';
 import { Upload, MagicStick, Box, SuccessFilled, Plus, Refresh, Search } from '@element-plus/icons-vue';
 import { useRouter } from 'vue-router';
 import { ElMessage } from "element-plus/es/components/message/index"
@@ -961,6 +1022,66 @@ const installHubSkill = async (id: string): Promise<void> => {
     ElMessage.error('安装失败');
   } finally {
     hubInstalling.value = '';
+  }
+};
+
+// ══════════ 【M4-AD】技能库来源管理 ══════════
+const sourcesDialog = ref(false);
+const sourceSaving = ref(false);
+const hubSources = ref<{ builtin: any[]; custom: any[] }>({ builtin: [], custom: [] });
+const sourceForm = reactive({ name: '', repo: '', branch: 'main', indexUrl: '', kind: 'shelf-index' });
+
+const allSources = computed(() =>
+  [...hubSources.value.builtin.map(x => ({ ...x, builtin: true })), ...hubSources.value.custom.map(x => ({ ...x, builtin: false }))],
+);
+
+const loadHubSources = async (): Promise<void> => {
+  try {
+    const res = await (window as any).electronAPI?.skills?.hubSourcesList?.();
+    if (res?.success) hubSources.value = res.data ?? { builtin: [], custom: [] };
+  } catch (e) {
+    console.error('loadHubSources failed', e);
+  }
+};
+
+const openSourcesDialog = async (): Promise<void> => {
+  sourcesDialog.value = true;
+  await loadHubSources();
+};
+
+const addHubSource = async (): Promise<void> => {
+  sourceSaving.value = true;
+  try {
+    const res = await (window as any).electronAPI?.skills?.hubSourcesAdd?.({ ...sourceForm });
+    if (res?.success) {
+      hubSources.value = res.data ?? hubSources.value;
+      ElMessage.success('已添加，点「刷新索引」后生效');
+      sourceForm.name = '';
+      sourceForm.repo = '';
+      sourceForm.indexUrl = '';
+    } else {
+      ElMessage.error(res?.error || '添加失败');
+    }
+  } catch (e) {
+    console.error('addHubSource failed', e);
+    ElMessage.error('添加失败');
+  } finally {
+    sourceSaving.value = false;
+  }
+};
+
+const removeHubSource = async (id: string): Promise<void> => {
+  try {
+    const res = await (window as any).electronAPI?.skills?.hubSourcesRemove?.(id);
+    if (res?.success) {
+      hubSources.value = res.data ?? hubSources.value;
+      ElMessage.success('已删除，点「刷新索引」后生效');
+    } else {
+      ElMessage.error(res?.error || '删除失败');
+    }
+  } catch (e) {
+    console.error('removeHubSource failed', e);
+    ElMessage.error('删除失败');
   }
 };
 

@@ -94,6 +94,13 @@ function installApi(over: Record<string, any> = {}) {
       hubInstall: vi.fn().mockResolvedValue({ success: true, data: { skillId: 'pdf', skills: [] } }),
       // 【M4-AC】安装前预览 —— 默认"没有可执行脚本"
       hubPreview: vi.fn().mockResolvedValue({ success: true, data: { files: ['SKILL.md'], executables: [] } }),
+      // 【M4-AD】来源管理
+      hubSourcesList: vi.fn().mockResolvedValue({
+        success: true,
+        data: { builtin: [{ id: 'anthropic-skills', name: 'Anthropic 官方技能集', repo: 'anthropics/skills' }], custom: [] },
+      }),
+      hubSourcesAdd: vi.fn().mockResolvedValue({ success: true, data: { builtin: [], custom: [] } }),
+      hubSourcesRemove: vi.fn().mockResolvedValue({ success: true, data: { builtin: [], custom: [] } }),
     },
     ...over,
   }
@@ -360,6 +367,19 @@ describe('M4 技能面板渲染', () => {
     await flushPromises()
 
     expect(api.skills.hubInstall).not.toHaveBeenCalled()
+  })
+
+  /* ─────────────────── 【M4-AD】技能库来源管理 ─────────────────── */
+
+  it('【M4-AD】点「管理来源」→ 拉取内置/自定义源列表', async () => {
+    vi.clearAllMocks()
+    installApi()
+    const w = await mountView()
+    const btn = w.findAll('button').find((b: any) => b.text().includes('管理来源'))
+    expect(btn).toBeTruthy()
+    await btn!.trigger('click')
+    await flushPromises()
+    expect(api.skills.hubSourcesList).toHaveBeenCalled()
   })
 
   /* ─────────────────── 【M4-V】裁判门禁在界面上的表现 ─────────────────── */

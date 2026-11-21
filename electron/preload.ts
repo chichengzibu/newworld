@@ -204,6 +204,10 @@ const IpcChannels = {
   SKILLS_HUB_INSTALL: 'skills:hub:install',
   // 【M4-AC】安装前预览(列出包内文件/可执行脚本)
   SKILLS_HUB_PREVIEW: 'skills:hub:preview',
+  // 【M4-AD】自定义源管理
+  SKILLS_HUB_SOURCES_LIST: 'skills:hub:sources:list',
+  SKILLS_HUB_SOURCES_ADD: 'skills:hub:sources:add',
+  SKILLS_HUB_SOURCES_REMOVE: 'skills:hub:sources:remove',
   SKILLS_GET_UTILITY: 'skills:getUtility',
   SKILLS_RELOAD: 'skills:reload',
   SKILLS_IMPORT_FILE: 'skills:importFile',
@@ -1082,6 +1086,14 @@ const electronAPI = {
       /** 【M4-X】刷新索引(联网抓取开源技能库) */
       hubRefresh: (): Promise<IpcResponse<any>> =>
         ipcRenderer.invoke(IpcChannels.SKILLS_HUB_REFRESH),
+
+      /** 【M4-AD】自定义源:列出 / 添加 / 删除 */
+      hubSourcesList: (): Promise<IpcResponse<{ builtin: any[]; custom: any[] }>> =>
+        ipcRenderer.invoke(IpcChannels.SKILLS_HUB_SOURCES_LIST),
+      hubSourcesAdd: (payload: { name: string; repo: string; branch?: string; indexUrl: string; kind?: string }): Promise<IpcResponse<any>> =>
+        ipcRenderer.invoke(IpcChannels.SKILLS_HUB_SOURCES_ADD, payload),
+      hubSourcesRemove: (id: string): Promise<IpcResponse<any>> =>
+        ipcRenderer.invoke(IpcChannels.SKILLS_HUB_SOURCES_REMOVE, { id }),
 
       /** 【M4-AC】安装前预览:列出包内文件与可执行脚本 */
       hubPreview: (id: string): Promise<IpcResponse<{ files: string[]; executables: string[] }>> =>

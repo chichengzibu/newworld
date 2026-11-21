@@ -39,6 +39,7 @@ import { getHost } from '../platform/runtime'
 import { LogManager } from '../core/LogManager'
 import { SkillManager } from './SkillManager'
 import { SkillLoader } from './SkillLoader'
+import { ConfigStore } from '../core/ConfigStore'
 
 /** 一个开源技能源 */
 export interface SkillHubSourceDef {
@@ -156,6 +157,8 @@ export interface SkillHubQuery {
 }
 
 const INDEX_CACHE_FILE = 'skill-hub-index.json'
+/** 【M4-AD】用户自建源存这里 */
+const EXTRA_SOURCES_KEY = 'skillHub.extraSources'
 const FETCH_TIMEOUT_MS = 20_000
 /** 并发度 —— GitHub 对匿名 API 有速率限制,别把请求堆上去 */
 const CONCURRENCY = 4
@@ -168,6 +171,18 @@ export class SkillHub {
   /** 额外源(用户自建) */
   private extraSources: SkillHubSourceDef[] = []
 
+  private constructor() {
+    // 【M4-AD】用户自建的源要能跨重启保留 —— 否则每次启动都得重配一遍
+    try {
+      const saved = ConfigStore.getInstance().get(EXTRA_SOURCES_KEY)
+      if (Array.isArray(saved)) {
+        this.extraSources = saved.filter(isValidSourceDef)
+      }
+    } catch (e) {
+      this.log.warn('[SkillHub] 读取自定义源失败(按无自定义源处理)', { error: String(e) })
+    }
+  }
+
   public static getInstance(): SkillHub {
     if (!SkillHub.instance) SkillHub.instance = new SkillHub()
     return SkillHub.instance
@@ -175,11 +190,71 @@ export class SkillHub {
 
   /** 用户自建的源(追加在内置源之后) */
   public setExtraSources(sources: SkillHubSourceDef[]): void {
-    this.extraSources = sources ?? []
+    this.extraSources = (sources ?? []).filter(isValidSourceDef)
+    this.persistExtraSources()
+  }
+
+  /** 列源 —— 内置的只读、自定义的可删 */
+  public listSources(): { builtin: SkillHubSourceDef[]; custom: SkillHubSourceDef[] } {
+    return { builtin: [...BUILTIN_SKILL_HUB_SOURCES], custom: [...this.extraSources] }
+  }
+
+  /**
+   * 加一个自定义源。
+   *
+   * 【为什么要校验】源地址会被**真的去请求** —— 一个写错的 repo/URL
+   * 只会让用户看到"拉取失败"，却不知道是自己填错了。校验把错误挡在保存之前。
+   * 只收 https:不让配置文件成为任意协议的入口。
+   */
+  public addExtraSource(input: Partial<SkillHubSourceDef>): { ok: boolean; error?: string; source?: SkillHubSourceDef } {
+    const name = String(input.name ?? '').trim()
+    const repo = String(input.repo ?? '').trim()
+    const branch = String(input.branch ?? '').trim() || 'main'
+    const indexUrl = String(input.indexUrl ?? '').trim()
+    const kind = input.kind === 'anthropic-marketplace' ? 'anthropic-marketplace' : 'shelf-index'
+
+    if (!name) return { ok: false, error: '名称不能为空' }
+    if (!/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/.test(repo)) {
+      return { ok: false, error: '仓库要写成 owner/name 的形式' }
+    }
+    if (!/^https:\/\//i.test(indexUrl)) {
+      return { ok: false, error: '索引地址必须是 https:// 开头' }
+    }
+
+    // id 由名称/仓库派生，保证唯一
+    const base = `custom-${(repo.split('/')[1] || name).toLowerCase().replace(/[^a-z0-9._-]/g, '-')}`
+    let id = base
+    let n = 1
+    while (this.getSources().some(s => s.id === id)) id = `${base}-${n++}`
+
+    const source: SkillHubSourceDef = { id, name, repo, branch, indexUrl, kind }
+    this.extraSources = [...this.extraSources, source]
+    this.persistExtraSources()
+    return { ok: true, source }
+  }
+
+  /** 删自定义源（内置的删不掉 —— 不是错误，是不支持） */
+  public removeExtraSource(id: string): { ok: boolean; error?: string } {
+    if (BUILTIN_SKILL_HUB_SOURCES.some(s => s.id === id)) {
+      return { ok: false, error: '内置源不能删除' }
+    }
+    const before = this.extraSources.length
+    this.extraSources = this.extraSources.filter(s => s.id !== id)
+    if (this.extraSources.length === before) return { ok: false, error: '没有这个自定义源' }
+    this.persistExtraSources()
+    return { ok: true }
   }
 
   public getSources(): SkillHubSourceDef[] {
     return [...BUILTIN_SKILL_HUB_SOURCES, ...this.extraSources]
+  }
+
+  private persistExtraSources(): void {
+    try {
+      ConfigStore.getInstance().set(EXTRA_SOURCES_KEY, this.extraSources)
+    } catch (e) {
+      this.log.warn('[SkillHub] 保存自定义源失败', { error: String(e) })
+    }
   }
 
   /* ─────────────────────────── 索引 ─────────────────────────── */
@@ -579,6 +654,20 @@ export class SkillHub {
 }
 
 /* ─────────────────────────── 小工具 ─────────────────────────── */
+
+/** 【M4-AD】从配置里读回来的源要做一次形状校验 —— 配置文件可能被手改坏 */
+function isValidSourceDef(v: unknown): v is SkillHubSourceDef {
+  if (!v || typeof v !== 'object') return false
+  const o = v as Record<string, unknown>
+  return (
+    typeof o.id === 'string' && o.id.length > 0 &&
+    typeof o.name === 'string' && o.name.length > 0 &&
+    typeof o.repo === 'string' && o.repo.includes('/') &&
+    typeof o.branch === 'string' && o.branch.length > 0 &&
+    typeof o.indexUrl === 'string' && o.indexUrl.startsWith('https://') &&
+    (o.kind === 'shelf-index' || o.kind === 'anthropic-marketplace')
+  )
+}
 
 /** 关键词命中权重 */
 function score(e: SkillHubEntry, q: string): number {

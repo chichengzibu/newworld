@@ -2380,3 +2380,26 @@ agent 循环，或随旧管道退场一并删除。预算 16k 字是拍定的，
 
 `tests/unit/skill-hub-m4x.test.ts` +3 例（分类器：挑出可执行 / 只有文档返回空 / 空列表）；
 `tests/unit/skills-m4-panels.test.ts` +3 例（有脚本 → 确认并列出文件名 / 无脚本 → 不打扰直接装 / 取消 → 不安装）。
+
+---
+
+## M4-AD 批：技能库来源可配置
+
+> 起因：M4-X 只内置了两个源，用户想加自己的技能库只能改代码 ——
+> `setExtraSources()` 早就存在，但没有持久化、没有界面。
+
+| ID | 状态 | 摘要 |
+|---|---|---|
+| DEV-180 | 已修 | **自定义源"有接口没入口"，且不持久化** · ① `SkillHub.setExtraSources()` 只改内存，重启即丢；② 没有 IPC、没有界面，用户加自己的技能库只能改代码；③ 从配置读回来的源**不做形状校验**（配置文件被手改坏会带进坏数据）。修：源存 `ConfigStore skillHub.extraSources` 并在构造时加载（坏条目过滤掉）；新增 `addExtraSource` / `removeExtraSource` / `listSources`，**保存前校验**（名称非空 / 仓库 `owner/name` / 索引地址必须 `https://` / 类型二选一）；内置源只读、自定义源可删；IPC `skills:hub:sources:list|add|remove`；技能页「开源技能库」卡片加「管理来源」对话框（列表 + 添加表单），保存后提示"点刷新索引生效" |
+
+### 为什么校验放在主进程
+
+源地址会被**真的去请求**。写错的 repo/URL 只会让用户看到「拉取失败」，
+却不知道是自己填错了 —— 把错误挡在保存之前，比事后看日志友好得多。
+只收 `https://`：不让配置文件成为任意协议的入口。
+
+### 回归钉
+
+`tests/unit/skill-hub-m4x.test.ts` +8 例：添加 / id 去重 / 仓库格式校验 /
+https 校验 / 名称非空 / 内置不可删、自定义可删 / 落盘 / **读回时坏配置被过滤**；
+`tests/unit/skills-m4-panels.test.ts` +1 例：点「管理来源」→ 拉取源列表。

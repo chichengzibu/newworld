@@ -133,6 +133,80 @@ describe('M4-X 开源技能库 · 离线逻辑', () => {
     expect(parseFrontmatter('直接是正文')).toEqual({})
   })
 
+  describe('M4-AD 自定义源管理', () => {
+    const validInput = {
+      name: '我的团队库',
+      repo: 'acme/skills',
+      branch: 'main',
+      indexUrl: 'https://raw.githubusercontent.com/acme/skills/main/index.json',
+      kind: 'shelf-index' as const,
+    }
+
+    it('添加合法源 → 出现在自定义列表里,id 不与内置冲突', () => {
+      hub.setExtraSources([])
+      const r = hub.addExtraSource(validInput)
+      expect(r.ok).toBe(true)
+      const custom = hub.listSources().custom
+      expect(custom.map(x => x.name)).toContain('我的团队库')
+      expect(custom[0].id.startsWith('custom-')).toBe(true)
+    })
+
+    it('重复添加同名仓库 → id 自动去重', () => {
+      hub.setExtraSources([])
+      hub.addExtraSource(validInput)
+      hub.addExtraSource(validInput)
+      const ids = hub.listSources().custom.map(x => x.id)
+      expect(new Set(ids).size).toBe(2)
+    })
+
+    it('【校验】仓库要写成 owner/name', () => {
+      expect(hub.addExtraSource({ ...validInput, repo: '没有斜杠' }).ok).toBe(false)
+      expect(hub.addExtraSource({ ...validInput, repo: 'a/b/c' }).ok).toBe(false)
+    })
+
+    it('【校验】索引地址必须 https://', () => {
+      const r = hub.addExtraSource({ ...validInput, indexUrl: 'http://insecure/x.json' })
+      expect(r.ok).toBe(false)
+      expect(r.error).toContain('https')
+    })
+
+    it('【校验】名称不能为空', () => {
+      expect(hub.addExtraSource({ ...validInput, name: '   ' }).ok).toBe(false)
+    })
+
+    it('内置源不能删；自定义源可以删', () => {
+      hub.setExtraSources([])
+      expect(hub.removeExtraSource('anthropic-skills').ok).toBe(false)
+      const added = hub.addExtraSource(validInput)
+      expect(added.ok).toBe(true)
+      expect(hub.removeExtraSource(added.source!.id).ok).toBe(true)
+      expect(hub.listSources().custom).toHaveLength(0)
+    })
+
+    it('添加会落盘(重启后还在)', async () => {
+      hub.setExtraSources([])
+      hub.addExtraSource(validInput)
+      const { ConfigStore } = await import('../../electron/core/ConfigStore')
+      const saved = ConfigStore.getInstance().get('skillHub.extraSources')
+      expect(Array.isArray(saved)).toBe(true)
+      expect((saved as any[]).some(x => x.name === '我的团队库')).toBe(true)
+    })
+
+    it('读回来的坏配置会被过滤掉(配置文件可能被手改坏)', async () => {
+      const { ConfigStore } = await import('../../electron/core/ConfigStore')
+      ConfigStore.getInstance().set('skillHub.extraSources', [
+        { id: 'ok', name: 'x', repo: 'a/b', branch: 'main', indexUrl: 'https://e/x.json', kind: 'shelf-index' },
+        { id: 'bad', name: 'y' },
+        null,
+      ])
+      // 重新构造一个实例(绕开单例)来模拟"重启后加载"
+      const { SkillHub: Hub } = await import('../../electron/skill/SkillHub')
+      const fresh = new (Hub as any)()
+      expect(fresh.listSources().custom).toHaveLength(1)
+      expect(fresh.listSources().custom[0].id).toBe('ok')
+    })
+  })
+
   describe('M4-AC 安装前预览:可执行文件分类', () => {
     it('按扩展名挑出"会被执行"的文件', () => {
       const files = ['SKILL.md', 'scripts/a.py', 'scripts/b.sh', 'refs/c.md', 'run.bat', 'tool.PS1', 'data.json']

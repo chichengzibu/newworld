@@ -610,6 +610,52 @@ export class IpcServer {
     });
 
     /**
+     * 【M4-AD】自定义源管理。
+     *
+     * 【为什么要有】内置只有两个源。用户想加自己项目/社区的技能库时，
+     * 之前只能改代码。现在存配置 + 校验 + 增删，重启后仍在。
+     */
+    ipcMain.handle('skills:hub:sources:list', async () => {
+      try {
+        const { SkillHub } = await import('../skill/SkillHub');
+        return { success: true, data: SkillHub.getInstance().listSources() };
+      } catch (error) {
+        this.log.error('skills:hub:sources:list 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    ipcMain.handle('skills:hub:sources:add', async (_, payload: { name?: string; repo?: string; branch?: string; indexUrl?: string; kind?: string }) => {
+      try {
+        const { SkillHub } = await import('../skill/SkillHub');
+        const res = SkillHub.getInstance().addExtraSource({
+          name: payload?.name,
+          repo: payload?.repo,
+          branch: payload?.branch,
+          indexUrl: payload?.indexUrl,
+          kind: payload?.kind === 'anthropic-marketplace' ? 'anthropic-marketplace' : 'shelf-index',
+        });
+        if (!res.ok) return { success: false, error: res.error ?? '添加失败' };
+        return { success: true, data: SkillHub.getInstance().listSources() };
+      } catch (error) {
+        this.log.error('skills:hub:sources:add 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    ipcMain.handle('skills:hub:sources:remove', async (_, payload: { id: string }) => {
+      try {
+        const { SkillHub } = await import('../skill/SkillHub');
+        const res = SkillHub.getInstance().removeExtraSource(String(payload?.id ?? ''));
+        if (!res.ok) return { success: false, error: res.error ?? '删除失败' };
+        return { success: true, data: SkillHub.getInstance().listSources() };
+      } catch (error) {
+        this.log.error('skills:hub:sources:remove 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    /**
      * 【M4-AC】安装前预览：列出包内文件，标出可执行脚本。
      *
      * 用户授权了「装完整包」，但授权不等于闭眼装 ——
