@@ -2403,3 +2403,29 @@ agent 循环，或随旧管道退场一并删除。预算 16k 字是拍定的，
 `tests/unit/skill-hub-m4x.test.ts` +8 例：添加 / id 去重 / 仓库格式校验 /
 https 校验 / 名称非空 / 内置不可删、自定义可删 / 落盘 / **读回时坏配置被过滤**；
 `tests/unit/skills-m4-panels.test.ts` +1 例：点「管理来源」→ 拉取源列表。
+
+---
+
+## M4-AE 批：受控对照的统计口径 —— "技能有没有用"要带不确定度
+
+> 起因：M4-E 的对照只做**比大小** —— 5 个配对里多对一次差值就翻 20 个百分点，
+> 却没有任何置信区间或显著性检验。按项目惯例先对比成熟实现。
+
+| ID | 状态 | 摘要 |
+|---|---|---|
+| DEV-181 | 已修 | **5 个配对就判"有帮助"** · M4-E 的结论只看效应量（±10% 门槛），不看统计支撑。实测口径：**5 个配对全对全错，McNemar 精确 p = 0.0625 > 0.05 —— 不显著**；6 个才到 0.03125。参考 **inspect_ai**（指标带 stderr/ci、二值用 Wilson）、**promptfoo/Fullsend**（框架本身不做显著性；19/20=95% 的 CI [76.4%,99.1%] 反而不通过 90% 门槛）、**配对评测方法论**（二值 McNemar、连续配对 bootstrap）。修：新增零依赖 `TrialStatistics` —— McNemar **精确**检验、确定性种子的配对 bootstrap CI、"还差多少对"（与主检验同一套）；`TrialSummary` 增 `stats`；判定改为**效应量过门槛 且 p<0.05** 才给 positive/negative，方向过门槛但不显著记 `insufficient_data` 并写明方向、p 值、约还需多少对 |
+
+### 为什么"方向对但样本不够"不叫 neutral
+
+`neutral` = 看不出差别（建议别再试）；`insufficient_data` = 看起来有差别但数据不够（建议多跑几个任务）。
+两者对用户含义完全不同。
+
+### 参照与取舍
+
+- **取**：结论必带 CI；二值用区间；小样本用精确检验；二值 McNemar + 连续配对 bootstrap；报告效应量 + CI。
+- **不取**：不引它们的包（零新 npm 依赖红线）；不做 FDR（一次只评一个技能）；不做聚类标准误（样本无分组结构）。
+
+### 回归钉
+
+`tests/unit/trial-statistics-m4ae.test.ts`（15 例）+ `skill-trial-m4e.test.ts` 新增 4 例。
+其中最有价值的一条：**5 个配对全对全错 → verdict 必须是 insufficient_data**。

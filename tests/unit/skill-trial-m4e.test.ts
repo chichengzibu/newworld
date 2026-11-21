@@ -188,4 +188,60 @@ describe('M4-E SkillTrial — 配对对照', () => {
     expect(s.n).toBe(0)
     expect(s.verdict).toBe('insufficient_data')
   })
+
+})
+
+describe('M4-AE 对照实验的统计支撑（参照 inspect_ai / McNemar 配对检验）', () => {
+  const tasks = (n: number): TrialTask[] =>
+    Array.from({ length: n }, (_, i) => ({ id: `t${i}`, instruction: `任务${i}` }))
+
+  /** 每个配对都是"带技能成、不带技能败" */
+  const perfectExecutor: TrialExecutor = async (_task, opts) => {
+    const withSkill = opts.suppressedSkills.length === 0
+    return okRun({ producedAnswer: withSkill })
+  }
+
+  it('【关键】5 个配对全对全错 → 方向为正,但**不冒充结论**', async () => {
+    const r = await runSkillTrial('s', tasks(5), perfectExecutor)
+    expect(r.summary.delta).toBe(1)                     // 效应量看起来"完美"
+    expect(r.summary.stats.pValue).toBeCloseTo(0.0625, 4) // 但精确检验 p > 0.05
+    expect(r.summary.verdict).toBe('insufficient_data') // 所以不给 positive
+    expect(r.summary.note).toContain('不冒充结论')
+  })
+
+  it('6 个配对全对全错 → 达到精确检验门槛 → positive', async () => {
+    const r = await runSkillTrial('s', tasks(6), perfectExecutor)
+    expect(r.summary.stats.pValue).toBeLessThan(0.05)
+    expect(r.summary.verdict).toBe('positive')
+    expect(r.summary.note).toContain('McNemar p=')
+    expect(r.summary.note).toContain('95% CI')
+  })
+
+  it('统计字段齐全:不一致对数 / 两类 CI', async () => {
+    const r = await runSkillTrial('s', tasks(6), perfectExecutor)
+    const st = r.summary.stats
+    expect(st.withOnly).toBe(6)
+    expect(st.withoutOnly).toBe(0)
+    expect(st.binaryCI.low).toBeLessThanOrEqual(st.binaryCI.high)
+    expect(st.scoreCI.low).toBeLessThanOrEqual(st.scoreCI.high)
+  })
+
+  it('方向过门槛但样本不足 → 说明里给出"约还需要多少对"', async () => {
+    // 10 个配对里 3 个"带技能赢" → delta=0.3 过门槛,但 McNemar 不显著
+    let call = 0
+    const exec: TrialExecutor = async (_t, opts) => {
+      const withSkill = opts.suppressedSkills.length === 0
+      const idx = Math.floor(call / 2)
+      call++
+      const ok = withSkill || idx >= 3
+      return okRun({ producedAnswer: ok })
+    }
+    const r = await runSkillTrial('s', tasks(10), exec)
+    expect(r.summary.delta).toBeCloseTo(0.3, 6)
+    expect(r.summary.stats.pValue).toBeGreaterThan(0.05)
+    expect(r.summary.verdict).toBe('insufficient_data')
+    expect(r.summary.note).toContain('约需')
+    // 外推的总对数必须比现在多（3/10 的不一致率下,要显著需要更多配对）
+    expect(r.summary.stats.requiredPairs ?? 0).toBeGreaterThan(10)
+  })
 })

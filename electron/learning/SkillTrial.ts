@@ -31,6 +31,10 @@ import {
   type GradableRun, type GradeResult, type TaskExpectation,
 } from './TaskGrader'
 import {
+  bootstrapMeanCI, mcnemarExactP, requiredPairsForDelta, formatCI,
+  type MeanCI,
+} from './TrialStatistics'
+import {
   createJudgeSampler, JUDGE_MIN_SAMPLES,
   DEFAULT_JUDGE_SAMPLE_RATE,
   type RunJudge,
@@ -193,6 +197,28 @@ export interface TrialSummary {
    *   none           —— 全是 0
    */
   scoreDeltaDirection: 'consistent_with' | 'consistent_against' | 'mixed' | 'none';
+  /**
+   * 【M4-AE】统计口径 —— 结论带不确定度,而不是只报一个差值。
+   *
+   * 【为什么要有】"5 个配对里全对全错"的 McNemar 精确 p 也只有 0.0625,
+   * 达不到 0.05 —— 按效应量直接判"有帮助"会系统性高估。
+   * 成熟评测框架(inspect_ai / promptfoo 生态)都要求报 CI;
+   * 这里用零依赖的精密实现:二值 McNemar 精确检验 + 配对 bootstrap。
+   */
+  stats: {
+    /** 带技能赢、不带技能输的配对数 */
+    withOnly: number;
+    /** 不带技能赢、带技能输的配对数 */
+    withoutOnly: number;
+    /** McNemar 精确检验(双侧)的 p 值 */
+    pValue: number;
+    /** 二值成功率差的 95% bootstrap 区间 */
+    binaryCI: MeanCI;
+    /** 综合分差均值的 95% bootstrap 区间 */
+    scoreCI: MeanCI;
+    /** 按当前效应外推:要达到 80% 功效大约需要的配对总数(无从估计则没有) */
+    requiredPairs?: number;
+  };
   /**
    * 【M4-N】pairwise 裁判的汇总(只作参考信号,不参与 verdict)。
    * `unstable` 占比高 = 裁判在这一批上顺序敏感 → 参考价值低。
@@ -388,6 +414,26 @@ export function summarize(n: number, pairs: TrialTaskPair[]): TrialSummary {
         : pos > 0 && neg > 0 ? 'mixed'
           : 'none';
 
+  // 【M4-AE】统计口径 —— 参照 inspect_ai 的 CI 指标 / 配对评测方法论的 McNemar + 配对 bootstrap。
+  //
+  // 【为什么必须加】5 个配对里"全对全错"时 McNemar 精确 p 也只有 0.0625 > 0.05 ——
+  // 按效应量直接判"有帮助"会系统性高估。Fullsend 文档里的经典反例同理:
+  // 19/20 = 95%,其 95% CI 是 [76.4%, 99.1%],**不通过** 90% 门槛。
+  const withOnly = pairs.filter(p => p.withSkill.grade.passed && !p.withoutSkill.grade.passed).length;
+  const withoutOnly = pairs.filter(p => !p.withSkill.grade.passed && p.withoutSkill.grade.passed).length;
+  const pValue = mcnemarExactP(withOnly, withoutOnly);
+  const binaryCI = bootstrapMeanCI(pairs.map(p => p.delta));
+  const scoreCI = bootstrapMeanCI(scoreDeltas);
+  const estimatedPairs = requiredPairsForDelta(withOnly, withoutOnly, n);
+  const stats: TrialSummary['stats'] = {
+    withOnly,
+    withoutOnly,
+    pValue,
+    binaryCI,
+    scoreCI,
+    ...(Number.isFinite(estimatedPairs) && estimatedPairs > n ? { requiredPairs: estimatedPairs } : {}),
+  };
+
   if (n < TRIAL_MIN_TASKS) {
     return {
       n,
@@ -399,21 +445,33 @@ export function summarize(n: number, pairs: TrialTaskPair[]): TrialSummary {
       verdict: 'insufficient_data',
       meanScoreDelta,
       scoreDeltaDirection,
-      note: `样本不足:只有 ${n} 个配对任务(至少需要 ${TRIAL_MIN_TASKS} 个)—— 差值不可靠,不给结论`,
+      stats,
+      note: `样本不足:只有 ${n} 个配对任务(至少需要 ${TRIAL_MIN_TASKS} 个)—— 差值不可靠,不给结论;当前差值 95% CI ${formatCI(binaryCI)}`,
     };
   }
 
-  const verdict: TrialSummary['verdict'] =
+  const effect: 'positive' | 'negative' | 'neutral' =
     delta > TRIAL_DELTA_THRESHOLD ? 'positive'
       : delta < -TRIAL_DELTA_THRESHOLD ? 'negative'
         : 'neutral';
+  // 【M4-AE】方向过门槛、但统计不显著 → **不冒充结论**。
+  // 记 insufficient_data(与"样本不足"同一含义:数据还不足以支撑结论),
+  // 并在说明里给出方向、p 值、以及还差多少对。
+  const significant = pValue < 0.05;
+  const verdict: TrialSummary['verdict'] =
+    effect === 'neutral' ? 'neutral' : significant ? effect : 'insufficient_data';
 
   const verdictText = {
     positive: '有帮助:带该技能的成功率明显更高',
     negative: '有害:带该技能的成功率明显更低',
     neutral: '看不出差别:两组成功率接近',
-    insufficient_data: '样本不足',
+    insufficient_data: '样本不足以支撑结论',
   }[verdict];
+
+  const statsNote = verdict === 'insufficient_data' && effect !== 'neutral'
+    ? `;方向为${delta > 0 ? '正向' : '负向'}(差值 ${(delta * 100).toFixed(0)}%),但 McNemar p=${pValue.toFixed(3)} ≥ 0.05 —— 不冒充结论`
+      + (stats.requiredPairs ? `;按当前效应估计约需 ${stats.requiredPairs} 对配对(现有 ${n} 对)` : '')
+    : `;McNemar p=${pValue.toFixed(3)},差值 95% CI ${formatCI(binaryCI)}`;
 
   // 【M4-N】二元结论是"看不出差别"时,若综合分差方向一致且够大,补一句说明 ——
   // 否则"看不出差别"会被读成"两者完全一样"(实测:两次都没过线,但一次只错 1 个工具、
@@ -434,6 +492,7 @@ export function summarize(n: number, pairs: TrialTaskPair[]): TrialSummary {
     verdict,
     meanScoreDelta,
     scoreDeltaDirection,
-    note: `${verdictText}(差值 ${(delta * 100).toFixed(0)}%,判定门槛 ±${TRIAL_DELTA_THRESHOLD * 100}%)${scoreNote}`,
+    stats,
+    note: `${verdictText}(差值 ${(delta * 100).toFixed(0)}%,判定门槛 ±${TRIAL_DELTA_THRESHOLD * 100}%${statsNote})${scoreNote}`,
   };
 }
