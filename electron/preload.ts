@@ -202,6 +202,8 @@ const IpcChannels = {
   SKILLS_HUB_RECOMMEND: 'skills:hub:recommend',
   SKILLS_HUB_REFRESH: 'skills:hub:refresh',
   SKILLS_HUB_INSTALL: 'skills:hub:install',
+  // 【M4-AC】安装前预览(列出包内文件/可执行脚本)
+  SKILLS_HUB_PREVIEW: 'skills:hub:preview',
   SKILLS_GET_UTILITY: 'skills:getUtility',
   SKILLS_RELOAD: 'skills:reload',
   SKILLS_IMPORT_FILE: 'skills:importFile',
@@ -1080,6 +1082,10 @@ const electronAPI = {
       /** 【M4-X】刷新索引(联网抓取开源技能库) */
       hubRefresh: (): Promise<IpcResponse<any>> =>
         ipcRenderer.invoke(IpcChannels.SKILLS_HUB_REFRESH),
+
+      /** 【M4-AC】安装前预览:列出包内文件与可执行脚本 */
+      hubPreview: (id: string): Promise<IpcResponse<{ files: string[]; executables: string[] }>> =>
+        ipcRenderer.invoke(IpcChannels.SKILLS_HUB_PREVIEW, { id }),
 
       /** 【M4-X】下载并安装一个技能 */
       hubInstall: (id: string): Promise<IpcResponse<any>> =>

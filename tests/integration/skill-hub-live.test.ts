@@ -95,6 +95,16 @@ describe('M4-X 开源技能库实跑', () => {
     const target = index.entries.find(e => e.installKind === 'dir' && /pdf/i.test(e.name + e.description))
       ?? index.entries.find(e => e.installKind === 'dir')
     expect(target, '索引里没有目录型条目').toBeTruthy()
+    // 【M4-AC】安装前预览 —— 真的列得出包内文件吗
+    const pv = await hub.previewInstall(target!)
+    expect(pv.ok, `预览失败: ${pv.error}`).toBe(true)
+    console.log(`  预览: ${pv.files?.length ?? 0} 个文件，其中可执行 ${pv.executables?.length ?? 0} 个`)
+    if ((pv.executables?.length ?? 0) > 0) {
+      console.log(`    可执行: ${(pv.executables ?? []).slice(0, 5).join(', ')}${(pv.executables?.length ?? 0) > 5 ? ' …' : ''}`)
+    }
+    expect(pv.files?.length ?? 0).toBeGreaterThan(0)
+    expect((pv.files ?? []).some(f => /SKILL\.md$/i.test(f))).toBe(true)
+
     console.log(`  安装 ${target!.id} (${target!.slug}) …`)
     const res = await hub.install(target!)
     console.log(`  → ${res.ok ? '✅' : '❌'} ${res.skillId ?? res.error}`)

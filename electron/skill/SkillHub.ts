@@ -309,6 +309,46 @@ export class SkillHub {
       .slice(0, opts.limit ?? 12)
   }
 
+  /* ─────────────────────────── 安装前预览 ─────────────────────────── */
+
+  /**
+   * 【M4-AC】列出这个包里**会进来的文件**，并标出其中哪些是**可执行脚本**。
+   *
+   * 【为什么要有】
+   * 用户 2026-11-19 授权「装完整包（含 scripts）」。授权不等于"闭着眼睛装"——
+   * 装之前让他看见"这个包会往你的技能目录里放 3 个 .py"，成本几乎为零，
+   * 却能让人对"agent 接下来可能会跑什么"有数。
+   *
+   * 【不做的】不在这一步下载正文、不执行任何东西、不做内容安全判定 ——
+   * 只列文件名。判定"这个脚本安不安全"不是本模块能替用户做的。
+   */
+  public async previewInstall(entry: SkillHubEntry): Promise<{
+    ok: boolean
+    files?: string[]
+    executables?: string[]
+    error?: string
+  }> {
+    try {
+      const source = this.getSources().find(s => s.id === entry.sourceId)
+      if (!source) return { ok: false, error: `未知来源:${entry.sourceId}` }
+
+      if (entry.installKind === 'file') {
+        // 单文件技能只有一份 SKILL.md —— 没有脚本
+        return { ok: true, files: [path.basename(entry.sourcePath)], executables: [] }
+      }
+
+      const fullPaths = await this.listDirFiles(source, entry.sourcePath)
+      const prefix = entry.sourcePath.replace(/\/+$/, '') + '/'
+      const rel = fullPaths
+        .map(p => (p.startsWith(prefix) ? p.slice(prefix.length) : path.basename(p)))
+        .filter(Boolean)
+        .sort()
+      return { ok: true, files: rel, executables: classifyExecutables(rel) }
+    } catch (e) {
+      return { ok: false, error: e instanceof Error ? e.message : String(e) }
+    }
+  }
+
   /* ─────────────────────────── 安装 ─────────────────────────── */
 
   /**
@@ -575,6 +615,22 @@ export function parseFrontmatter(text: string): Record<string, string> {
     out[mm[1]] = mm[2].trim().replace(/^['"]|['"]$/g, '')
   }
   return out
+}
+
+/**
+ * 【M4-AC】从文件列表里挑出"可能会被执行"的那些。
+ *
+ * 【口径 —— 按扩展名，诚实说明它不完美】
+ * agent 会通过 Bash 跑技能目录里的脚本（仍走白名单 + 确认门）。
+ * 这里用扩展名判定，**不做内容分析**：
+ *   - 认作可执行：.py .sh .bash .ps1 .bat .cmd .js .mjs .cjs .rb .pl .exe
+ *   - 不认作可执行：.md .txt .json .yaml .png …
+ * 局限：`.sh` 改名成 `.txt` 就躲过去了。所以这是**提示**，不是**保证** ——
+ * 真正的执行仍然只有经过 Bash 工具、且通过白名单与确认门才发生。
+ */
+export function classifyExecutables(files: string[]): string[] {
+  const EXEC_EXT = /\.(py|sh|bash|zsh|ps1|bat|cmd|js|mjs|cjs|rb|pl|php|exe|dll|so|dylib)$/i
+  return files.filter(f => EXEC_EXT.test(f))
 }
 
 /** 标签可能是数组、可能是逗号串 */

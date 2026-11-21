@@ -92,6 +92,8 @@ function installApi(over: Record<string, any> = {}) {
       }),
       hubRefresh: vi.fn().mockResolvedValue({ success: true, data: { fetchedAt: Date.now(), count: 34, sources: [] } }),
       hubInstall: vi.fn().mockResolvedValue({ success: true, data: { skillId: 'pdf', skills: [] } }),
+      // 【M4-AC】安装前预览 —— 默认"没有可执行脚本"
+      hubPreview: vi.fn().mockResolvedValue({ success: true, data: { files: ['SKILL.md'], executables: [] } }),
     },
     ...over,
   }
@@ -304,6 +306,60 @@ describe('M4 技能面板渲染', () => {
     expect(text).toContain('不稳定')
     // 汇总说明里要点明裁判顺序敏感
     expect(text).toContain('顺序敏感')
+  })
+
+  /* ─────────────────── 【M4-AC】安装前预览可执行脚本 ─────────────────── */
+
+  it('【M4-AC】包里有可执行脚本 → 安装前弹确认,并列出文件名', async () => {
+    vi.clearAllMocks()
+    installApi()
+    api.skills.hubPreview.mockResolvedValue({
+      success: true,
+      data: { files: ['SKILL.md', 'scripts/run.py'], executables: ['scripts/run.py'] },
+    })
+    const w = await mountView()
+    const btn = w.findAll('button').find((b: any) => b.text().includes('下载安装'))
+    await btn!.trigger('click')
+    await flushPromises()
+
+    const { ElMessageBox } = await import('element-plus/es/components/message-box/index')
+    const calls = (ElMessageBox.confirm as any).mock.calls
+    expect(calls.length).toBe(1)
+    // 必须把文件名摆出来 —— 只说"有脚本"等于没说
+    expect(String(calls[0][0])).toContain('scripts/run.py')
+    // 确认之后才真的装
+    expect(api.skills.hubInstall).toHaveBeenCalledWith('anthropic-skills:pdf')
+  })
+
+  it('【M4-AC】没有可执行脚本 → 不打扰用户,直接安装', async () => {
+    vi.clearAllMocks()
+    installApi()
+    const w = await mountView()
+    const btn = w.findAll('button').find((b: any) => b.text().includes('下载安装'))
+    await btn!.trigger('click')
+    await flushPromises()
+
+    const { ElMessageBox } = await import('element-plus/es/components/message-box/index')
+    expect((ElMessageBox.confirm as any).mock.calls.length).toBe(0)
+    expect(api.skills.hubInstall).toHaveBeenCalled()
+  })
+
+  it('【M4-AC】用户取消 → 不安装', async () => {
+    vi.clearAllMocks()
+    installApi()
+    api.skills.hubPreview.mockResolvedValue({
+      success: true,
+      data: { files: ['SKILL.md', 'x.sh'], executables: ['x.sh'] },
+    })
+    const { ElMessageBox } = await import('element-plus/es/components/message-box/index')
+    ;(ElMessageBox.confirm as any).mockRejectedValueOnce(new Error('cancel'))
+
+    const w = await mountView()
+    const btn = w.findAll('button').find((b: any) => b.text().includes('下载安装'))
+    await btn!.trigger('click')
+    await flushPromises()
+
+    expect(api.skills.hubInstall).not.toHaveBeenCalled()
   })
 
   /* ─────────────────── 【M4-V】裁判门禁在界面上的表现 ─────────────────── */

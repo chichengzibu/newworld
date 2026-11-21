@@ -35,7 +35,7 @@ vi.mock('electron-log', () => ({
   },
 }))
 
-import { SkillHub, parseFrontmatter, type SkillHubEntry, type SkillHubIndex } from '../../electron/skill/SkillHub'
+import { SkillHub, parseFrontmatter, classifyExecutables, type SkillHubEntry, type SkillHubIndex } from '../../electron/skill/SkillHub'
 
 const entry = (over: Partial<SkillHubEntry> = {}): SkillHubEntry => ({
   id: 'src:slug',
@@ -131,5 +131,20 @@ describe('M4-X 开源技能库 · 离线逻辑', () => {
 
   it('frontmatter:没有 frontmatter 时返回空(不抛)', () => {
     expect(parseFrontmatter('直接是正文')).toEqual({})
+  })
+
+  describe('M4-AC 安装前预览:可执行文件分类', () => {
+    it('按扩展名挑出"会被执行"的文件', () => {
+      const files = ['SKILL.md', 'scripts/a.py', 'scripts/b.sh', 'refs/c.md', 'run.bat', 'tool.PS1', 'data.json']
+      expect(classifyExecutables(files)).toEqual(['scripts/a.py', 'scripts/b.sh', 'run.bat', 'tool.PS1'])
+    })
+
+    it('只有文档时返回空 —— 不该吓唬用户', () => {
+      expect(classifyExecutables(['SKILL.md', 'REFERENCE.md', 'logo.png'])).toEqual([])
+    })
+
+    it('空列表返回空', () => {
+      expect(classifyExecutables([])).toEqual([])
+    })
   })
 })

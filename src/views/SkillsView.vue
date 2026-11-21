@@ -912,6 +912,39 @@ const refreshHubIndex = async (): Promise<void> => {
 
 /** 下载并安装一个技能 */
 const installHubSkill = async (id: string): Promise<void> => {
+  // 【M4-AC】装之前先看一眼包里会进来什么。
+  // 用户授权了「装完整包（含 scripts）」，但授权不等于闭眼装 ——
+  // 列出可执行脚本几乎零成本，却能让人对"agent 接下来可能跑什么"有数。
+  let preview: any = null;
+  try {
+    preview = await (window as any).electronAPI?.skills?.hubPreview?.(id);
+  } catch {
+    preview = null;
+  }
+  try {
+    if (!preview?.success) {
+      await ElMessageBox.confirm(
+        '无法列出包内文件（可能是网络问题）。仍要安装吗？',
+        '安装前预览失败',
+        { type: 'warning', confirmButtonText: '仍然安装', cancelButtonText: '取消' },
+      );
+    } else {
+      const execs: string[] = preview.data?.executables ?? [];
+      if (execs.length > 0) {
+        const listText = execs.slice(0, 10).map(f => `· ${f}`).join('、')
+        const tail = execs.length > 10 ? `，等共 ${execs.length} 个` : ''
+        await ElMessageBox.confirm(
+          `这个技能包含 ${execs.length} 个可执行脚本：${listText}${tail}。` +
+            '它们只会在 agent 通过 Bash 调用时运行，且仍需通过白名单与确认。仍要安装吗？',
+          '安装前确认',
+          { type: 'warning', confirmButtonText: '仍然安装', cancelButtonText: '取消' },
+        );
+      }
+    }
+  } catch {
+    return; // 用户取消
+  }
+
   hubInstalling.value = id;
   try {
     const res = await (window as any).electronAPI?.skills?.hubInstall?.(id);

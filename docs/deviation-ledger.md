@@ -2348,3 +2348,35 @@ agent 循环，或随旧管道退场一并删除。预算 16k 字是拍定的，
   从开源库装的技能，值得按上游描述补全 `when_to_use` 的同义说法（OCR/扫描件等）。
 - 主题重叠时，AI 选哪个都可能合理；那时更该关心"两个都加载会不会冲突"。
 - 不要指望"换更大的模型"解决路由 —— 27b 反而更差。
+
+---
+
+## M4-AC 批：安装前列出包内可执行文件
+
+> 起因：用户 2026-11-19 授权「装完整包（含 scripts）」。**授权不等于闭眼装** ——
+> 装之前让人看见"会进来哪些可执行文件"，成本几乎为零。
+
+| ID | 状态 | 摘要 |
+|---|---|---|
+| DEV-179 | 已修 | **从开源库装技能是"盲装"——包里有什么脚本，装完才知道** · 用户授权了含 scripts 的完整包，但界面上只有「下载安装」一个按钮，**装之前看不到包内文件**。实测 `anthropic-skills:docx` 一个包里有 **61 个文件、其中 15 个可执行脚本**（`scripts/accept_changes.py` / `comment.py` / `merge_runs.py` / `office/helpers/__init__.py` …）。修：`SkillHub.previewInstall()` 用 GitHub tree API 列出包内文件并**按扩展名标出可执行脚本**；新增 IPC `skills:hub:preview`；界面在安装前弹确认并**把文件名摆出来**；没有脚本则**不打扰**直接装；预览失败（网络）也明确告知并二次确认；用户取消则不装 |
+
+### 口径与局限（诚实说明）
+
+- **按扩展名判定**，不做内容分析：`.py .sh .bash .zsh .ps1 .bat .cmd .js .mjs .cjs .rb .pl .php .exe .dll .so .dylib`
+- **局限**：`x.sh` 改名成 `x.txt` 就躲过去了。所以这是**提示**，不是**保证** ——
+  真正的执行仍然只有经过 Bash 工具、通过白名单与确认门才会发生。
+- 这一步**不下载正文、不执行任何东西、不做内容安全判定**。判定"这个脚本安不安全"不是模块能替用户做的。
+
+### 实跑
+
+`tests/integration/skill-hub-live.test.ts`（接真实 GitHub）：
+```
+预览: 61 个文件，其中可执行 15 个
+  可执行: scripts/__init__.py, scripts/accept_changes.py, scripts/comment.py, scripts/merge_runs.py, scripts/office/helpers/__init__.py …
+安装 anthropic-skills:docx → ✅
+```
+
+### 回归钉
+
+`tests/unit/skill-hub-m4x.test.ts` +3 例（分类器：挑出可执行 / 只有文档返回空 / 空列表）；
+`tests/unit/skills-m4-panels.test.ts` +3 例（有脚本 → 确认并列出文件名 / 无脚本 → 不打扰直接装 / 取消 → 不安装）。

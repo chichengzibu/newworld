@@ -609,6 +609,27 @@ export class IpcServer {
       }
     });
 
+    /**
+     * 【M4-AC】安装前预览：列出包内文件，标出可执行脚本。
+     *
+     * 用户授权了「装完整包」，但授权不等于闭眼装 ——
+     * 装之前让他看见"会进来哪些 .py/.sh"，成本几乎为零。
+     */
+    ipcMain.handle('skills:hub:preview', async (_, payload: { id: string }) => {
+      try {
+        const { SkillHub } = await import('../skill/SkillHub');
+        const hub = SkillHub.getInstance();
+        const entry = hub.getCached()?.entries.find(e => e.id === payload?.id);
+        if (!entry) return { success: false, error: '索引里找不到该技能(请先刷新索引)' };
+        const res = await hub.previewInstall(entry);
+        if (!res.ok) return { success: false, error: res.error ?? '预览失败' };
+        return { success: true, data: { files: res.files ?? [], executables: res.executables ?? [] } };
+      } catch (error) {
+        this.log.error('skills:hub:preview 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
     ipcMain.handle('skills:hub:install', async (_, payload: { id: string }) => {
       try {
         const { SkillHub } = await import('../skill/SkillHub');
