@@ -421,6 +421,14 @@
           />
           <div class="dir-empty">建议至少 5 个任务 —— 少于 5 个配对任务时，差值不可靠，系统会明确说「样本不足」而不是给结论。</div>
         </el-form-item>
+        <!-- 【M4-AF】重复次数 —— 单次运行自带随机性，重复 + 归约能压掉噪声。
+             成本按次数线性翻倍，所以默认 1，并在确认框里算进总调用数。 -->
+        <el-form-item label="重复次数">
+          <el-input-number v-model="trialRepeats" :min="1" :max="5" />
+          <span class="dir-empty" style="margin-left: 8px;">
+            {{ '每个变体跑几遍（二值取多数票、分数取均值）；成本按次数翻倍' }}
+          </span>
+        </el-form-item>
         <el-form-item>
           <el-button type="primary" :loading="trialRunning" @click="runTrial">开始验证</el-button>
         </el-form-item>
@@ -842,6 +850,7 @@ const loadAcceptance = async (): Promise<void> => {
 // ══════════ 【M4-E】技能验证(受控对照) ══════════
 const trialSkillId = ref('');
 const trialTasksText = ref('');
+const trialRepeats = ref(1);
 const trialRunning = ref(false);
 const trialResult = ref<any>(null);
 // 【M4-V】是否请求 pairwise 裁判对照 —— 默认关(D7:裁判层保持默认关闭)
@@ -885,7 +894,7 @@ const runTrial = async (): Promise<void> => {
   // 成本提示 —— 每个任务跑两遍,token 翻倍
   try {
     await ElMessageBox.confirm(
-      `将跑 ${tasks.length} 个任务，每个任务两遍（带技能 / 禁技能），共 ${tasks.length * 2} 次模型调用。\n\ntoken 成本大约翻倍。`,
+      `将跑 ${tasks.length} 个任务 × 2 个变体（带技能 / 禁技能）${trialRepeats.value > 1 ? ` × ${trialRepeats.value} 遍` : ''}，共 ${tasks.length * 2 * trialRepeats.value} 次模型调用。\n\ntoken 成本大约翻倍。`,
       '开始技能验证？',
       { confirmButtonText: '开始', cancelButtonText: '取消', type: 'warning' },
     );
@@ -901,6 +910,8 @@ const runTrial = async (): Promise<void> => {
       tasks,
       // 【M4-V】裁判对照:默认不请求;请求了也要过主进程的校准门禁
       enableJudge: trialEnableJudge.value,
+      // 【M4-AF】重复次数(主进程还会封顶到 5)
+      repeats: trialRepeats.value,
     });
     if (res?.success) {
       trialResult.value = res.data;

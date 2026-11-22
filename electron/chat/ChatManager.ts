@@ -1468,13 +1468,30 @@ export class ChatManager {
   public async runSkillUtilityTrial(
     skillId: string,
     tasks: TrialTask[],
-    opts: { enableJudge?: boolean } = {},
+    opts: { enableJudge?: boolean; repeats?: number } = {},
   ): Promise<TrialResult> {
-    const conversationId = this.config.createConversation({ title: `技能验证:${skillId}` }).id;
-    const executor: TrialExecutor = async (task, o) =>
-      this.runTrialVariant(conversationId, task.instruction, o.suppressedSkills);
+    /**
+     * 【M4-AF】每次都开一个**新会话**。
+     *
+     * 之前整轮试验共用一个会话 —— 同任务的两个变体、以及重复跑的次数，
+     * 会把上一轮的对话历史带进下一轮。模型能看到"刚才做过一遍"，
+     * 结果就不再是独立样本（单次试验时看不出来，repeats>1 时直接毁掉重复的意义）。
+     */
+    const executor: TrialExecutor = async (task, o) => {
+      const conv = this.config.createConversation({ title: `技能验证:${skillId}` }).id;
+      try {
+        return await this.runTrialVariant(conv, task.instruction, o.suppressedSkills);
+      } finally {
+        try {
+          this.config.deleteConversation(conv);
+        } catch { /* 清理失败不影响结果 */ }
+      }
+    };
 
     const trialOpts: TrialOptions = {};
+    // 【M4-AF】重复次数封顶 5 —— 成本是线性翻倍的，不能让一次误输入把额度烧光
+    const repeats = Math.floor(Number(opts.repeats ?? 1));
+    if (Number.isFinite(repeats) && repeats > 1) trialOpts.repeats = Math.min(5, repeats);
     if (opts.enableJudge) {
       const judgeCfg = this.resolveJudgeConfig();
       if (judgeCfg) {

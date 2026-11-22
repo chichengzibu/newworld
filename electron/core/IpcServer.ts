@@ -524,7 +524,7 @@ export class IpcServer {
      * 【成本必须先告知用户】每个任务跑两遍(带/不带技能)→ token 翻倍。
      * 界面在调用前会先说明。
      */
-    ipcMain.handle('skills:runUtilityTrial', async (_, payload: { skillId: string; tasks: Array<{ id: string; instruction: string; expectation?: any }>; enableJudge?: boolean }) => {
+    ipcMain.handle('skills:runUtilityTrial', async (_, payload: { skillId: string; tasks: Array<{ id: string; instruction: string; expectation?: any }>; enableJudge?: boolean; repeats?: number }) => {
       try {
         const skillId = String(payload?.skillId ?? '').trim();
         if (!skillId) return { success: false, error: '技能 id 不能为空' };
@@ -534,8 +534,12 @@ export class IpcServer {
         const result = await ChatManager.getInstance().runSkillUtilityTrial(
           skillId,
           tasks as any,
-          // 【M4-V】裁判对照默认关(D7);用户显式开了才请求,且仍要过校准门禁
-          { enableJudge: payload?.enableJudge === true },
+          {
+            // 【M4-V】裁判对照默认关(D7);用户显式开了才请求,且仍要过校准门禁
+            enableJudge: payload?.enableJudge === true,
+            // 【M4-AF】重复次数(默认 1;主进程还会封顶到 5)
+            repeats: Number(payload?.repeats) || 1,
+          },
         );
         return { success: true, data: result };
       } catch (error) {

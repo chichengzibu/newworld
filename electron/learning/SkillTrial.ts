@@ -97,6 +97,22 @@ export interface TrialOptions {
    * 换回来的结论既不能用、又会污染说明。宁可不跑,并说清楚。
    */
   pairwiseGate?: JudgeGate;
+  /**
+   * 【M4-AF】每个变体跑几遍（默认 1）。
+   *
+   * 【为什么】单次运行自带随机性：同样的任务、同样的技能，一次成功一次失败并不罕见。
+   * 只跑一遍就把"这一次"当成"这个技能的效果"，会把噪声当信号。
+   * 参照 inspect_ai 的 **epochs**：同一任务重复采样，再归约（它们默认用 mean）。
+   *
+   * 【口径】
+   * - 二值：**多数票**（`passed × 2 > repeats`；平票按"不通过"—— 保守）
+   * - 连续分：取**均值**
+   * - 点式裁判只在**第一遍**上跑（裁判是一次模型调用，不能跟着重复数一起翻倍）
+   * - 某次执行抛错 → 该次不计入；全抛错 → 该变体故障（与原来一致）
+   *
+   * 【成本】模型调用数 × repeats —— 界面上必须先告知。
+   */
+  repeats?: number;
 }
 
 /**
@@ -167,6 +183,8 @@ export interface TrialTaskPair {
 export interface TrialSummary {
   /** 参与判定的任务数 */
   n: number;
+  /** 【M4-AF】每个变体重复了几遍（1 = 未重复） */
+  repeats: number;
   /** 带技能的成功能次数 */
   withSkillSuccesses: number;
   /** 不带技能的成功能次数 */
@@ -294,26 +312,54 @@ export async function runSkillTrial(
       : '没有提供放行凭据 —— 裁判未通过校准门禁(D7:裁判层保持默认关闭)')
     : '';
 
-  for (const [taskIndex, task] of tasks.entries()) {
-    let withRun: GradableRun | null = null;
-    let withoutRun: GradableRun | null = null;
-    try {
-      withRun = await executor(task, { suppressedSkills: [] });
-    } catch { /* 该变体故障 → 不计入 */ }
-    try {
-      withoutRun = await executor(task, { suppressedSkills: [skillId] });
-    } catch { /* 同上 */ }
-    if (!withRun || !withoutRun) continue;
+  // 【M4-AF】重复运行 + 归约（参照 inspect_ai 的 epochs）
+  const repeats = Math.max(1, Math.floor(opts.repeats ?? 1));
 
-    // 【M4-F】裁判按采样率跑(默认 5%)—— 裁判是一次模型调用,不能全量跑
+  for (const [taskIndex, task] of tasks.entries()) {
     const useJudge = !!opts.judge && sampler(taskIndex);
-    const withGrade = useJudge
-      ? await gradeRunWithJudge(withRun, task.expectation ?? {}, opts.judge)
-      : gradeRun(withRun, task.expectation ?? {});
-    const withoutGrade = useJudge
-      ? await gradeRunWithJudge(withoutRun, task.expectation ?? {}, opts.judge)
-      : gradeRun(withoutRun, task.expectation ?? {});
+
+    /**
+     * 跑一个变体 repeats 遍，再归约。
+     *
+     * 【为什么归约】单次运行自带随机性 —— 同一任务一次成功一次失败很常见，
+     * 拿"这一次"当"这个技能的效果"就是把噪声当信号。
+     * 【口径】二值取多数票（平票按不通过，保守）；连续分取均值；
+     * 点式裁判只在第一遍上跑（裁判是一次模型调用，不能跟着 repeats 翻倍）。
+     */
+    const runVariant = async (suppressed: string[]): Promise<{ run: GradableRun; grade: GradeResult } | null> => {
+      const runs: GradableRun[] = [];
+      for (let i = 0; i < repeats; i++) {
+        try {
+          runs.push(await executor(task, { suppressedSkills: suppressed }));
+        } catch { /* 该次故障 → 跳过（实验故障 ≠ 任务失败） */ }
+      }
+      if (runs.length === 0) return null;
+
+      const first = runs[0];
+      const grades: GradeResult[] = [
+        useJudge
+          ? await gradeRunWithJudge(first, task.expectation ?? {}, opts.judge)
+          : gradeRun(first, task.expectation ?? {}),
+      ];
+      for (let i = 1; i < runs.length; i++) {
+        grades.push(gradeRun(runs[i], task.expectation ?? {}));
+      }
+
+      const passedCount = grades.filter(g => g.passed).length;
+      const passed = grades.length === 1 ? grades[0].passed : passedCount * 2 > grades.length;
+      const score = grades.reduce((a, g) => a + g.score, 0) / grades.length;
+      return { run: first, grade: { ...grades[0], passed, score } };
+    };
+
+    const withVariant = await runVariant([]);
+    const withoutVariant = await runVariant([skillId]);
+    if (!withVariant || !withoutVariant) continue;
     if (useJudge) judgeRuns++;
+
+    const withRun = withVariant.run;
+    const withGrade = withVariant.grade;
+    const withoutRun = withoutVariant.run;
+    const withoutGrade = withoutVariant.grade;
 
     const pair: TrialTaskPair = {
       task,
@@ -348,7 +394,7 @@ export async function runSkillTrial(
     pairs.push(pair);
   }
 
-  const summary = summarize(pairs.length, pairs);
+  const summary = summarize(pairs.length, pairs, repeats);
   // 【M4-V】裁判对照的状态 —— 请求过就必须有说法,不允许静默
   if (pairwiseRequested) {
     summary.judgeStatus = pairwiseAllowed
@@ -396,7 +442,7 @@ export async function runSkillTrial(
 /**
  * 汇总 —— 纯函数,便于单测。
  */
-export function summarize(n: number, pairs: TrialTaskPair[]): TrialSummary {
+export function summarize(n: number, pairs: TrialTaskPair[], repeats = 1): TrialSummary {
   const withSkillSuccesses = pairs.filter(p => p.withSkill.grade.passed).length;
   const withoutSkillSuccesses = pairs.filter(p => p.withoutSkill.grade.passed).length;
   const withSkillRate = n > 0 ? withSkillSuccesses / n : 0;
@@ -437,6 +483,7 @@ export function summarize(n: number, pairs: TrialTaskPair[]): TrialSummary {
   if (n < TRIAL_MIN_TASKS) {
     return {
       n,
+      repeats,
       withSkillSuccesses,
       withoutSkillSuccesses,
       withSkillRate,
@@ -484,6 +531,7 @@ export function summarize(n: number, pairs: TrialTaskPair[]): TrialSummary {
 
   return {
     n,
+    repeats,
     withSkillSuccesses,
     withoutSkillSuccesses,
     withSkillRate,

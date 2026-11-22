@@ -1069,7 +1069,7 @@ const electronAPI = {
        * 【M4-E】跑一次技能效用对照实验(每个任务跑两遍:带/不带技能)。
        * **token 成本翻倍** —— 调用前须向用户说明。
        */
-      runUtilityTrial: (payload: { skillId: string; tasks: Array<{ id: string; instruction: string; expectation?: any }>; enableJudge?: boolean }): Promise<IpcResponse<any>> =>
+      runUtilityTrial: (payload: { skillId: string; tasks: Array<{ id: string; instruction: string; expectation?: any }>; enableJudge?: boolean; repeats?: number }): Promise<IpcResponse<any>> =>
         ipcRenderer.invoke(IpcChannels.SKILLS_RUN_UTILITY_TRIAL, payload),
 
       /**
