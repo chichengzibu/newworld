@@ -165,6 +165,72 @@ export class SkillManager {
     return [...new Set(out)];
   }
 
+  /**
+   * 【M4-AH】把旧位置（`<userData>/skills`）里的技能迁到新位置。
+   *
+   * 【为什么必须有】M4-X 把技能目录从 `<userData>/skills` 改到了「应用自身目录的 skills」。
+   * 只改路径不迁移 = **升级上来的用户原有技能全部"消失"**（旧目录还在，但没人读）。
+   * 测试发现不了：测试环境里 appPath 与 userData 是同一个目录，新旧路径恰好重合。
+   *
+   * 【口径 —— 三条，都是为了不伤数据】
+   * ① **复制，不移动**：旧目录原样保留。迁移出错时用户还能从原处找回。
+   * ② **只补缺，不覆盖**：目标里已有同名技能就跳过（用户在新位置改过的版本优先）。
+   * ③ **幂等**：重复调用不会重复复制，也不会报错。
+   *
+   * 【跳过的情况】新旧目录相同（fallback 到 userData 时）；两者互相包含（避免递归自复制）。
+   */
+  public static migrateLegacySkillsDir(
+    targetDir: string = SkillManager.getSkillsDir(),
+  ): { migrated: string[]; skippedExisting: string[]; error?: string } {
+    const result: { migrated: string[]; skippedExisting: string[]; error?: string } = {
+      migrated: [],
+      skippedExisting: [],
+    };
+    try {
+      const legacyDir = path.join(getHost().getPath('userData'), 'skills');
+      const target = path.resolve(targetDir);
+      const legacy = path.resolve(legacyDir);
+
+      // 同一目录(fallback 场景)或互相包含 → 不动
+      const norm = (p: string) => p.toLowerCase();
+      const isUnder = (child: string, parent: string) =>
+        norm(child) === norm(parent) || norm(child).startsWith(norm(parent) + path.sep);
+      if (isUnder(target, legacy) || isUnder(legacy, target)) return result;
+      if (!fs.existsSync(legacyDir)) return result;
+
+      let entries: fs.Dirent[] = [];
+      try {
+        entries = fs.readdirSync(legacyDir, { withFileTypes: true });
+      } catch (e) {
+        result.error = String(e);
+        return result;
+      }
+
+      for (const e of entries) {
+        if (!e.isDirectory()) continue;
+        const src = path.join(legacyDir, e.name);
+        // 只迁移看起来像技能的目录（含 SKILL.md / skill.md），别把杂物搬过去
+        const hasDoc = ['SKILL.md', 'skill.md'].some(f => fs.existsSync(path.join(src, f)));
+        if (!hasDoc) continue;
+        const dest = path.join(target, e.name);
+        if (fs.existsSync(dest)) {
+          result.skippedExisting.push(e.name);
+          continue;
+        }
+        try {
+          // 复制而不是移动 —— 原目录保留，便于用户回退
+          fs.cpSync(src, dest, { recursive: true });
+          result.migrated.push(e.name);
+        } catch (err) {
+          result.error = `${e.name}: ${String(err)}`;
+        }
+      }
+    } catch (e) {
+      result.error = String(e);
+    }
+    return result;
+  }
+
   /** 建目录 —— 失败返回 false(不抛:不可写是**正常**情形,不是异常) */
   private static ensureDir(dir: string): boolean {
     try {

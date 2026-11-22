@@ -99,6 +99,19 @@ export class SkillLoader {
 
     // 确保目录存在
     this.ensureSkillsDir();
+    // 【M4-AH】把旧位置(userData/skills)里的技能迁到当前目录 —— 复制、只补缺、不删原目录。
+    // 不做这一步，从旧版本升级上来的用户会看到"技能全没了"（旧目录还在，但没人再读它）。
+    try {
+      const mig = SkillManager.migrateLegacySkillsDir(this.skillsDir);
+      if (mig.migrated.length > 0) {
+        this.log.info('[SkillLoader] 已从旧技能目录迁移技能', { count: mig.migrated.length, skills: mig.migrated });
+      }
+      if (mig.error) {
+        this.log.warn('[SkillLoader] 技能迁移部分失败(不影响现有技能)', { error: mig.error });
+      }
+    } catch (e) {
+      this.log.warn('[SkillLoader] 技能迁移失败(不阻断)', { error: String(e) });
+    }
     // 加载技能
     this.loadAllSkills();
   }
