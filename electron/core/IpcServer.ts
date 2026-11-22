@@ -705,6 +705,31 @@ export class IpcServer {
      * 界面用它决定"启用裁判对照"的勾选框能不能勾 —— 门禁不通过时
      * 勾选框禁用,并把**具体哪一项不达标**写给用户看。
      */
+    /**
+     * 【M4-AG】开跑前的样本量指引 —— 动态算，不写死数字。
+     *
+     * 用户写任务时就能看到"要检出多大的差异、大概需要多少个任务"，
+     * 而不是跑完才发现"样本不足"。数字来自 `requiredPairsForPower`
+     * （配对二值的标准功效公式），与测试里的算法是同一个。
+     */
+    ipcMain.handle('skills:trialGuidance', async () => {
+      try {
+        const { requiredPairsForPower } = await import('../learning/TrialStatistics');
+        const effects = [0.5, 0.3, 0.2];
+        return {
+          success: true,
+          data: {
+            // 6 = McNemar 精确检验的硬下限：5 个配对即使全对全错也只有 p=0.0625
+            minTasks: 6,
+            byEffect: effects.map(d => ({ delta: d, pairs: requiredPairsForPower(d) })),
+          },
+        };
+      } catch (error) {
+        this.log.error('skills:trialGuidance 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
     ipcMain.handle('skills:judgeTrust', async () => {
       try {
         const { ChatManager } = await import('../chat/ChatManager');

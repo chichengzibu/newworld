@@ -197,6 +197,8 @@ const IpcChannels = {
   SKILLS_RUN_UTILITY_TRIAL: 'skills:runUtilityTrial',
   // 【M4-V】裁判放行门禁状态
   SKILLS_JUDGE_TRUST: 'skills:judgeTrust',
+  // 【M4-AG】对照实验的样本量指引
+  SKILLS_TRIAL_GUIDANCE: 'skills:trialGuidance',
   // 【M4-X】开源技能库(搜索/推荐/下载安装)
   SKILLS_HUB_SEARCH: 'skills:hub:search',
   SKILLS_HUB_RECOMMEND: 'skills:hub:recommend',
@@ -1076,6 +1078,10 @@ const electronAPI = {
        * 【M4-X】在开源技能库里搜索。
        * 索引是本地缓存的 → **断网也能搜**(只有下载安装需要网络)。
        */
+      /** 【M4-AG】开跑前的样本量指引（要检出多大差异、约需多少个任务） */
+      trialGuidance: (): Promise<IpcResponse<{ minTasks: number; byEffect: Array<{ delta: number; pairs: number }> }>> =>
+        ipcRenderer.invoke(IpcChannels.SKILLS_TRIAL_GUIDANCE),
+
       hubSearch: (opts: { q?: string; sourceId?: string; category?: string; limit?: number }): Promise<IpcResponse<any[]>> =>
         ipcRenderer.invoke(IpcChannels.SKILLS_HUB_SEARCH, opts),
 

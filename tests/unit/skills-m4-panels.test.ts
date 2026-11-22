@@ -94,6 +94,14 @@ function installApi(over: Record<string, any> = {}) {
       hubInstall: vi.fn().mockResolvedValue({ success: true, data: { skillId: 'pdf', skills: [] } }),
       // 【M4-AC】安装前预览 —— 默认"没有可执行脚本"
       hubPreview: vi.fn().mockResolvedValue({ success: true, data: { files: ['SKILL.md'], executables: [] } }),
+      // 【M4-AG】样本量指引 —— 数字由主进程算，界面只渲染
+      trialGuidance: vi.fn().mockResolvedValue({
+        success: true,
+        data: {
+          minTasks: 6,
+          byEffect: [{ delta: 0.5, pairs: 27 }, { delta: 0.3, pairs: 82 }, { delta: 0.2, pairs: 191 }],
+        },
+      }),
       // 【M4-AD】来源管理
       hubSourcesList: vi.fn().mockResolvedValue({
         success: true,
@@ -367,6 +375,19 @@ describe('M4 技能面板渲染', () => {
     await flushPromises()
 
     expect(api.skills.hubInstall).not.toHaveBeenCalled()
+  })
+
+  /* ─────────────────── 【M4-AG】开跑前的样本量指引 ─────────────────── */
+
+  it('【M4-AG】技能验证卡片显示"至少要几个任务"（数字来自主进程）', async () => {
+    vi.clearAllMocks()
+    installApi()
+    const w = await mountView()
+    const text = w.text()
+    expect(api.skills.trialGuidance).toHaveBeenCalled()
+    expect(text).toContain('至少 6 个配对任务')
+    expect(text).toContain('约需 82 个以上')
+    expect(text).toContain('约需 191 个以上')
   })
 
   /* ─────────────────── 【M4-AD】技能库来源管理 ─────────────────── */

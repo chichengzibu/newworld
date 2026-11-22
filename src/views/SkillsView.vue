@@ -423,6 +423,10 @@
         </el-form-item>
         <!-- 【M4-AF】重复次数 —— 单次运行自带随机性，重复 + 归约能压掉噪声。
              成本按次数线性翻倍，所以默认 1，并在确认框里算进总调用数。 -->
+        <!-- 【M4-AG】开跑前的样本量指引 —— 数字由主进程按功效公式算,不写死 -->
+        <el-form-item v-if="trialGuidanceText">
+          <span class="dir-empty">{{ trialGuidanceText }}</span>
+        </el-form-item>
         <el-form-item label="重复次数">
           <el-input-number v-model="trialRepeats" :min="1" :max="5" />
           <span class="dir-empty" style="margin-left: 8px;">
@@ -851,6 +855,27 @@ const loadAcceptance = async (): Promise<void> => {
 const trialSkillId = ref('');
 const trialTasksText = ref('');
 const trialRepeats = ref(1);
+const trialGuidance = ref<{ minTasks: number; byEffect: Array<{ delta: number; pairs: number }> } | null>(null);
+
+const trialGuidanceText = computed(() => {
+  const g = trialGuidance.value;
+  if (!g) return '';
+  const pick = (d: number) => g.byEffect.find(x => Math.abs(x.delta - d) < 1e-9)?.pairs;
+  const n30 = pick(0.3);
+  const n20 = pick(0.2);
+  const base = `至少 ${g.minTasks} 个配对任务才可能判定显著（5 个时连"全对全错"的 p 也只有 0.0625）。`;
+  if (!n30 || !n20) return base;
+  return base + `任务越多越稳：检出 30% 的差异约需 ${n30} 个以上、20% 约需 ${n20} 个以上（80% 把握、假设四成任务会出现分歧）。`;
+});
+
+const loadTrialGuidance = async (): Promise<void> => {
+  try {
+    const res = await (window as any).electronAPI?.skills?.trialGuidance?.();
+    if (res?.success) trialGuidance.value = res.data ?? null;
+  } catch (e) {
+    console.error('loadTrialGuidance failed', e);
+  }
+};
 const trialRunning = ref(false);
 const trialResult = ref<any>(null);
 // 【M4-V】是否请求 pairwise 裁判对照 —— 默认关(D7:裁判层保持默认关闭)
@@ -1265,6 +1290,8 @@ onMounted(() => {
   loadAcceptance();
   // 【M4-X】进技能页就拉一次开源技能库的推荐（断网时用本地缓存,不影响本页其它功能）
   loadHubRecommend();
+  // 【M4-AG】拉一次样本量指引（开跑前就知道该写多少任务）
+  loadTrialGuidance();
   // 【M4-V】查裁判门禁状态 —— 决定勾选框能不能勾
   loadJudgeTrust();
 

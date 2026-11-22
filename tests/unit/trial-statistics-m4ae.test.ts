@@ -22,6 +22,7 @@ import {
   bootstrapMeanCI,
   mcnemarExactP,
   requiredPairsForDelta,
+  requiredPairsForPower,
   formatCI,
 } from '../../electron/learning/TrialStatistics'
 
@@ -112,6 +113,31 @@ describe('M4-AE 受控对照的统计口径', () => {
     it('方向为零 → 无从估计', () => {
       expect(requiredPairsForDelta(3, 3, 6)).toBe(Infinity)
       expect(requiredPairsForDelta(0, 0, 0)).toBe(Infinity)
+    })
+  })
+
+  describe('M4-AG 开跑前估算样本量', () => {
+    it('效应越小、需要的任务越多', () => {
+      expect(requiredPairsForPower(0.5)).toBeLessThan(requiredPairsForPower(0.3))
+      expect(requiredPairsForPower(0.3)).toBeLessThan(requiredPairsForPower(0.2))
+    })
+
+    it('30% 差异 ≈ 80 个量级；20% ≈ 190 个量级（默认 40% 不一致率）', () => {
+      expect(requiredPairsForPower(0.3)).toBeGreaterThan(60)
+      expect(requiredPairsForPower(0.3)).toBeLessThan(120)
+      expect(requiredPairsForPower(0.2)).toBeGreaterThan(140)
+      expect(requiredPairsForPower(0.2)).toBeLessThan(260)
+    })
+
+    it('0 效应无从规划；极端分离下限为 2', () => {
+      expect(requiredPairsForPower(0)).toBe(Infinity)
+      expect(requiredPairsForPower(1)).toBe(2)
+    })
+
+    it('不一致率低于效应时按效应钳住（不返回 0 个）', () => {
+      const n = requiredPairsForPower(0.5, 0.2)
+      expect(Number.isFinite(n)).toBe(true)
+      expect(n).toBeGreaterThan(0)
     })
   })
 

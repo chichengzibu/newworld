@@ -148,6 +148,43 @@ export function requiredPairsForDelta(
   return Infinity
 }
 
+/**
+ * 【M4-AG】要检出某个效应,大约需要多少个配对(80% 把握)。
+ *
+ * 【出处】配对二值比例的标准功效公式(Connor 1987;inspect_ai 生态的 evalconfidence、
+ * Fullsend 的 significance.py 都把它做成"最少试验数/功效"计算器):
+ *   n_d = (z_{1−α/2}·√(p10+p01) + z_{1−β}·√(p10+p01−(p10−p01)²))² / (p10−p01)²
+ *   n   = n_d / (p10+p01)
+ * 其中 p10、p01 是两类**不一致对**的占比,p10−p01 = Δ(成功率差),
+ * p10+p01 = 不一致率 t。故 p10=(t+Δ)/2、p01=(t−Δ)/2。
+ *
+ * 【为什么必须让用户知道】5 个任务时,连"全对全错"都只有 p=0.0625;
+ * 要检出 30% 的差异(80% 把握),按 40% 不一致率约需 **81 个**配对。
+ * 不把这个数说在前面,用户会把"跑完了、结论是样本不足"当成工具坏了。
+ *
+ * 【假设必须显式】t 是**假设**,不是观测值。默认 0.4(两种做法在四成任务上结果不同);
+ * t < |Δ| 时这个效应在这套假设下不可能出现 → Infinity。
+ *
+ * 【与 requiredPairsForDelta 的分工】
+ * - 本函数:**开跑前**规划(输入是"想检出多大",输出"要几个任务")
+ * - requiredPairsForDelta:**跑完后**解释(输入是已经观测到的不一致对,输出"还差多少")
+ */
+export function requiredPairsForPower(
+  delta: number,
+  discordanceRate = 0.4,
+  opts: { alpha?: number; power?: number } = {},
+): number {
+  const { alpha = 0.05, power = 0.8 } = opts
+  const d = Math.abs(delta)
+  const t = Math.max(d, Math.min(1, discordanceRate)) // t 至少要 ≥ |Δ|
+  if (d < 1e-9) return Infinity
+  if (d >= 1) return 2 // Δ=1 时极致分离,最少 2 对即可(不过实际仍要更多才稳)
+  const zA = 1.959963984540054 // 双侧 0.05
+  const zB = 0.8416212335729143 // 80% 功效
+  const nd = Math.pow(zA * Math.sqrt(t) + zB * Math.sqrt(Math.max(0, t - d * d)), 2) / (d * d)
+  return Math.max(2, Math.ceil(nd / t))
+}
+
 /** 把区间格式化成"±x%"的说明串(给 note 用) */
 export function formatCI(ci: MeanCI): string {
   const f = (v: number) => `${(v * 100).toFixed(0)}%`
