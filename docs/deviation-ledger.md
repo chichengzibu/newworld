@@ -2512,6 +2512,7 @@ https 校验 / 名称非空 / 内置不可删、自定义可删 / 落盘 / **读
 
 ### 状态
 
-- 修好的 3 个 spec **本轮未能重新实跑**（执行环境限制），需用
-  `npm run test:e2e:electron` 复跑确认。
+- **已复跑确认（2026-11-23）**：全量 Electron e2e —— **142 passed / 0 failed / 33 skipped**（175 例，11.6 分钟）。
+- 33 个 skipped 均为**有条件跳过**，不是失败：dev-only 路由（`a5` / `d3` / `d2prime` 及部分导航路由，需 `E2E_INCLUDE_DEV=1`）、诊断用例（`diag-launch`，需 `E2E_DIAG=1`）、需要真 Ollama 的用例（`chat-real-send` 3 + `multi-provider` 5，需 `OLLAMA_URL`）、token 尚未经 IPC 暴露的 2 条 P0。
+- **未做**：逐条核对这 33 个跳过是否都"应当跳过"（只按条件分类）。
 - `perf:full` / `perf:sse` 依赖缺失的 `cross-env`，仍未修（非交付路径）。
