@@ -35,7 +35,9 @@ test.describe('VERIFICATION · 剩余界面实跑', () => {
       must: [
         '.skills-dir-card',        // 技能目录卡
         '.skills-trial-card',      // 技能验证(受控对照)卡
-        'button:has-text("浏览 ClawHub 市场")', // M4-M 新增的入口
+        // 【M4-Y】原「浏览 ClawHub 市场」按钮已删 —— 开源技能库直接内嵌在本页，
+        // 公开技能在「开源技能库」卡片里找（自建仓库才去 /clawhub）。
+        '.skills-hub-card',        // 开源技能库卡（搜索/推荐/下载）
       ],
     },
     {

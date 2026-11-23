@@ -1041,6 +1041,22 @@ M4-X 把技能目录从 `<userData>/skills` 改到「应用自身目录的 skill
 **为什么测试之前没抓到**：测试环境里 appPath 与 userData 是同一个目录，
 新旧路径恰好重合 —— 迁移逻辑永远走不到。现在用"故意造两个目录"的用例钉住。
 
+### 🧪 交付检查：两处 e2e 问题（M4-AI）
+
+- **「e2e 全绿」是假象**：`npm run test:e2e` 的 vitest 配置 `include` 只有 3 个纯前端文件，
+  并**显式排除 `*.spec.ts`**；真正的 Electron 全量是 **39 个 spec**。全量实跑结果
+  **136 passed / 8 failed / 33 skipped** —— 8 个失败**全是 M4-Y 删旧界面后没同步的 spec**
+  （6 条在测已删除的 4 个本地演示页签；2 条在找已删除的「浏览 ClawHub 市场」按钮），
+  **不是产品回归**。
+- **`test:e2e:electron` 在 Windows 上跑不起来**：Unix 的 `ENV=1 cmd` 写法 cmd.exe 不认；
+  且 `cross-env` 未安装（`perf:full` / `perf:sse` 同样受影响）。
+
+修：`clawhub-browse.spec.ts` 重写为「私有技能仓库」4 条；`verification-pages` 的技能页
+必查项改为 `.skills-hub-card`；`verification-checklist` M1 钉「技能页内嵌开源技能库」；
+新增零依赖 `scripts/e2e-electron.mjs` 并改脚本指向它（Windows 可用）。
+
+**教训**：删 UI 必须同步改 e2e；「跑 e2e」要说清是 15 例还是 177 例。
+
 ### 📊 验证
 
 

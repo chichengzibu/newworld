@@ -2492,3 +2492,26 @@ https 校验 / 名称非空 / 内置不可删、自定义可删 / 落盘 / **读
 
 `tests/unit/skill-migration-m4ah.test.ts`（7 例）：复制且旧目录保留 / 不覆盖同名 /
 幂等 / 非技能目录不搬 / 新旧相同不动 / 目标在旧目录内不动 / 旧目录不存在不抛。
+
+---
+
+## M4-AI 批：交付检查挖出的两个 e2e 问题
+
+> 起因：交付前检查。用户跑 `npm run test:e2e` 报"全绿"，但那**只覆盖 3 个文件 / 15 个用例**。
+
+| ID | 状态 | 摘要 |
+|---|---|---|
+| DEV-185 | 已修 | **"e2e 全绿"是个假象：`npm run test:e2e` 只跑纯前端 3 个文件** · `vitest.e2e.config.ts` 的 `include` 只有 `routes-render` / `nova-search` / `nova-voice` 三个，并且**显式排除 `*.spec.ts`** —— 而 `tests/e2e/` 下真正跑 Electron 的是 **39 个 spec**。全量实跑（`E2E_ELECTRON=1 playwright test`）结果：**136 passed / 8 failed / 33 skipped**。8 个失败**全是 M4-Y 删掉旧界面后没同步的 spec**（不是产品回归）：`clawhub-browse` 的 6 条在测已删除的 4 个本地演示页签；`verification-pages` 与 `verification-checklist` 各 1 条在找已删除的「浏览 ClawHub 市场」按钮。修：把 `clawhub-browse.spec.ts` 重写为「私有技能仓库」4 条（标题与分工说明 / 连接入口 / 配置指引 / 旧页签不许回潮）；`verification-pages` 的"技能管理页"必查项改为 `.skills-hub-card`；`verification-checklist` M1 改为钉"技能页内嵌开源技能库（滚进视口再断言）" |
+| DEV-186 | 已修 | **`test:e2e:electron` 在 Windows 上跑不起来** · 脚本是 `E2E_ELECTRON=1 playwright test …`（Unix env 前置写法），cmd.exe 报「'E2E_ELECTRON' 不是内部或外部命令」。而 `cross-env` **既不在 devDependencies 也没装**（顺带：`perf:full` / `perf:sse` 同样跑不了）。修：新增零依赖 `scripts/e2e-electron.mjs`（spawn playwright 并注入 env），脚本改指向它 |
+
+### 教训
+
+**删 UI 必须同步改 e2e。** M4-Y 删掉 4 个本地演示页签时，只改了单测与组件测试，
+没动 Playwright —— 于是交付门禁红在"早已不存在的页面"上。
+另外"跑 e2e"这句话必须说清跑的是哪一套：纯前端 web e2e（15 例）≠ Electron 全量（177 例）。
+
+### 状态
+
+- 修好的 3 个 spec **本轮未能重新实跑**（执行环境限制），需用
+  `npm run test:e2e:electron` 复跑确认。
+- `perf:full` / `perf:sse` 依赖缺失的 `cross-env`，仍未修（非交付路径）。

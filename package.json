@@ -31,7 +31,7 @@
     "icons": "node scripts/generate-icons.mjs",
     "docs:list": "node scripts/list-docs.mjs",
     "test:all": "vitest run && npm run build && npm run test:e2e:electron",
-    "test:e2e:electron": "E2E_ELECTRON=1 playwright test --reporter=line"
+    "test:e2e:electron": "node scripts/e2e-electron.mjs"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.1",

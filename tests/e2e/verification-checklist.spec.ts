@@ -207,24 +207,27 @@ test.describe('VERIFICATION D/E 段 · 清单自动化', () => {
     expect(bodyText, '未出现红屏兜底文本').toContain('[PiPiClaw render error]')
     expect(bodyText).toContain('VERIFICATION-E2-探针错误')
   })
-  test('M1: 低频功能入口在「意图现场」,不在图标栏里(ClawHub / 模型对比)', async ({ window }) => {
+  test('M1: 低频功能入口在「意图现场」,不在图标栏里(开源技能库 / 模型对比)', async ({ window }) => {
     // 【M4-M】v4.4 把侧栏收成 7 个固定图标时,ClawHub 与模型对比的侧栏入口丢了。
-    // 决策:不进侧栏(无文字的图标栏靠"识别",对新手更难),改为在**母页面**放带文字的按钮
+    // 决策:不进侧栏(无文字的图标栏靠"识别",对新手更难),改为在**母页面**放带文字的入口
     //   —— 同类产品的做法:Cherry Studio 的插件市场在「设置 → Agent 设置 → 插件」、
     //   OpenChat 主导航只留 3 项、Claude Code 用 /plugin 显式命令。
-    // 这条断言钉住:① 两个页面各有**可见的**入口按钮 ② 点了真能到对应路由。
+    //
+    // 【M4-Y 修正】原「浏览 ClawHub 市场」按钮已删 —— 开源技能库直接内嵌在技能页
+    // （比"跳一层"更靠前）；/clawhub 只剩自建仓库（低频，走命令面板）。
+    // 故这条断言改为钉住「技能页内嵌开源技能库」这个更强的"意图现场"。
 
-    // ① 技能页 → 浏览 ClawHub 市场
+    // ① 技能页 → 开源技能库内嵌卡（可见且在视口内）
     await gotoBySideNav(window, '/skills')
-    const marketBtn = window.locator('button:has-text("浏览 ClawHub 市场"), button:has-text("Browse ClawHub")').first()
-    await expect(marketBtn, '技能页缺少 ClawHub 市场入口').toBeVisible({ timeout: 15_000 })
-    // 【关键】必须在**视口内** —— Playwright 的 toBeVisible() 只看 CSS 可见性,
+    const hubCard = window.locator('.skills-hub-card').first()
+    await expect(hubCard, '技能页缺少「开源技能库」卡').toBeVisible({ timeout: 15_000 })
+    // 卡片在页面靠下 —— 先滚进视口再断言（否则"可见但没滚到"会误判）
+    await hubCard.scrollIntoViewIfNeeded()
+    // 【关键】必须在**视口内** —— toBeVisible() 只看 CSS 可见性,
     // 元素落在视口外也算"可见"(还能被自动滚动点到)→ 那样这条断言就是假通过。
-    // 实测踩过:DevTools docked 把视口挤到 725,按钮在 x=1097+ → 用户根本看不见。
-    await expect(marketBtn).toBeInViewport({ timeout: 10_000 })
-    await marketBtn.click()
-    await window.waitForURL(/#\/clawhub/, { timeout: 10_000 })
-    await expect(window.locator('h1').first()).toBeVisible({ timeout: 10_000 })
+    await expect(hubCard).toBeInViewport({ timeout: 10_000 })
+    // 卡片里要有搜索框（用户能直接在这里找，而不是先跳页）
+    await expect(window.locator('.skills-hub-card input').first()).toBeVisible({ timeout: 10_000 })
 
     // ② 模型页 → 对比模型
     await gotoBySideNav(window, '/models')
