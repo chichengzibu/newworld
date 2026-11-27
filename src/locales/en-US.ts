@@ -182,7 +182,7 @@ export default {
     selectProvider: 'Select Provider',
     selectModel: 'Select Model',
     newChat: 'New Chat',
-    webSearchToggle: 'Web search (let the model search the web when answering)',
+    webSearchToggle: 'Web access (let the model search and fetch page content)',
     searchConversation: 'Search conversations...',
     batchActions: 'Batch Actions',
     selectedCount: '{count} selected',

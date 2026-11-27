@@ -336,8 +336,12 @@ export class LlmAgentBrain implements AgentBrain {
     let selectedToolNames = opts.tools ?? Array.from(this.tools.keys())
     // 【v4.8】联网搜索开关：关闭时不把 web_search 放进本次 run 的白名单，
     // 模型根本看不到这个工具（而非看到后被调用再拒绝）。开启才授权模型联网。
+    //
+    // 【v4.11】web_fetch 与 web_search 共用同一个开关 —— 两者都是「模型主动访问
+    // 外部网络」，分出两个开关只会让用户困惑（开了搜索却抓不了网页）。语义上
+    // 「允许联网」就是一个整体授权，与 ChatGPT/Claude 的联网开关一致。
     if (!isWebSearchEnabled()) {
-      selectedToolNames = selectedToolNames.filter((n) => n !== 'web_search')
+      selectedToolNames = selectedToolNames.filter((n) => n !== 'web_search' && n !== 'web_fetch')
     }
     const selectedTools = selectedToolNames
       .map(n => this.tools.get(n))

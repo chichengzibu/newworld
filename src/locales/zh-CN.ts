@@ -195,7 +195,7 @@ export default {
     selectProvider: '选择提供商',
     selectModel: '选择模型',
     newChat: '新建对话',
-    webSearchToggle: '联网搜索（开启后模型可自动联网检索）',
+    webSearchToggle: '联网（开启后模型可检索网页、抓取指定页面内容）',
     searchConversation: '搜索会话...',
     batchActions: '批量操作',
     selectedCount: '已选中 {count} 项',

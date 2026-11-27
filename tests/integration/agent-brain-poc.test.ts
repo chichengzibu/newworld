@@ -296,14 +296,15 @@ describe('LlmAgentBrain v0.1 端到端 (mock LLM)', () => {
 })
 
 describe('LlmAgentBrain v0.1 工具列表', () => {
-  it('listTools 返 9 工具 metadata (Read/Edit/Bash/Glob/Grep/load_skill/parallel_subtasks/create_artifact/web_search)', () => {
+  it('listTools 返 10 工具 metadata (Read/Edit/Bash/Glob/Grep/load_skill/parallel_subtasks/create_artifact/web_search/web_fetch)', () => {
     const brain = LlmAgentBrain.getInstance()
     const tools = brain.listTools()
     // 【M4-A】load_skill 渐进披露；【P3】parallel_subtasks 多 agent 编排；
-    // create_artifact 成品交付；【v4.8】web_search 联网搜索（受输入区开关控制是否进 LLM tools）
-    expect(tools).toHaveLength(9)
+    // create_artifact 成品交付；【v4.8】web_search 联网搜索；
+    // 【v4.11】web_fetch 网页正文抓取（与 web_search 共用联网开关）
+    expect(tools).toHaveLength(10)
     const names = tools.map(t => t.name).sort()
-    expect(names).toEqual(['Bash', 'Edit', 'Glob', 'Grep', 'Read', 'create_artifact', 'load_skill', 'parallel_subtasks', 'web_search'])
+    expect(names).toEqual(['Bash', 'Edit', 'Glob', 'Grep', 'Read', 'create_artifact', 'load_skill', 'parallel_subtasks', 'web_fetch', 'web_search'])
     // 验证每个有 description + parameters
     for (const t of tools) {
       expect(t.description).toBeTruthy()

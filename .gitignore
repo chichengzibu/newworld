@@ -155,3 +155,8 @@ release.bak-*/
 New World-*-Setup.exe
 PiPiClaw-*-Setup.exe
 *.asar
+
+# 【v4.11】根目录临时探针文件（API 调试/一次性脚本产物）——此前只覆盖了 .tmp-*/
+.tmp-*.json
+.tmp-*.txt
+.tmp-*.cjs
