@@ -1,0 +1,25 @@
+# Dependabot — 依赖治理(P0 工程规范批次, 2026-11-24)
+# npm: 周更, 生产依赖 security 更新优先直提; 分组小步合入避免大 diff。
+# github-actions: 周更, 与 ci.yml/release.yml 的 action 版本保持新鲜。
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      minor-and-patch:
+        update-types:
+          - minor
+          - patch
+    labels:
+      - dependencies
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    labels:
+      - dependencies
+      - ci

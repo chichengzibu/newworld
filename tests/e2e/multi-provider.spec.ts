@@ -40,7 +40,7 @@ test.describe('T+630 多 Provider 切换', () => {
       await api.models.add({
         name: 'MP Fast (qwen3.5:9b)',
         type: 'openai',
-        baseUrl: 'http://localhost:11434/v1',
+        baseUrl: 'http://127.0.0.1:11434/v1',
         apiKey: 'no-key',
         enabled: true,
         timeout: 30000,
@@ -49,7 +49,7 @@ test.describe('T+630 多 Provider 切换', () => {
       const r2 = await api.models.add({
         name: 'MP Quality (qwen3:14b)',
         type: 'openai',
-        baseUrl: 'http://localhost:11434/v1',
+        baseUrl: 'http://127.0.0.1:11434/v1',
         apiKey: 'no-key',
         enabled: true,
         timeout: 30000,

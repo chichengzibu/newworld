@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - Channel / WechatWorkChannel (W7.2)
+ * New World - Channel / WechatWorkChannel (W7.2)
  *
  * 企业微信 IM 通道(真实 fetch 实现)。
  * API: https://qyapi.weixin.qq.com/cgi-bin/gettoken (corpid + corpsecret)
@@ -42,7 +42,8 @@ export class WechatWorkChannel implements Channel {
     const body = {
       touser: msg.to,
       msgtype: 'text',
-      agentid: config.appId,
+      // IM 真连通:agentId 此前与 corpId 都挤在 appId 里，现按 UI 原名字段优先
+      agentid: config.agentId ?? config.appId,
       text: { content: msg.text ?? '' },
     }
     const res = await fetch(
@@ -98,11 +99,14 @@ export class WechatWorkChannel implements Channel {
 
   private async getAccessToken(): Promise<string | null> {
     const config = this.configStore.get('im-wechat-work')
-    if (!config?.appId || !config?.appSecret) return null
+    // IM 真连通:优先读 UI 原名 corpId/corpSecret，回退老配置 appId/appSecret
+    const corpId = config?.corpId ?? config?.appId
+    const corpSecret = config?.appSecret ?? config?.corpSecret
+    if (!corpId || !corpSecret) return null
     if (this.accessToken && this.accessTokenExpiresAt > Date.now() + 60_000) {
       return this.accessToken
     }
-    const url = `https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid=${encodeURIComponent(config.appId)}&corpsecret=${encodeURIComponent(config.appSecret)}`
+    const url = `https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid=${encodeURIComponent(corpId)}&corpsecret=${encodeURIComponent(corpSecret)}`
     const res = await fetch(url, { method: 'GET' })
     if (!res.ok) return null
     const data = (await res.json()) as { errcode?: number; errmsg?: string; access_token?: string; expires_in?: number }

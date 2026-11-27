@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * PiPiClaw end-to-end smoke test (Phase 4 Task 5)
+ * New World end-to-end smoke test (Phase 4 Task 5)
  *
  * Strategy A (lightweight): verify build artifacts + key code surface.
  * Does NOT spawn a real Electron process (no GUI, sub-second).
@@ -51,7 +51,7 @@ function fileSize(p) {
   return statSync(p).size
 }
 
-console.log('🔥 PiPiClaw smoke test')
+console.log('🔥 New World smoke test')
 console.log(`   root: ${ROOT}\n`)
 
 if (process.env.SMOKE_FULL === '1') {
@@ -88,9 +88,24 @@ check('dist/index.html exists (vite renderer)', () => {
   if (size < 200) throw new Error(`too small: ${size} bytes`)
   return true
 })
-check('dist-electron/tsconfig.node.tsbuildinfo exists (tsc emit proof)', () => {
-  const p = join(ROOT, 'dist-electron/tsconfig.node.tsbuildinfo')
-  if (!existsSync(p)) throw new Error('missing (tsc incremental build info)')
+// 【M3-F 改】原先这条断言查 `dist-electron/tsconfig.node.tsbuildinfo`
+// —— 那是"用 tsc 产 main.js"的年代留下的产物证明。构建早已改走 vite
+// (esbuild),tsc 不再 emit → 这条断言**永远失败**,是条过期断言。
+//
+// 换成真正有意义的那道门:主进程类型检查。
+// 【为什么重要】类型错误里藏着「模块被删了但 import 还在」这类构建级故障 ——
+// 曾经有 4 条断链让 electron 主进程构建直接失败,而构建本身**不做类型检查**。
+// 现在 build.mjs 把 typecheck 设为门禁,这里再验一次它确实过。
+check('主进程类型检查通过 (tsc --noEmit,构建门禁)', () => {
+  const r = spawnSync(
+    process.execPath,
+    [join(ROOT, 'node_modules', 'typescript', 'bin', 'tsc'), '--noEmit', '-p', 'tsconfig.node.json'],
+    { cwd: ROOT, encoding: 'utf-8', timeout: 300000 },
+  )
+  if (r.status !== 0) {
+    const out = `${r.stdout || ''}${r.stderr || ''}`.split(/\r?\n/).filter(Boolean).slice(0, 12).join('\n')
+    throw new Error(`主进程类型检查未通过:\n${out}`)
+  }
   return true
 })
 

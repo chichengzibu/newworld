@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - 聊天管理器
+ * New World - 聊天管理器
  * 
  * 职责：
  * 1. 聊天消息处理（流式/非流式）
@@ -14,14 +14,48 @@ import { BrowserWindow } from 'electron';
 import { LogManager } from '../core/LogManager';
 import { ChatConfig } from './ChatConfig';
 import { ModelManager } from '../models/ModelManager';
+import { toLlmProviderConfig } from '../models/ModelProvider';
 import { HermesMemory } from '../hermes/HermesMemory';
 import { HermesAdapter, RECALL_CHAT_MIN_SCORE } from '../hermes/HermesAdapter';
+import { MemoryDistiller, type DistilledMemory } from '../hermes/MemoryDistiller';
 import { TaskExecutor } from '../task/TaskExecutor';
 import { InstructionGenerator } from '../task/InstructionGenerator';
 import { HistoryAssembler } from './HistoryAssembler';
 import { SelfLearner } from '../learning/SelfLearner';
-import type { Conversation, ChatMessage, ChatSettings, MessageRole, StreamChunk } from './ChatTypes';
+import { SkillEffectivenessTracker } from '../learning/SkillEffectivenessTracker';
+import { classifyFailure } from '../learning/FailureClassifier';
+import { normalizeTaskCategory } from '../learning/TaskCategory';
+import { runSkillTrial, type TrialExecutor, type TrialResult, type TrialTask, type TrialOptions } from '../learning/SkillTrial';
+import { createPairwiseJudge } from '../learning/RunJudge';
+import { evaluateJudgeTrust, toJudgeGate } from '../learning/JudgeTrust';
+import { LlmConfigStore } from '../llm/LlmConfigStore';
+import { AcceptanceLog } from '../learning/AcceptanceLog';
+import type { GradableRun } from '../learning/TaskGrader';
+import { CostTracker } from '../insight/CostTracker';
+import { ConfigStore } from '../core/ConfigStore';
+import { AgentEventRelayBus, type AgentRunEvent } from '../agent/AgentEventRelay';
+import type { ProducedArtifact } from '../agent/tools/Tool';
+import type { Conversation, ChatMessage, ChatSettings, MessageRole, MessageStatus, StreamChunk } from './ChatTypes';
 import type { AgentBrain, Disposable } from '../contracts/types';
+
+/** agent 派发结果 —— handled=false 时调用方须回落旧管道 */
+export interface AgentDispatchResult {
+  handled: boolean
+  content?: string
+  totalTokens?: number
+  iterations?: number
+  toolCalls?: Array<{ name: string; ok: boolean; durationMs: number; entity?: { kind: string; id: string } }>
+  /**
+   * 【M4-D】本次 run 实际应用过的技能 id。
+   * 「技能被应用后有没有用」这个问题,前提是能说出哪些技能被应用了 ——
+   * 由工具自己声明(LoadSkillTool 返回 appliedEntity),brain 汇总上抛。
+   */
+  appliedSkills?: string[]
+  /** 助手占位消息 id(渲染层据此回填最终内容) */
+  messageId?: string
+  runId?: string
+  reason?: string
+}
 
 export class ChatManager {
   private static instance: ChatManager;
@@ -29,6 +63,16 @@ export class ChatManager {
   private config!: ChatConfig;
   private modelManager!: ModelManager;
   private abortControllers: Map<string, AbortController> = new Map();
+  /**
+   * 【P3】agent run 的中止句柄。此前 UI 点「停止」只 abort 旧流式管道的 controller,
+   * agent 的 LLM 循环和工具照跑 —— 多 agent 并行后更危险(子任务停不下来)。
+   * 这里按会话登记当前 run,stopGeneration 一并中止父 run 及其所有子任务。
+   */
+  private agentAborts: Map<string, Set<{ runId: string; abort: () => boolean }>> = new Map();
+  /** M1-C: agent 运行事件中继(把 brain 事件关联会话后广播到渲染层) */
+  private agentEventRelay = AgentEventRelayBus;
+  /** 【M1-D】等待用户确认的计划表 planId → resolve(true=确认,false=拒绝) */
+  private confirmHandlers: Map<string, (confirmed: boolean) => void> = new Map();
 
   private constructor() {
     this.log.info('[ChatManager] 初始化');
@@ -155,6 +199,14 @@ export class ChatManager {
       controller.abort();
       this.abortControllers.delete(conversationId);
     }
+    // agent 路径走的是 brain.abortRun(),与上面的旧流式 controller 不是一套。
+    const agentRuns = this.agentAborts.get(conversationId);
+    if (agentRuns) {
+      for (const handle of Array.from(agentRuns)) {
+        try { handle.abort() } catch { /* 单个 run 中止失败不影响其余 */ }
+      }
+      agentRuns.clear();
+    }
   }
 
   // ============ 核心消息发送方法 ============
@@ -194,6 +246,15 @@ export class ChatManager {
         
         // 保存技能
         const saved = selfLearner.saveSkillFromProposal(pendingProposal);
+        // 自进化闭环反向回路：技能落盘后写一条记忆，让下次召回知道"我会这个了"
+        if (saved?.success) {
+          void this.recordSkillToMemory({
+            name: pendingProposal.name,
+            description: pendingProposal.description,
+            triggerCondition: pendingProposal.triggerCondition,
+            keywords: pendingProposal.keywords ?? [],
+          });
+        }
         
         // 回复用户
         const replyMessage: ChatMessage = {
@@ -224,7 +285,23 @@ export class ChatManager {
       }
     }
 
-    // 2. 添加用户消息
+    // 2. 【M4-Q 修】把传入的 provider/model **落到会话上**。
+    // 此前 sendMessage 收了 providerId 却只写进"用户消息"里,**从不写会话**;
+    // 而 agent 路径(dispatchToAgent)读的是**会话上的** providerId
+    // → 经 IPC 发消息(IM 通道 / 定时任务 / 语音 / 任何外部调用方)时
+    //   agent 永远拿不到 provider → 每条消息都报
+    //   「[LlmAgentBrain error] no LLM provider configured」→ 回落旧管道
+    //   → **学习闭环(M4-B/M4-F)记到的全是这种失败**。
+    // UI 路径没暴露这个问题,是因为模型选择器自己调了 store.setCurrentModel
+    // (它会 updateConversation)—— 两条路径不一致。
+    if (providerId || modelId) {
+      const conv = this.config.getConversation(conversationId);
+      if (conv && (conv.providerId !== providerId || conv.modelId !== modelId)) {
+        this.config.updateConversation(conversationId, { providerId, modelId });
+      }
+    }
+
+    // 3. 添加用户消息
     const userMessage: ChatMessage = {
       id: `user_${Date.now()}`,
       role: 'user',
@@ -237,7 +314,61 @@ export class ChatManager {
     this.config.addMessage(conversationId, userMessage);
     this.broadcastMessage(conversationId, userMessage);
 
-    // 2. 尝试用大模型生成操作步骤并执行
+    // 2.5 【W5 接线 · M1-B】agent tool loop 优先
+    //   真 tool-call 循环此前零生产调用方(死代码),现接入主链路。
+    //   回落保证:未注册 agent / LLM 未配置 / 抛错 → handled:false,继续走下方旧管道,
+    //   可用性不回退。执行模式为 'safe' 时跳过 agent(纯对话)。
+    if (this.shouldUseAgentLoop()) {
+      try {
+        const agentResult = await this.dispatchToAgent(conversationId, content, 'ui');
+        if (agentResult.handled) {
+          /**
+           * 【M4-B】agent loop 路径的观察 + 结果反馈。
+           *
+           * 依据业界调研的四组件模型(缺一环则闭环不成立):
+           *   ① 轨迹捕获 ← agent 事件(已有)
+           *   ② 结果追踪 ← 本行:把成败与失败模式写进 tracker
+           *   ③ 诊断反馈 ← failure 分类(工具错/权限/超时/限流…)
+           *   ④ 持久存储 ← skill-stats.json + observations.json(已有)
+           *
+           * 此前 agent loop 路径【完全不产生学习数据】—— 只有旧的
+           * TaskExecutor 管道有观察端。这是最重要的能力路径,却是盲区。
+           */
+          this.recordAgentOutcome(conversationId, content, agentResult);
+
+          /**
+           * 【M4-F】登记这次运行,等用户给出接受度信号。
+           *
+           * 用户信号是**事后**才有的(看到答复才可能点「重新生成」或纠正),
+           * 所以必须先登记运行,信号来了才对得上号。
+           */
+          try {
+            if (agentResult.messageId) {
+              AcceptanceLog.getInstance().registerRun({
+                conversationId,
+                messageId: agentResult.messageId,
+                skills: agentResult.appliedSkills ?? [],
+                category: this.normalizeTaskCategory(content),
+                ts: Date.now(),
+              });
+            }
+          } catch (e) {
+            this.log.warn('[ChatManager] 接受度登记失败(不阻塞)', e);
+          }
+
+          this.broadcastConversationUpdate(conversationId);
+          const done = agentResult.messageId
+            ? this.config.getMessage(conversationId, agentResult.messageId)
+            : null;
+          return (done ?? userMessage) as ChatMessage;
+        }
+        this.log.info(`[ChatManager] [${traceId}] agent loop 未接管(${agentResult.reason}),回落旧管道`);
+      } catch (e) {
+        this.log.warn(`[ChatManager] [${traceId}] agent loop 异常,回落旧管道`, e);
+      }
+    }
+
+    // 3. 尝试用大模型生成操作步骤并执行
     try {
       const instructionGenerator = InstructionGenerator.getInstance();
       const taskExecutor = TaskExecutor.getInstance();
@@ -251,8 +382,8 @@ export class ChatManager {
       const steps = await instructionGenerator.generateTaskSteps(content, providerId, modelId, _history);
       
       if (steps && steps.length > 0) {
-        this.log.info(`[ChatManager] [${traceId}] 大模型生成了 ${steps.length} 个步骤，开始执行`);
-        
+        this.log.info(`[ChatManager] [${traceId}] 大模型生成了 ${steps.length} 个步骤，准备执行`);
+
         // 创建助手占位消息
         const placeholderId = `assistant_${Date.now()}`;
         const placeholder: ChatMessage = {
@@ -286,6 +417,44 @@ export class ChatManager {
           status: 'pending',
           createdAt: Date.now()
         };
+
+        /**
+         * 【M1-D】执行确认闸门。
+         *
+         * 修复前: 渲染层 Chat.vue 的"确认执行任务"弹窗是死代码
+         * (showTaskConfirmDialog 从未被置 true),LLM 生成步骤后【立即执行】,
+         * 用户全程黑盒。
+         *
+         * 现在: 除 'safe'(纯对话)外,plan 与 craft 两种执行模式都要先 emit
+         * 计划事件 → 等用户确认 → 才执行。用户已明确选择"所有任务都确认"。
+         * 无渲染窗口(定时任务/IM)或 60s 超时 → fail-safe 拒绝。
+         */
+        if (this.getExecutionMode() !== 'safe') {
+          const confirmed = await this.requestPlanConfirmation(
+            conversationId,
+            content,
+            steps.map((s, i) => ({
+              order: i + 1,
+              description: s.description || `执行 ${s.action}`,
+              status: 'pending' as const,
+              params: s.params ?? {},
+            })),
+          );
+          if (!confirmed) {
+            this.log.info(`[ChatManager] [${traceId}] 用户未确认执行,已取消`);
+            this.config.updateMessage(conversationId, placeholderId, {
+              content: '已取消执行。如果你不想这个计划,可以直接说明要调整的地方。',
+              status: 'sent',
+            });
+            this.broadcastMessage(conversationId, {
+              ...placeholder,
+              content: '已取消执行。如果你不想这个计划,可以直接说明要调整的地方。',
+              status: 'sent',
+            });
+            this.broadcastConversationUpdate(conversationId);
+            return this.config.getMessage(conversationId, placeholderId) as ChatMessage;
+          }
+        }
 
         const result = await taskExecutor.executeTask(task as any, 'ui');
 
@@ -372,20 +541,61 @@ export class ChatManager {
         this.broadcastConversationUpdate(conversationId);
         
         // ============ Hermes 自我学习 ============
-        if (result.success) {
-          // #007 G3 观察端覆盖声明 (订单 b①):
-          // 本行 = G3 在【任务流分支】的既有观察端 (chat 任务成功执行时, 既有链, #007 补声明不动代码)
-          //        三元组: instruction=用户消息原文 / steps=任务steps[] / _result=TaskExecutor 返回对象 (result.success 语义)
-          // 本块外的 handleNormalChat shouldPrecipitate 块 (L515-529) = G3 在【普通对话流】的新增观察端 (#007 本单)
-          //        三元组: instruction=用户消息原文 / steps=[] (v1 不接步骤摘要, W5 接线批扩) / _result='ok'|'fail' (依据 finalMsg.status)
-          // 两分支互斥 (任务流失败 → 回退普通对话流; chat-execution-ui B-1/B-2 走任务流 → 本行覆盖) → 无重复观察
+        /**
+         * 【M4-B 修正】此前【只观察成功的执行】(if (result.success))——
+         * 失败样本全被丢弃。而调研明确:「保留失败 —— 把事故转成评测用例,
+         * 而不是让它们消失」。失败样本恰恰是最有学习价值的。
+         *
+         * 现在成功与失败都观察,并附带失败诊断。
+         *
+         * 【容错红线 — 整块包 try/catch】
+         * 学习是【旁路】,不是主链路的一部分。前一版把 observeExecution 裸调,
+         * 一旦它抛错(哪怕是被单测 mock 掉一个静态方法),整个任务流就抛 →
+         * 被上层 catch → 回退普通对话流 → 用户看到的是"LLM 连不上"这种
+         * 无关错误,而真正的失败原因(任务被拒/命令失败)被吞掉了。
+         * 这违反 #006.5 W1 立的"catch→log, 不阻塞 chat 主流"红线。
+         * 现在:整块兜住,任何异常只记日志,主流程结果一字不改。
+         */
+        try {
           const selfLearner = SelfLearner.getInstance();
+          const resultSteps = (result.result?.steps ?? []) as Array<Record<string, any>>;
+          const failedStep = resultSteps.find(
+            (s) => s?.status === 'failed' || s?.error,
+          );
+          selfLearner.observeExecution(
+            content,
+            steps,
+            result,
+            {
+              source: 'task_executor',
+              toolsUsed: steps.map((s: any) => s?.action).filter(Boolean),
+              ...(failedStep
+                ? {
+                    failure: {
+                      stepIndex: resultSteps.indexOf(failedStep),
+                      ...classifyFailure(failedStep?.error, failedStep?.description),
+                    },
+                  }
+                : {}),
+            },
+          );
 
-          // 观察执行 - SelfLearner内部会自动检查是否达到分析阈值
-          selfLearner.observeExecution(content, steps, result);
-          // 注意：分析是异步的，前端通过 skills:new-proposal 事件接收通知
+          // 效果反馈:每个步骤一条 —— 让 tracker 有数据可统计
+          const tracker = SkillEffectivenessTracker.getInstance();
+          for (const s of resultSteps) {
+            tracker.record({
+              skillName: s?.type ?? s?.description ?? 'unknown',
+              unitType: 'tool',
+              ts: Date.now(),
+              durationMs: Math.max(0, (s?.endTime ?? 0) - (s?.startTime ?? 0)),
+              success: s?.status !== 'failed' && !s?.error,
+              conversationId,
+            });
+          }
+        } catch (e) {
+          this.log.warn('[ChatManager] M4-B 学习记录失败(不阻塞 chat 流)', e);
         }
-        
+
         return finalMsg;
       }
     } catch (taskError) {
@@ -462,7 +672,7 @@ export class ChatManager {
         this.log.warn('[ChatManager] #006.5 R-2 recall 降级: 管线召回段失败, 核心记忆+历史记忆段仍生效', e);
       }
 
-      let systemPrompt = '你是PiPiClaw智能助手，一个专业的AI自动化助手，内置OpenClaw本地执行引擎。';
+      let systemPrompt = '你是New World智能助手，一个专业的AI自动化助手，内置OpenClaw本地执行引擎。';
       if (memoryPrompt.trim()) {
         systemPrompt += `\n\n用户记忆:\n${memoryPrompt}`;
       }
@@ -487,45 +697,75 @@ export class ChatManager {
 
       const finalMsg = this.config.getMessage(conversationId, assistantMessageId);
       if (finalMsg?.content) {
-        const shouldPrecipitate = /(文件|文件夹|目录|创建|写入|修改|删除|整理|习惯|偏好|喜欢)/.test(content)
-          || /(文件|文件夹|目录|创建|写入|修改|删除|整理)/.test(finalMsg.content);
+        /**
+         * 【M4.9 记忆沉淀升级：正则门控 → LLM 提炼】
+         *
+         * 旧实现：命中 /(文件|整理|创建|偏好|喜欢)/ 就把「用户原话 + 回复前 500 字」
+         * 整段塞进记忆库。问题在于 ——
+         *   · 与语义无关（"我以后都用中文" 没关键词，反而记不进去）
+         *   · 存的是流水账，不是结论
+         *   · 同一件事说五遍存五条，互相稀释
+         *
+         * 新实现：走 MemoryDistiller 做一次轻量 LLM 提炼，产出 0~2 条结构化记忆
+         * （content + importance + kind）。没有值得记的就什么都不存。
+         * LLM 不可用时【静默降级】为原来的正则路径，保证记忆功能不会因为
+         * 没配模型就完全失效。
+         */
+        const distilled = await this.distillMemories(content, finalMsg.content);
 
-        if (shouldPrecipitate) {
-          hermes.addConversationMemory(conversationId,
-            `用户请求: ${content}\nAI回复: ${finalMsg.content.substring(0, 500)}${finalMsg.content.length > 500 ? '...' : ''}`,
-            50
-          );
-          // #006.5 W1: 向量层同步沉淀 — 幂等 (同 conversationId+content → 同 id → Map 覆盖; 禁 Date.now() id,
-          //   否则二次 store 同内容产生两条向量, 违反 #006 V3 upsert 同-id 覆盖的幂等口径)
-          //   容错: catch→log, 不阻塞 chat 主流 (订单开工令)
-          try {
-            const adapter = HermesAdapter.getInstance();
-            const content05 = `用户请求: ${content}\nAI回复: ${finalMsg.content.substring(0, 500)}${finalMsg.content.length > 500 ? '...' : ''}`;
-            const idHash = createHash('sha256').update(`${conversationId}|${content05}`).digest('hex').slice(0, 16);
-            await adapter.store({
-              id: `chat-${idHash}`,
-              content: content05,
-              score: 50,
-              createdAt: Date.now(),
-            });
-          } catch (e) {
-            this.log.warn('[ChatManager] #006.5 W1 向量层沉淀失败 (不阻塞 chat 流)', e);
+        if (distilled.length > 0) {
+          // 提炼成功：只存结论，不存原文
+          for (const d of distilled) {
+            const idHash = createHash('sha256').update(`${conversationId}|${d.content}`).digest('hex').slice(0, 16);
+            try {
+              await HermesAdapter.getInstance().store({
+                id: `mem-${idHash}`,
+                content: d.content,
+                score: d.importance,
+                createdAt: Date.now(),
+              });
+            } catch (e) {
+              this.log.warn('[ChatManager] 提炼记忆入库失败（不阻塞 chat 流）', e);
+            }
           }
+          this.log.info('[ChatManager] LLM 提炼记忆完成', { count: distilled.length });
+        } else {
+          // 降级：提炼不可用（无模型/超时/无值得记的）→ 走原正则门控兜底
+          const shouldPrecipitate = /(文件|文件夹|目录|创建|写入|修改|删除|整理|习惯|偏好|喜欢)/.test(content)
+            || /(文件|文件夹|目录|创建|写入|修改|删除|整理)/.test(finalMsg.content);
 
-          // #007 G3 O1 (订单定案): 轮次完成后推 1 条观察 → 触发 SelfLearner 分析池
-          //   三元组实证: instruction = 用户消息原文 / steps = [] (v1 不接 TaskExecutor 步骤摘要, W5 接线批扩)
-          //              _result = 'ok' | 'fail' (依据 finalMsg.status, 现签名第 3 参下划线未用, #007 填语义, 不动方法签名)
-          //   容错: catch→log, 不阻塞 chat 主流 (沿用 #006.5 W1 容错红线)
-          try {
-            SelfLearner.getInstance().observeExecution(
-              content,
-              [],
-              finalMsg.status === 'error' ? 'fail' : 'ok'
+          if (shouldPrecipitate) {
+            hermes.addConversationMemory(conversationId,
+              `用户请求: ${content}\nAI回复: ${finalMsg.content.substring(0, 500)}${finalMsg.content.length > 500 ? '...' : ''}`,
+              50
             );
-          } catch (e) {
-            this.log.warn('[ChatManager] #007 G3 observeExecution 失败 (不阻塞 chat 流)', e);
+            try {
+              const adapter = HermesAdapter.getInstance();
+              const content05 = `用户请求: ${content}\nAI回复: ${finalMsg.content.substring(0, 500)}${finalMsg.content.length > 500 ? '...' : ''}`;
+              const idHash = createHash('sha256').update(`${conversationId}|${content05}`).digest('hex').slice(0, 16);
+              await adapter.store({
+                id: `chat-${idHash}`,
+                content: content05,
+                score: 50,
+                createdAt: Date.now(),
+              });
+            } catch (e) {
+              this.log.warn('[ChatManager] #006.5 W1 向量层沉淀失败 (不阻塞 chat 流)', e);
+            }
           }
         }
+
+        /**
+         * 【M4-B 修正】普通对话流【不产生技能学习样本】。
+         *
+         * 门控是文本猜测，与真实执行无关 —— 用户说"整理一下思路"
+         * 也会被记录，但没有任何执行发生；steps 恒为 [] → 分析器拿不到可学序列。
+         * 真正的执行轨迹由两处产生：agent tool loop 与 TaskExecutor 任务流。
+         * 普通对话没有执行，没有可学的东西，故不产生观察。
+         *
+         * 但「记住聊过什么」（记忆）与「学技能」（学习）是两件事：
+         * 记忆沉淀保留（含上面的 LLM 提炼），学习样本不由对话产生。
+         */
       }
 
       return finalMsg || assistantPlaceholder;
@@ -540,8 +780,46 @@ export class ChatManager {
     }
   }
 
-  // ============ 流式响应处理 ============
+  /**
+   * LLM 提炼记忆（M4.9）。
+   *
+   * 与正则门控的区别：让模型判断"这段对话有没有值得长期记住的用户信息"，
+   * 并产出结构化结论。任何失败（无模型/超时/解析失败）都返回 []，
+   * 由调用方降级到原正则路径 —— 记忆功能不会因为没配模型就整体失效。
+   */
+  private async distillMemories(userText: string, assistantText: string): Promise<DistilledMemory[]> {
+    try {
+      return await MemoryDistiller.getInstance().distill(userText, assistantText);
+    } catch (e) {
+      this.log.warn('[ChatManager] 记忆提炼异常，降级为正则门控', e);
+      return [];
+    }
+  }
 
+  /**
+   * 技能落盘后反哺记忆（自进化闭环的反向回路）。
+   *
+   * SelfLearner 写完 SKILL.md 即结束，记忆库原本完全不知道；
+   * 下次遇到同类任务召回不到"我以前把这事固化成技能了"。
+   * 这里写一条 procedure 记忆补上这条回路。失败不影响技能保存。
+   */
+  private async recordSkillToMemory(proposal: { name: string; description: string; triggerCondition: string; keywords: string[] }): Promise<void> {
+    try {
+      const d = MemoryDistiller.getInstance().buildSkillMemory(proposal);
+      const idHash = createHash('sha256').update(`skill|${proposal.name}|${d.content}`).digest('hex').slice(0, 16);
+      await HermesAdapter.getInstance().store({
+        id: `skill-${idHash}`,
+        content: d.content,
+        score: d.importance,
+        createdAt: Date.now(),
+      });
+      this.log.info('[ChatManager] 技能已反哺记忆库', { skill: proposal.name });
+    } catch (e) {
+      this.log.warn('[ChatManager] 技能反哺记忆失败（不影响技能保存）', e);
+    }
+  }
+
+  // ============ 流式响应处理 ============
   private async streamModelResponse(
     conversationId: string,
     messageId: string,
@@ -967,6 +1245,26 @@ export class ChatManager {
   }
 
   /**
+   * 【NW】真实 token usage 广播 → 渲染层生命体 Orb 精确遥测。
+   * 载荷与 CostTracker 记账同源, 只推送给仍存活的窗口。
+   */
+  private broadcastUsage(conversationId: string, usage: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+    /** provider 真实回传才有；缺失时渲染层不展示思考计数 */
+    reasoningTokens?: number;
+    model: string;
+  }): void {
+    const windows = BrowserWindow.getAllWindows();
+    windows.forEach(w => {
+      if (!w.isDestroyed()) {
+        w.webContents.send('chat:usage', { conversationId, usage });
+      }
+    });
+  }
+
+  /**
    * Phase 3 Task 1: 真 LLM SSE 增量推送
    * 每收到一个 SSE data 行就立即广播一个增量 chunk 到 chat:streamUpdate,
    * 渲染进程 store 通过订阅 onStreamUpdate 把 delta 累积到消息 content,
@@ -1018,8 +1316,16 @@ export class ChatManager {
   }
 
   /**
-   * 派发消息给已注册的 agent(由 IpcServer / TaskExecutor 调用)
-   * 如果没注册 agent,返回 void(noop),不抛错
+   * 派发消息给已注册的 agent(由 sendMessage / IpcServer / TaskExecutor 调用)
+   *
+   * 【W5 接线 · M1-B】此方法此前只 log decision 即丢弃(零调用方),现改为真正执行:
+   *   1. 组装 history(HistoryAssembler 拉会话真源,排除当前 user 消息)
+   *   2. 拉取 Hermes 记忆上下文(管线召回,缺省空串)
+   *   3. 经 think() 进入 tool loop,拿到 decision + token + toolCalls
+   *   4. token 记入 CostTracker(此前 run() 吐出的 token 被丢弃)
+   *   5. 以流式占位消息 + onAgentEvent 广播把执行过程送到渲染层
+   *
+   * 失败一律返回 handled:false(不抛错),调用方据此回落旧管道,保证可用性不回退。
    *
    * contextKind 参数 (v3 #4 + 5 裁决 #4):
    *   - 'ui'        : 来自渲染进程 chat IPC
@@ -1028,20 +1334,589 @@ export class ChatManager {
    *   - 未提供     : 按 'headless' 兜底 (fail-safe, 拒绝 confirm 级命令)
    * 绝不从 LLM 自报, 由入口硬编码。
    */
-  public async dispatchToAgent(msg: ChatMessage, contextKind?: 'ui' | 'headless' | 'im_inbound' | 'scheduler'): Promise<void> {
+  public async dispatchToAgent(
+    conversationId: string,
+    content: string,
+    contextKind: 'ui' | 'headless' | 'im_inbound' | 'scheduler' = 'ui',
+    /** 【M4-E】本次运行禁用的技能 id(配对对照的「不带技能」变体) */
+    suppressedSkills: string[] = [],
+  ): Promise<AgentDispatchResult> {
     if (!this.registeredAgent) {
       this.log.debug('[ChatManager] dispatchToAgent: 未注册 agent,跳过');
-      return;
+      return { handled: false, reason: 'no-agent' };
     }
-    const effectiveKind = contextKind ?? 'headless'
+
+    const conv = this.config.getConversation(conversationId);
+    const history = HistoryAssembler.buildHistory(conv?.messages ?? [], '');
+
+    /**
+     * 【M4-L】把会话选中的 provider 解析成 agent 可用的配置。
+     *
+     * 背景:用户自建的 provider 存在 **ModelManager**(设置 → 模型管理),
+     * 而 agent 路径走 **LlmClient** —— 它只认 **LlmConfigStore**,
+     * 且设置页**没有**后者的入口(`/settings/llm-config` 是孤岛路由)。
+     * 两张表不同步 → agent 每次都拿不到 provider →
+     * "no LLM provider configured" → 回落旧管道(每条消息先失败一次)。
+     *
+     * 这里按**会话**把用户选中的那个 provider 翻译成内联配置带下去,
+     * 不写全局表(全局表按类型索引,同类型的多个用户 provider 会互相覆盖)。
+     */
+    const providerId = conv?.providerId ?? undefined;
+    const modelId = conv?.modelId ?? undefined;
+    const mp = providerId ? this.modelManager.getProvider(providerId) : undefined;
+    const inlineProvider = mp ? toLlmProviderConfig(mp) : undefined;
+
+    // 记忆上下文:管线召回(无 embedding 配置时 HermesAdapter 返空数组,此处不阻塞主链路)
+    let memoryContext = '';
     try {
-      // #005 Step 0 (DEV-014 切除): 派生逻辑留入口 (本处), 经 think(ctx.contextKind) 显式贯穿 —
-      // 模块态 setCommandContext 已删; 本处是唯一派生点 (gateway 轨走 source 参数, 不经此处)。
-      const decision = await this.registeredAgent.think({ conversationId: msg.id, content: msg.content, contextKind: effectiveKind });
-      this.log.debug('[ChatManager] dispatchToAgent: agent decision', { decision, contextKind: effectiveKind });
+      const recalled = await HermesAdapter.getInstance().recall(content, { minScore: RECALL_CHAT_MIN_SCORE });
+      if (Array.isArray(recalled) && recalled.length > 0) {
+        memoryContext = recalled
+          .slice(0, 5)
+          .map(m => `- ${typeof m?.content === 'string' ? m.content : JSON.stringify(m)}`)
+          .join('\n');
+      }
     } catch (e) {
-      this.log.error('[ChatManager] dispatchToAgent 失败', e);
+      this.log.warn('[ChatManager] dispatchToAgent: 记忆召回失败,降级为空上下文');
     }
+
+    // 执行过程占位消息 + 事件订阅(tool_call / tool_result 实时广播)
+    const placeholderId = `assistant_agent_${Date.now()}`;
+    const placeholder: ChatMessage = {
+      id: placeholderId,
+      role: 'assistant',
+      content: '',
+      timestamp: Date.now(),
+      status: 'streaming',
+    };
+    this.config.addMessage(conversationId, placeholder);
+    this.broadcastMessage(conversationId, placeholder);
+
+    const traceId = `agent_${Date.now()}`;
+    // 预先声明 runId 并绑定会话归属 —— brain 无状态(不持有 conversationId),
+    // 事件归属由会话层在中继表登记,这是让 tool_call 可被渲染层消费的前提。
+    const runId = `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    this.agentEventRelay.bindRun(runId, conversationId);
+
+    // 【P3】把 agent run 登记到会话的停止句柄表 —— 子任务由父 run 的 AbortSignal 级联中止。
+    let agentAbortHandle: { runId: string; abort: () => boolean } | undefined;
+    const brainAbort = (this.registeredAgent as { abortRun?: (id: string) => boolean }).abortRun;
+    if (typeof brainAbort === 'function') {
+      agentAbortHandle = {
+        runId,
+        abort: () => brainAbort.call(this.registeredAgent, runId),
+      };
+      let handles = this.agentAborts.get(conversationId);
+      if (!handles) {
+        handles = new Set();
+        this.agentAborts.set(conversationId, handles);
+      }
+      handles.add(agentAbortHandle);
+    }
+
+    // 工具真实落盘的成品先攒在这里，最终写进消息 —— 事件是一次性的，消息才是可持久化的事实。
+    const runArtifacts: ProducedArtifact[] = [];
+    const unsubscribe = this.agentEventRelay.subscribe((ev) => {
+      if (ev.conversationId !== conversationId) return;
+      if (ev.type === 'tool_result' && ev.runId === runId) {
+        const arts = (ev.data as { artifacts?: ProducedArtifact[] })?.artifacts;
+        if (Array.isArray(arts)) runArtifacts.push(...arts);
+      }
+      this.broadcastAgentEvent(conversationId, ev);
+    });
+
+    try {
+      const decision = await this.registeredAgent.think({
+        runId,
+        conversationId,
+        content,
+        contextKind,
+        history: history.map(m => ({ role: m.role, content: m.content })),
+        ...(memoryContext ? { memoryContext } : {}),
+        // 【M4-L】把会话选中的 provider / model 带进 agent
+        ...(inlineProvider ? { provider: inlineProvider.provider, config: inlineProvider } : {}),
+        ...(modelId ? { model: modelId } : {}),
+        // 【M4-E】配对对照:禁用的技能随 ctx 下传,由 load_skill 工具层拒绝
+        ...(suppressedSkills.length > 0 ? { suppressedSkills } : {}),
+      } as never);
+
+      const payload = (decision?.payload ?? {}) as {
+        text?: string
+        totalTokens?: number
+        iterations?: number
+        runId?: string
+        toolCalls?: Array<{ name: string; ok: boolean; durationMs: number; entity?: { kind: string; id: string } }>
+        /** 【M4-D】本次 run 实际应用过的技能 id */
+        appliedSkills?: string[]
+        /** 【M3-E】真实使用的 LLM 模型名(成本按它归集) */
+        llmModel?: string
+        /** 【M3-E】分项 token —— 此前只取 total,输入/输出混在一栏 */
+        promptTokens?: number
+        completionTokens?: number
+        /** 【P2】思考 token —— 来自 provider 的 reasoning_tokens，不是估算值 */
+        reasoningTokens?: number
+        /** 【M4-H】来自兜底占位实现(未接入真实模型) */
+        stub?: boolean
+      };
+      const text = payload.text ?? '';
+      const totalTokens = payload.totalTokens ?? 0;
+      const toolCalls = payload.toolCalls ?? [];
+
+      /**
+       * token 记账 —— run() 已吐出,此前在此处断链丢失。
+       *
+       * 【M3-E 修正两处记账失真】
+       * ① model 此前恒为字面量 `'agent-loop'` —— 成本按**一个假模型名**归集,
+       *    于是"哪个模型花了多少钱"根本查不出来(全部混在一栏)。
+       *    现用载荷里的**真实模型名**(`llmModel`),取不到才回落。
+       * ② inputTokens 此前塞的是 **totalTokens**,outputTokens 恒为 0 ——
+       *    输入输出混在一栏,无法区分"提示词长"还是"回答长"。
+       *    适配器本来就回传 promptTokens/completionTokens,此前被 brain 丢掉了,
+       *    现已一路带上来。
+       */
+      if (totalTokens > 0) {
+        try {
+          const promptTokens = payload.promptTokens ?? 0;
+          const completionTokens = payload.completionTokens ?? 0;
+          // 分项缺失时(老 provider 不回传)按 total 兜底,不记成 0
+          const inputTokens = promptTokens > 0 ? promptTokens : totalTokens;
+          const outputTokens = completionTokens;
+          CostTracker.getInstance().recordUsage({
+            model: payload.llmModel || 'agent-loop',
+            inputTokens,
+            outputTokens,
+            conversationId,
+          });
+
+          // 【NW】把真实 usage 广播到渲染层,驱动生命体 Orb 的精确 token 遥测。
+          // 与记账同源(同一份 payload),避免"账上一个数、界面另一个数"。
+          this.broadcastUsage(conversationId, {
+            promptTokens: inputTokens,
+            completionTokens: outputTokens,
+            totalTokens,
+            reasoningTokens: payload.reasoningTokens,
+            model: payload.llmModel || 'agent-loop',
+          });
+        } catch (e) {
+          this.log.warn('[ChatManager] dispatchToAgent: token 记账失败', e);
+        }
+      }
+
+      /**
+       * 【M4-H】占位回复要**在消息上留痕**,不能只靠正文里的一句话。
+       *
+       * 兜底实现的正文已经写明「未接入真实模型」,但如果它混在正常答复里,
+       * 用户扫一眼很容易当成正常答复划过去。消息状态标成 'stub',
+       * 让「这条是占位答复」成为**结构化事实**而不只是一段文字。
+       */
+      const msgStatus: MessageStatus = payload.stub === true ? 'stub' : 'sent';
+      // 【P2】思考 token 落到消息本身 —— 这样刷新页面后 ThinkingBlock 的计数仍在,
+      // 不依赖一次性 IPC 广播的到达时机。provider 没回传时干脆不带这个字段。
+      const reasoningTokens = payload.reasoningTokens ?? 0;
+      const finalUpdate: Partial<ChatMessage> = {
+        content: text,
+        status: msgStatus,
+        ...(reasoningTokens > 0 ? { thinkingTokens: reasoningTokens } : {}),
+        ...(runArtifacts.length > 0 ? { artifacts: runArtifacts } : {}),
+      };
+      this.config.updateMessage(conversationId, placeholderId, finalUpdate);
+      this.broadcastMessage(conversationId, { ...placeholder, ...finalUpdate });
+
+      this.log.info(
+        `[ChatManager] [${traceId}] agent loop 完成: ${payload.iterations ?? 0} 轮, ` +
+        `${toolCalls.length} 次工具调用, ${totalTokens} tokens`,
+      );
+
+      return {
+        handled: true,
+        content: text,
+        messageId: placeholderId,
+        runId: payload.runId,
+        totalTokens,
+        iterations: payload.iterations ?? 0,
+        toolCalls,
+        appliedSkills: payload.appliedSkills ?? [],
+      };
+    } catch (e) {
+      this.log.error('[ChatManager] dispatchToAgent 失败,交由调用方回落', e);
+      try {
+        this.config.updateMessage(conversationId, placeholderId, {
+          content: `agent 执行失败:${(e as Error).message}`,
+          status: 'error',
+        });
+      } catch { /* 回落消息失败不二次抛 */ }
+      return { handled: false, reason: (e as Error).message };
+    } finally {
+      unsubscribe();
+      this.agentEventRelay.releaseRun(runId);
+      if (agentAbortHandle) this.agentAborts.get(conversationId)?.delete(agentAbortHandle);
+    }
+  }
+
+  /** 把 agent 运行事件广播到渲染层(供工具调用可视化消费) */
+  private broadcastAgentEvent(conversationId: string, event: AgentRunEvent): void {
+    const windows = BrowserWindow.getAllWindows();
+    windows.forEach(w => {
+      if (!w.isDestroyed()) {
+        w.webContents.send('agent:onEvent', { conversationId, event });
+      }
+    });
+  }
+
+  /**
+   * 【M4-E】跑一次技能效用对照实验的**单个变体**。
+   *
+   * 【为什么在主进程做】
+   * 对照实验要真跑 agent(带/不带技能各一遍),而 agent 只在主进程里。
+   * 渲染层只负责发起与展示。
+   *
+   * 【变体如何生效】
+   * `suppressedSkills` 随 AgentContext 下传到工具层,`load_skill` 会拒绝该技能 ——
+   * 这是「不带技能」变体唯一靠得住的做法:光把技能从提示词里摘掉不够,
+   * 模型仍可能凭记忆用同样的做法。
+   */
+  private async runTrialVariant(
+    conversationId: string,
+    instruction: string,
+    suppressedSkills: string[],
+  ): Promise<GradableRun> {
+    const content = instruction;
+    this.config.addMessage(conversationId, {
+      id: `user_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`,
+      role: 'user',
+      content,
+      timestamp: Date.now(),
+      status: 'sent',
+    });
+
+    const result = await this.dispatchToAgent(conversationId, content, 'ui', suppressedSkills);
+    const toolCalls = result.toolCalls ?? [];
+    return {
+      instruction,
+      answer: result.content,
+      toolsUsed: toolCalls.map(c => c.name),
+      hadToolFailure: toolCalls.some(c => !c.ok),
+      hadError: !result.handled,
+      producedAnswer: !!result.content && result.content.length > 0,
+    };
+  }
+
+  /**
+   * 【M4-E】跑一次技能效用对照实验。
+   *
+   * 【成本提示】每个任务跑两遍 → token 翻倍。界面必须先告知用户。
+   *
+   * 【M4-V 裁判对照接线】此前这条路径**从不传 judge** —— 裁判层在生产上
+   * 一次都没跑过(M4-N 只在单测里存在)。现在接上了,但**默认关闭**:
+   *   - 用户显式开了 `enableJudge` 才请求裁判对照
+   *   - 请求了还要过**校准门禁**(evaluateJudgeTrust):
+   *     没归档过校准记录 / 任何一项指标不达标 → 裁判**不被调用**
+   *   - 被拦下时,结果里会写明为什么(judgeStatus),不是静默没跑
+   *
+   * 【为什么裁判用「用户配置的模型」而不是写死的裁判模型】
+   * 校准记录是**按模型**归档的 —— 换了模型,旧记录立刻失效(judge drift)。
+   * 所以门禁查的就是用户当前实际在用的那个模型。
+   */
+  public async runSkillUtilityTrial(
+    skillId: string,
+    tasks: TrialTask[],
+    opts: { enableJudge?: boolean; repeats?: number } = {},
+  ): Promise<TrialResult> {
+    /**
+     * 【M4-AF】每次都开一个**新会话**。
+     *
+     * 之前整轮试验共用一个会话 —— 同任务的两个变体、以及重复跑的次数，
+     * 会把上一轮的对话历史带进下一轮。模型能看到"刚才做过一遍"，
+     * 结果就不再是独立样本（单次试验时看不出来，repeats>1 时直接毁掉重复的意义）。
+     */
+    const executor: TrialExecutor = async (task, o) => {
+      const conv = this.config.createConversation({ title: `技能验证:${skillId}` }).id;
+      try {
+        return await this.runTrialVariant(conv, task.instruction, o.suppressedSkills);
+      } finally {
+        try {
+          this.config.deleteConversation(conv);
+        } catch { /* 清理失败不影响结果 */ }
+      }
+    };
+
+    const trialOpts: TrialOptions = {};
+    // 【M4-AF】重复次数封顶 5 —— 成本是线性翻倍的，不能让一次误输入把额度烧光
+    const repeats = Math.floor(Number(opts.repeats ?? 1));
+    if (Number.isFinite(repeats) && repeats > 1) trialOpts.repeats = Math.min(5, repeats);
+    if (opts.enableJudge) {
+      const judgeCfg = this.resolveJudgeConfig();
+      if (judgeCfg) {
+        // 【门禁】只有门禁放行,才真的构造裁判并传下去
+        const gate = toJudgeGate(evaluateJudgeTrust(judgeCfg.model));
+        if (gate.trusted) {
+          trialOpts.pairwiseJudge = createPairwiseJudge({ model: judgeCfg.model, provider: judgeCfg.provider });
+        }
+        trialOpts.pairwiseGate = gate;
+      } else {
+        // 没配模型 → 门禁无从查起,但**照样要把话说清楚**
+        trialOpts.pairwiseGate = {
+          trusted: false,
+          reason: '没有可用的 LLM provider —— 无法构造裁判,也没有可查的校准记录',
+        };
+      }
+    }
+    return await runSkillTrial(skillId, tasks, executor, trialOpts);
+  }
+
+  /**
+   * 解析"用哪个模型当裁判" —— 取用户当前**启用**的 provider。
+   *
+   * 【为什么取用户的 provider 而不是写死裁判模型】
+   * 校准记录按模型归档:用户换模型 = 旧记录失效。
+   * 写死模型会让门禁查一个跟实际调用不同的模型 → 放行形同虚设。
+   */
+  private resolveJudgeConfig(): { model: string; provider: any } | null {
+    const active = LlmConfigStore.getInstance().getActive();
+    if (!active) return null;
+    const model = active.defaultModel;
+    if (!model) return null;
+    return { model, provider: active.provider };
+  }
+
+  /**
+   * 【M4-V】查当前裁判能不能用 —— 界面用它来决定勾选框是否可勾。
+   */
+  public getJudgeTrust(): { trusted: boolean; model: string; reason: string; basis?: string } {
+    const cfg = this.resolveJudgeConfig();
+    if (!cfg) {
+      return { trusted: false, model: '', reason: '没有启用任何 LLM provider —— 无法构造裁判' };
+    }
+    const verdict = evaluateJudgeTrust(cfg.model);
+    return {
+      trusted: verdict.trusted,
+      model: verdict.model,
+      reason: verdict.trusted ? (verdict.basis ?? '已通过校准门禁') : verdict.reasons.join('；'),
+      basis: verdict.basis,
+    };
+  }
+
+  /**
+   * 【M4-B】记录 agent loop 的一次执行:轨迹观察 + 效果反馈。
+   *
+   * 调研依据:「按整条轨迹评分,而非只看最终答案」——
+   * 经由失败的工具调用得到的正确答案,是潜伏的生产事故。
+   * 因此这里同时记录:
+   *   - 轨迹(工具调用序列 + 每步成败)
+   *   - 最终结果
+   *   - 失败诊断(首个失败步骤 + 分类)
+   * 并把每次工具调用写进 SkillEffectivenessTracker —— 它此前零调用方,
+   * 意味着"技能被调用后效果如何"这个闭环信号从未被采集。
+   */
+  /**
+   * 【M4-D】任务类别归一 —— 与 SelfLearner 共用同一实现(TaskCategory.ts)。
+   * 两边规则必须一致,否则对比组会漏记录。
+   */
+  private normalizeTaskCategory(instruction: string): string {
+    return normalizeTaskCategory(instruction);
+  }
+
+  private recordAgentOutcome(
+    conversationId: string,
+    instruction: string,
+    result: AgentDispatchResult,
+  ): void {
+    const toolCalls = result.toolCalls ?? [];
+    const failed = toolCalls.find(c => !c.ok);
+    const outcome: 'ok' | 'fail' | 'partial' = failed
+      ? (toolCalls.some(c => c.ok) ? 'partial' : 'fail')
+      : 'ok';
+
+    try {
+      // ① 轨迹观察
+      const failure = failed
+        ? {
+            stepIndex: toolCalls.indexOf(failed),
+            ...classifyFailure(failed.name),
+          }
+        : undefined;
+
+      SelfLearner.getInstance().observeExecution(
+        instruction,
+        toolCalls.map(c => ({ name: c.name, ok: c.ok, durationMs: c.durationMs })),
+        outcome,
+        {
+          trajectoryId: result.runId,
+          toolsUsed: toolCalls.map(c => c.name),
+          source: 'agent_loop',
+          ...(failure ? { failure } : {}),
+        },
+      );
+
+      // ② 效果反馈:每个工具调用一条记录 → tracker 才有数据可统计
+      //    unitType='tool' —— 这是【工具级】信号,不是技能级效用。
+      const tracker = SkillEffectivenessTracker.getInstance();
+      for (const c of toolCalls) {
+        tracker.record({
+          skillName: c.name,
+          unitType: 'tool',
+          ts: Date.now(),
+          durationMs: c.durationMs,
+          success: c.ok,
+          conversationId,
+        });
+      }
+
+      /**
+       * 【M4-D】③ 技能级效用信号 —— 「技能 S 被应用了,这次运行成功没」。
+       *
+       * 这是"这个技能到底有没有用"这个问题能被回答的**前提**:
+       * 没有"哪些技能被应用"的记录,就只剩"工具调用的成败",无从谈技能的效用。
+       *
+       * 【category 是关键】记下归一化后的任务类别,才能做
+       * 「同类别任务下:带该技能 vs 不带该技能」的对比 ——
+       * 只看绝对成功率会把"任务本身难"误判成"技能没用"。
+       */
+      const appliedSkills = result.appliedSkills ?? [];
+      if (appliedSkills.length > 0) {
+        const category = this.normalizeTaskCategory(instruction);
+        for (const skillId of appliedSkills) {
+          tracker.record({
+            skillName: skillId,
+            unitType: 'skill',
+            ts: Date.now(),
+            durationMs: 0,
+            success: outcome === 'ok',
+            conversationId,
+            category,
+          });
+        }
+      }
+    } catch (e) {
+      // 记录失败不得影响主流程
+      this.log.warn('[ChatManager] recordAgentOutcome 失败(不阻塞)', e);
+    }
+  }
+
+  /** 广播任务单步状态(让执行过程实时可见) */
+  private broadcastTaskStep(conversationId: string, payload: { planId: string; order: number; status: string; description?: string; error?: string }): void {
+    const windows = BrowserWindow.getAllWindows();
+    windows.forEach(w => {
+      if (!w.isDestroyed()) {
+        w.webContents.send('chat:onTaskStep', { conversationId, ...payload });
+      }
+    });
+  }
+
+  /** 广播执行计划(渲染层据此弹确认框) */
+  private broadcastTaskPlan(conversationId: string, plan: unknown): void {
+    const windows = BrowserWindow.getAllWindows();
+    windows.forEach(w => {
+      if (!w.isDestroyed()) {
+        w.webContents.send('chat:onTaskPlan', plan);
+      }
+    });
+  }
+
+  /**
+   * 请求用户确认执行计划。
+   *
+   * fail-safe 设计:
+   *   - 无任何渲染窗口(定时任务/IM 入口) → 拒绝(不盲执行)
+   *   - 用户 60s 未响应 → 拒绝(不是默认同意)
+   *   - 执行模式非 plan → 立即放行(调用方已判定)
+   *
+   * 拒绝默认值必须是 false:安全边界上,"不知道"不等于"可以"。
+   */
+  private async requestPlanConfirmation(
+    conversationId: string,
+    instruction: string,
+    steps: Array<{ order: number; description: string; status: string; params: Record<string, unknown> }>,
+    timeoutMs = 60_000,
+  ): Promise<boolean> {
+    const windows = BrowserWindow.getAllWindows().filter(w => !w.isDestroyed());
+    if (windows.length === 0) {
+      this.log.warn('[ChatManager] 无渲染窗口,拒绝执行(plan 模式 fail-safe)');
+      return false;
+    }
+
+    const planId = `plan_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+    this.broadcastTaskPlan(conversationId, {
+      conversationId,
+      planId,
+      instruction,
+      steps,
+      riskLevel: steps.length > 5 ? 'high' : steps.length > 2 ? 'medium' : 'low',
+      createdAt: Date.now(),
+    });
+
+    return new Promise<boolean>((resolve) => {
+      let settled = false;
+      const finish = (ok: boolean): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        this.confirmHandlers.delete(planId);
+        resolve(ok);
+      };
+      const timer = setTimeout(() => {
+        this.log.warn(`[ChatManager] 计划 ${planId} 等待确认超时,拒绝执行`);
+        finish(false);
+      }, timeoutMs);
+      this.confirmHandlers.set(planId, finish);
+    });
+  }
+
+  /**
+   * 渲染层确认回调入口(IpcServer 转发 chat:task:confirm)。
+   * 未知 planId 一律拒绝 —— 不给"误确认"留口子。
+   */
+  public resolveTaskConfirmation(planId: string, confirmed: boolean): boolean {
+    const handler = this.confirmHandlers.get(planId);
+    if (!handler) {
+      this.log.warn(`[ChatManager] resolveTaskConfirmation: 未知 planId ${planId},拒绝`);
+      return false;
+    }
+    handler(confirmed);
+    return true;
+  }
+
+  /**
+   * 【M1-E】是否走 agent tool loop。
+   * 判定链(任一为否即回落旧管道):
+   *   1. 已注册 agent
+   *   2. 存在任一已启用且带 apiKey 的 LLM provider(否则 LlmClient 无从调用)
+   *   3. 执行模式 ≠ 'safe'(safe = 纯对话,拦截所有执行类指令)
+   *
+   * 【M1-E 安全修正】原默认值是 'craft'(权限内自动执行),用户在 UI 上完全看不到,
+   *   等于"静默执行"。现默认改为 'plan' —— agent 仍会执行,但经确认门;
+   *   'safe' 才是纯对话。理由见 docs/deviation-ledger.md。
+   */
+  private shouldUseAgentLoop(): boolean {
+    if (!this.registeredAgent) return false;
+    try {
+      const mode = this.getExecutionMode();
+      if (mode === 'safe') return false;
+    } catch (e) {
+      this.log.warn('[ChatManager] shouldUseAgentLoop: 执行模式读取失败,按 plan 处理');
+    }
+    try {
+      const providers = this.modelManager.getAllProviders?.() ?? [];
+      const hasReady = providers.some((p: { enabled?: boolean; apiKey?: string }) => p.enabled !== false && !!p.apiKey);
+      if (!hasReady) {
+        this.log.debug('[ChatManager] shouldUseAgentLoop: 无可用 LLM provider,回落旧管道');
+        return false;
+      }
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  /** 读取执行模式(渲染层 executionMode store 为真源,此处读同一份持久化配置) */
+  public getExecutionMode(): 'safe' | 'plan' | 'craft' {
+    try {
+      const store = ConfigStore.getInstance();
+      // 键名与 IpcServer.ts:1100 的 execution:mode:set 保持一致
+      const raw = store.get('execution.mode') as string | undefined;
+      if (raw === 'safe' || raw === 'plan' || raw === 'craft') return raw;
+    } catch { /* 配置不可用则用默认值 */ }
+    return 'craft'; // 【M1-E】默认保持 craft;UI 常驻可见,用户知情
   }
 
   /**

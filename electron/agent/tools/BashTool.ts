@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - BashTool (M1 v0.1 + #002-v3)
+ * New World - BashTool (M1 v0.1 + #002-v3)
  *
  * 跑命令, 跟 ClaudeCode Bash tool 协议对齐:
  *   args: { command: string, args?: string[], cwd?: string, timeout_ms?: number }
@@ -53,6 +53,8 @@ export class BashTool implements PiPiTool {
       cwd,
       timeoutMs,
       contextKind: ctx?.contextKind ?? 'headless',
+      // 【M3-C】中止信号透传 —— 用户点「停止」时整棵进程树被杀
+      ...(ctx?.signal ? { signal: ctx.signal } : {}),
     })
 
     if (r.ok) {

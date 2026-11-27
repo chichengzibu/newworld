@@ -6,7 +6,7 @@ export const goHttp: TemplateConfig = {
   description: 'Go 1.23 net/http + 标准库 RESTful API',
   triggers: ['go', 'golang', 'go-http', '后端go', '微服务go', 'restful-go'],
   devPort: 8080,
-  image: 'pipiclaw/sandbox-base:latest',
+  image: 'newworld/sandbox-base:latest',
   files: [
     {
       path: 'main.go',
@@ -27,7 +27,7 @@ func main() {
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		json.NewEncoder(w).Encode(map[string]string{
-			"message": "Hello from Go HTTP (PiPiClaw sandbox)",
+			"message": "Hello from Go HTTP (New World sandbox)",
 		})
 	})
 
@@ -57,7 +57,7 @@ func main() {
     },
     {
       path: 'go.mod',
-      content: `module pipiclaw-go-sandbox
+      content: `module newworld-go-sandbox
 
 go 1.23
 `,

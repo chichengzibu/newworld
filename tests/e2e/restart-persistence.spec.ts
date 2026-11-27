@@ -20,11 +20,11 @@ import { homedir, tmpdir } from 'node:os'
 
 function findUserDataPath(): string {
   // Electron 30 + 没有 productName,默认 userData = %APPDATA%/Electron
-  // 也可能写到 pipiclaw / PiPiClaw(legacy)
+  // 也可能写到 newworld / New World(legacy)
   const candidates = [
     join(homedir(), 'AppData', 'Roaming', 'Electron'),
-    join(homedir(), 'AppData', 'Roaming', 'pipiclaw'),
-    join(homedir(), 'AppData', 'Roaming', 'PiPiClaw'),
+    join(homedir(), 'AppData', 'Roaming', 'newworld'),
+    join(homedir(), 'AppData', 'Roaming', 'New World'),
   ]
   for (const c of candidates) {
     if (existsSync(c)) return c
@@ -95,7 +95,7 @@ test.describe('T+420 状态持久化到磁盘', () => {
       const r = await api.models.add({
         name: 'Ollama Persistence Test (T+420)',
         type: 'openai',
-        baseUrl: 'http://localhost:11434/v1',
+        baseUrl: 'http://127.0.0.1:11434/v1',
         apiKey: 'no-key',
         enabled: true,
         timeout: 30_000,

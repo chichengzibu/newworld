@@ -115,7 +115,7 @@ async function synthesizeStepsWithLlm(
 
   const llm = LlmClient.getInstance()
   const systemPrompt = [
-    '你是 PiPiClaw 的 SKILL.md 生成助手。',
+    '你是 New World 的 SKILL.md 生成助手。',
     '根据用户提供的触发短语、描述、录屏帧数,产出 4-8 行可执行的步骤列表,',
     '每行以 "N. " 开头,使用简体中文,可包含鼠标动作 / 键盘动作 / 等待 / 截图 / 检查等动词。',
     '只输出步骤文本,不要输出任何额外的说明或前言。',

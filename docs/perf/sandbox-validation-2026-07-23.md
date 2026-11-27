@@ -1,4 +1,4 @@
-# PiPiClaw Sandbox 验证报告
+# New World Sandbox 验证报告
 
 生成时间: 2026-07-23T09:27:39.436Z
 commit: local

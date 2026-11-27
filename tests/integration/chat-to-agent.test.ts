@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 vi.mock('electron', () => ({
-  app: { getPath: vi.fn((k: string) => `/tmp/pipiclaw-int-c2a-${k}`) },
+  app: { getPath: vi.fn((k: string) => `/tmp/newworld-int-c2a-${k}`) },
   ipcMain: { handle: vi.fn(), on: vi.fn(), removeHandler: vi.fn() },
   BrowserWindow: { getAllWindows: () => [] },
   shell: {},

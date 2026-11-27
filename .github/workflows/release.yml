@@ -1,4 +1,4 @@
-name: PiPiClaw Release
+name: New World Release
 
 # 触发: 推送 v* 格式 tag (如 v4.3.1)
 # 行为: 3 平台 build installer → 上传 artifact → 生成 latest.yml → 创建 GitHub Release
@@ -55,7 +55,7 @@ jobs:
         if: matrix.os == 'windows-latest'
         uses: actions/upload-artifact@v4
         with:
-          name: pipiclaw-windows-x64
+          name: newworld-windows-x64
           path: |
             release/*.exe
             release/*.blockmap
@@ -65,7 +65,7 @@ jobs:
         if: matrix.os == 'macos-13'
         uses: actions/upload-artifact@v4
         with:
-          name: pipiclaw-macos
+          name: newworld-macos
           path: |
             release/*.dmg
             release/*.blockmap
@@ -75,7 +75,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         uses: actions/upload-artifact@v4
         with:
-          name: pipiclaw-linux-x64
+          name: newworld-linux-x64
           path: |
             release/*.AppImage
             release/*.deb
@@ -101,6 +101,32 @@ jobs:
           ls -laR dist-release/
           find dist-release -type f \( -name "*.exe" -o -name "*.dmg" -o -name "*.AppImage" -o -name "*.yml" -o -name "*.blockmap" \) | sort
 
+      # ── SHA256 校验值 ──
+      # 本版本未做代码签名（Windows 会显示"未知发布者"）。
+      # 提供 SHA256 让用户能自行核对下载的文件是否被篡改 —— 这是无签名
+      # 分发的最低诚信要求，也是用户判断"这个 exe 是不是官方构建"的唯一手段。
+      - name: Generate SHA256 checksums
+        run: |
+          cd dist-release
+          {
+            echo "# SHA256 校验值"
+            echo ""
+            echo "本版本未进行代码签名。Windows 首次运行可能提示「未知发布者」，"
+            echo "这是未签名软件的预期行为，不表示文件有问题。"
+            echo ""
+            echo "校验方式："
+            echo "  Windows  PowerShell: Get-FileHash <文件名> -Algorithm SHA256"
+            echo "  macOS/Linux           shasum -a 256 <文件名>"
+            echo ""
+            echo "如果校验值与本文件一致，说明下载完整且未被篡改。"
+            echo ""
+            find . -type f \( -name "*.exe" -o -name "*.dmg" -o -name "*.AppImage" -o -name "*.deb" -o -name "*.rpm" \) -print0 \
+              | sort -z \
+              | xargs -0 -I{} sh -c 'printf "%s  %s\n" "$(sha256sum "{}" | cut -d" " -f1)" "$(basename "{}")"'
+          } > SHA256SUMS.txt
+          echo "=== 生成的校验文件 ==="
+          cat SHA256SUMS.txt
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
@@ -114,6 +140,26 @@ jobs:
           prerelease: ${{ contains(inputs.tag || github.ref_name, '-alpha') || contains(inputs.tag || github.ref_name, '-beta') || contains(inputs.tag || github.ref_name, '-rc') }}
           generate_release_notes: true
           fail_on_unmatched_files: true
+          body: |
+            ## 关于代码签名
+
+            本版本**未进行代码签名**。Windows 首次运行安装包时可能弹出「未知发布者」
+            的 SmartScreen 提示 —— 这是未签名软件的预期行为，不表示文件有问题。
+
+            请下载后核对 `SHA256SUMS.txt` 中的校验值，确认文件完整且未被篡改：
+
+            ```powershell
+            # Windows
+            Get-FileHash "New World-x.x.x-Setup.exe" -Algorithm SHA256
+            ```
+
+            ```bash
+            # macOS / Linux
+            shasum -a 256 "New World-x.x.x.dmg"
+            ```
+
+            所有构建产物均由本仓库的 GitHub Actions 从源码构建，
+            可在 Actions 页面查看对应 tag 的构建记录。
           files: |
             dist-release/**/*.exe
             dist-release/**/*.dmg
@@ -122,5 +168,6 @@ jobs:
             dist-release/**/*.rpm
             dist-release/**/*.yml
             dist-release/**/*.blockmap
+            dist-release/SHA256SUMS.txt
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

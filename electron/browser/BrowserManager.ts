@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - 浏览器自动化管理器
+ * New World - 浏览器自动化管理器
  * 
  * 职责：
  * 1. 管理 Playwright 浏览器实例

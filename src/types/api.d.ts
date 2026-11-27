@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - 前端API类型定义
+ * New World - 前端API类型定义
  * 
  * 定义前端使用的类型
  */

@@ -1,12 +1,32 @@
 /**
- * PiPiClaw - OpenAI-compatible adapter (M1 v0.1)
+ * New World - OpenAI-compatible adapter (M1 v0.1)
  *
  * 复用 OpenAI 协议但 baseUrl + model 来自 LlmConfig.
  * 覆盖: deepseek / ollama (via /v1/chat/completions) / volc_ark / openrouter / custom.
  */
 import { LogManager } from '../../core/LogManager'
-import type { LlmConfig, LlmRequest, LlmResponse, LlmToolCall, LlmStreamChunk } from '../types'
+import type { LlmConfig, LlmRequest, LlmResponse, LlmToolCall, LlmStreamChunk, LlmUsage } from '../types'
 import { DEFAULT_API_BASE, DEFAULT_MODELS } from '../types'
+import { parseOpenAiUsage } from '../usage'
+
+/**
+ * 判断 baseUrl 是否指向 ollama。
+ *
+ * 【为什么要单独判】
+ * `reasoning_effort: "none"` 是 ollama 对 OpenAI 标准的扩展取值
+ * (OpenAI 官方只有 minimal/low/medium/high)。给别的 provider 发这个字段
+ * 可能被拒或被忽略 —— 所以只对 ollama 发。
+ *
+ * 识别方式:默认端口 11434(ollama 固定端口)。本机/容器/LAN 都覆盖。
+ */
+function isOllamaBaseUrl(baseUrl: string): boolean {
+  try {
+    const u = new URL(baseUrl)
+    return u.port === '11434' || u.pathname.includes('/11434')
+  } catch {
+    return false
+  }
+}
 
 export class OpenAiCompatibleAdapter {
   private log = LogManager.getInstance()
@@ -28,6 +48,19 @@ export class OpenAiCompatibleAdapter {
       }
       if (req.think !== undefined) {
         body.think = req.think
+        // 【M4-J 实测发现】ollama 的 OpenAI 兼容端点**不认** `think` 字段 ——
+        // 它只在原生 /api/chat 上认。实测:同一模型同一请求,
+        //   /v1/chat/completions + think:false → 仍产出 reasoning(1073 字符),
+        //                                    且 max_tokens 全被 thinking 吃掉 → content 为空
+        //   /v1/chat/completions + reasoning_effort:"none" → reasoning 长度 0、58 token 出内容
+        // 后果不是"慢一点":裁判这类**只要一行结论**的调用会直接拿不到结论
+        // (content 空 → 解析失败 → 记为 unknown)。
+        // 故:ollama 端点改用 reasoning_effort 关闭 thinking;
+        //     非 ollama 端点不动(它们各有各的扩展字段,乱发可能被拒)。
+        if (req.think === false && isOllamaBaseUrl(baseUrl)) {
+          body.reasoning_effort = 'none'
+          delete body.think
+        }
       }
       const headers: Record<string, string> = {
         'Content-Type': 'application/json',
@@ -83,13 +116,7 @@ export class OpenAiCompatibleAdapter {
         content,
         model,
         durationMs: Date.now() - startMs,
-        usage: data.usage
-          ? {
-              promptTokens: data.usage.prompt_tokens,
-              completionTokens: data.usage.completion_tokens,
-              totalTokens: data.usage.total_tokens,
-            }
-          : undefined,
+        usage: parseOpenAiUsage(data.usage),
         ...(toolCalls && toolCalls.length > 0 ? { toolCalls } : {}),
         ...(reasoning ? { reasoning } : {}),
         ...(finishReason ? { finishReason } : {}),
@@ -150,7 +177,7 @@ export class OpenAiCompatibleAdapter {
     let accContent = ''
     let accReasoning = ''
     const toolAcc: Map<number, { id: string; name: string; args: string }> = new Map()
-    let finalUsage: { promptTokens: number; completionTokens: number; totalTokens: number } | undefined
+    let finalUsage: LlmUsage | undefined
     let finalFinish: string | undefined
     try {
       while (true) {
@@ -189,11 +216,7 @@ export class OpenAiCompatibleAdapter {
           }
           if (choice?.finish_reason) finalFinish = choice.finish_reason
           if (data.usage) {
-            finalUsage = {
-              promptTokens: data.usage.prompt_tokens,
-              completionTokens: data.usage.completion_tokens,
-              totalTokens: data.usage.total_tokens,
-            }
+            finalUsage = parseOpenAiUsage(data.usage)
           }
         }
       }

@@ -1,4 +1,4 @@
-# PiPiClaw × LLM 模型适配笔记
+# New World × LLM 模型适配笔记
 
 跑过 4 个本地 Ollama 模型的真实经验,这里记下"踩过的坑"。
 
@@ -18,7 +18,7 @@
 - **症状**: `max_tokens=200`,模型返回 200 token 全部是 reasoning,content 空
 - **触发**: qwen3 / qwen3.5 / DeepSeek-R1 等 reasoning 模型,问题稍微复杂就触发
 - **修复**:
-  - PiPiClaw OpenAI adapter 已 fallback `content ?? reasoning`(commit 34eb72f)
+  - New World OpenAI adapter 已 fallback `content ?? reasoning`(commit 34eb72f)
   - **生产 max_tokens 建议 ≥ 2048**,给 thinking + 答案都留够空间
 
 ### 2. `think: false` 协议层不生效
@@ -29,7 +29,7 @@
   qwen3.5:9b: 仍走 native thinking
   ```
 - **解决**: 必须用 Ollama native API `/api/chat`(不走 `/v1/chat/completions`)
-- **PiPiClaw**: 目前走 OpenAI compat,所以**关闭 thinking 不可用**。建议用 `max_tokens ≥ 4096` 间接解决
+- **New World**: 目前走 OpenAI compat,所以**关闭 thinking 不可用**。建议用 `max_tokens ≥ 4096` 间接解决
 
 ### 3. qwen3:14b 慢于 qwen3.5:9b
 - **症状**: 14B 比 9B 慢 2 倍(42s vs 23s)
@@ -74,7 +74,7 @@
 - gpt-4o-mini:便宜 + 质量好
 - gpt-4o:质量顶(贵)
 
-## PiPiClaw 已做的修复
+## New World 已做的修复
 
 | commit | 修复内容 |
 |---|---|

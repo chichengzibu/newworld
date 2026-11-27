@@ -2,8 +2,8 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 vi.mock('electron', () => ({
   app: {
-    getPath: vi.fn(() => '/tmp/pipiclaw-adapters-test'),
-    getName: () => 'pipiclaw',
+    getPath: vi.fn(() => '/tmp/newworld-adapters-test'),
+    getName: () => 'newworld',
     getVersion: () => '0.0.0',
     isPackaged: false,
   },

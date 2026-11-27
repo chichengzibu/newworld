@@ -1,9 +1,9 @@
 {
-  // PiPiClaw 鸿蒙 PC(HarmonyOS PC)HAP 壳工程 —— 应用级配置
+  // New World 鸿蒙 PC(HarmonyOS PC)HAP 壳工程 —— 应用级配置
   // 与 electron-builder.json5 的 appId 保持一致,便于两端共用同一套包标识。
   "app": {
-    "bundleName": "com.pipiclaw.app",
-    "vendor": "PiPiClaw Team",
+    "bundleName": "com.newworld.nw",
+    "vendor": "New World Team",
     // versionCode 必须为整数且单调递增:主(4).次(05).修订(00).构建(00) → 4050000
     "versionCode": 4050000,
     // versionName 只允许 A.B.C 形式,不能带 -alpha 后缀

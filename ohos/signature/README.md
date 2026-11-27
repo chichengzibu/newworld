@@ -6,12 +6,12 @@
 
 | 文件 | 说明 | 来源 |
 |------|------|------|
-| `pipiclaw-debug.p12` | 调试密钥库 | DevEco Studio 自动生成 |
-| `pipiclaw-debug.cer` | 调试证书 | DevEco Studio 自动生成 |
-| `pipiclaw-debug.p7b` | 调试 Profile | DevEco Studio 自动生成（需登录华为开发者账号） |
-| `pipiclaw-release.p12` | 发布密钥库 | 本地生成，妥善备份 |
-| `pipiclaw-release.cer` | 发布证书 | AppGallery Connect 申请 |
-| `pipiclaw-release.p7b` | 发布 Profile | AppGallery Connect 申请（绑定 bundleName `com.pipiclaw.app`） |
+| `nw-debug.p12` | 调试密钥库 | DevEco Studio 自动生成 |
+| `nw-debug.cer` | 调试证书 | DevEco Studio 自动生成 |
+| `nw-debug.p7b` | 调试 Profile | DevEco Studio 自动生成（需登录华为开发者账号） |
+| `nw-release.p12` | 发布密钥库 | 本地生成，妥善备份 |
+| `nw-release.cer` | 发布证书 | AppGallery Connect 申请 |
+| `nw-release.p7b` | 发布 Profile | AppGallery Connect 申请（绑定 bundleName `com.newworld.nw`） |
 
 ## 生成方式
 
@@ -28,7 +28,7 @@ TODO（需 DevEco 确认）：本机未安装 DevEco Studio，以下为标准流
 
 TODO（需 AGConnect 确认）：
 
-1. AppGallery Connect 创建应用，`bundleName` 必须为 `com.pipiclaw.app`（与 `AppScope/app.json5` 一致）
+1. AppGallery Connect 创建应用，`bundleName` 必须为 `com.newworld.nw`（与 `AppScope/app.json5` 一致）
 2. 生成密钥与 CSR，申请发布证书与 Profile
 3. 把 `.p12 / .cer / .p7b` 放入本目录，在 `build-profile.json5` 中新增 release 签名配置
 

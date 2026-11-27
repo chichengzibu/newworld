@@ -88,7 +88,7 @@ E2E_ELECTRON=1 PLAYWRIGHT_BROWSERS_PATH=0 npx playwright test tests/e2e/confirm-
 ```
 > `E2E_ELECTRON=1` 才启动 Electron (不设时 2 skipped, CI 防御, 与其余 6 spec 同配方);
 > `PLAYWRIGHT_BROWSERS_PATH=0` 钉死项目本地浏览器;
-> 审计落 fresh temp userData (`<tmp>/pipiclaw-p0-confirm-dialog-*/audit/openclaw.audit.jsonl`), 不涉生产 %APPDATA% 路径。
+> 审计落 fresh temp userData (`<tmp>/newworld-p0-confirm-dialog-*/audit/openclaw.audit.jsonl`), 不涉生产 %APPDATA% 路径。
 
 **S1-allow / S2-deny 签名 (都绑本次调用: 行数差 + 字段解析, 禁只验"文件变长")**:
 - S1-allow: 真点击「允许」→ `res.success===true` (`git --version` 真跑出 `git version 2.55.0.windows.2`); 审计**恰新增 2 行** (start `humanConfirm='true'` `confirmChannel='ui'` / finish `exit=0`, 同 opId)
@@ -125,7 +125,7 @@ console.log('[冒烟结果]', res);
 - ✅ 审计断言绑定本次调用 (行数差 = 2 / 1 + 字段解析), 非"文件变长"
 - ✅ 报告标注**签名人 = 自动化证据**, 禁出现"用户已验证"表述
 
-~~**冒烟后动作**: 我读 `%APPDATA%/PiPiClaw/audit/openclaw.audit.jsonl` 末 2 行贴出来 + 用户口头确认 "冒烟过"。~~
+~~**冒烟后动作**: 我读 `%APPDATA%/New World/audit/openclaw.audit.jsonl` 末 2 行贴出来 + 用户口头确认 "冒烟过"。~~
 (2026-10-12 作废 — S2 裁决改自动化签; 上列手工动作仅留作复核参考路径时的操作提示)
 
 ---
@@ -136,12 +136,12 @@ console.log('[冒烟结果]', res);
 ```typescript
 export const TEST_USER_DATA = pathNode.join(
   os.tmpdir(),                              // Windows: C:\Users\Administrator\AppData\Local\Temp
-  `pipiclaw-test-userdata-${process.pid}`,  // 按 worker pid 隔离
+  `newworld-test-userdata-${process.pid}`,  // 按 worker pid 隔离
 )
 ```
-- 测试 audit 样例文件物理路径 = **`<os.tmpdir()>/pipiclaw-test-userdata-<pid>/audit/openclaw.audit.jsonl`** (Windows 是 `%LOCALAPPDATA%\Temp\pipiclaw-test-userdata-<pid>\...`)
+- 测试 audit 样例文件物理路径 = **`<os.tmpdir()>/newworld-test-userdata-<pid>/audit/openclaw.audit.jsonl`** (Windows 是 `%LOCALAPPDATA%\Temp\newworld-test-userdata-<pid>\...`)
 - **不在 %APPDATA% (生产路径)** → 测试隔离生效, **非违规**
-- 实跑验证: 我在测试环境里 `ls "$APPDATA/PiPiClaw/audit/openclaw.audit.jsonl"` → **"OK: %APPDATA% 无审计文件"** (上一轮终端输出已确认)
+- 实跑验证: 我在测试环境里 `ls "$APPDATA/New World/audit/openclaw.audit.jsonl"` → **"OK: %APPDATA% 无审计文件"** (上一轮终端输出已确认)
 - **冒烟** 时才落 %APPDATA% (因为那是真 app 跑), 符合预期
 
 ---

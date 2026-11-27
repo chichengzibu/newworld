@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - 权限状态管理 (Pinia Store)
+ * New World - 权限状态管理 (Pinia Store)
  */
 
 import { defineStore } from 'pinia';
@@ -244,6 +244,20 @@ export const usePermissionsStore = defineStore('permissions', () => {
     return null;
   }
 
+  /** 重置权限配置到出厂安全态（IPC 已存在，此前缺 store 透传与 UI 入口） */
+  async function resetPermissions(): Promise<boolean> {
+    try {
+      const result = await (window as any).electronAPI?.permissions?.reset();
+      if (result?.success) {
+        await fetchPermissionSets();
+        return true;
+      }
+    } catch (err) {
+      console.error('重置权限失败:', err);
+    }
+    return false;
+  }
+
   return {
     permissionSets,
     activeSetId,
@@ -259,6 +273,7 @@ export const usePermissionsStore = defineStore('permissions', () => {
     updatePermissionRule,
     deletePermissionSet,
     duplicatePermissionSet,
-    checkPermission
+    checkPermission,
+    resetPermissions
   };
 });

@@ -61,7 +61,7 @@ describe('voice 模块 barrel 出口完备(②笔)', () => {
       pitch: 0.9,
       volume: 0.8,
     }
-    expect(Object.keys(sample).sort()).toEqual(['autoRead', 'pitch', 'rate', 'volume'].concat('enabled' ? 'enabled' : []).sort())
+    expect(Object.keys(sample).sort()).toEqual(['autoRead', 'pitch', 'rate', 'volume', 'enabled'].sort())
     // \u4e25\u683c\u65b9\u5f0f\u9a8c\u8bc1 5 \u4e2a\u5b57\u6bb5
     expect(Object.keys(sample)).toHaveLength(5)
   })

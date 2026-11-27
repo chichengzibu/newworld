@@ -5,8 +5,8 @@ import * as path from 'node:path'
 
 vi.mock('electron', () => ({
   app: {
-    getPath: vi.fn((k: string) => `/tmp/pipiclaw-llm-mock-${k}`),
-    getName: () => 'pipiclaw',
+    getPath: vi.fn((k: string) => `/tmp/newworld-llm-mock-${k}`),
+    getName: () => 'newworld',
     getVersion: () => '0.0.0',
   },
   safeStorage: {
@@ -91,7 +91,7 @@ describe('P1-T1.4: LLM real-use with mock server', () => {
 
   beforeEach(() => {
     // 清掉 userData 防止跨测试污染
-    const tmpRoot = '/tmp/pipiclaw-llm-mock-userData'
+    const tmpRoot = '/tmp/newworld-llm-mock-userData'
     if (fs.existsSync(tmpRoot)) {
       fs.rmSync(tmpRoot, { recursive: true, force: true })
     }

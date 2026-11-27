@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - Agent tools shared internals (M1 v0.1)
+ * New World - Agent tools shared internals (M1 v0.1)
  *
  * Glob / Grep 工具共享的辅助函数: 安全 cwd 解析 + glob 段正则.
  */
@@ -26,7 +26,7 @@ export function resolveSafeCwd(input: string | undefined): string {
 }
 
 export function reEsc(s: string): string {
-  return s.replace(/[.+^$()|{}\[\]\\]/g, '\\$&')
+  return s.replace(/[.+^$()|{}[\]\\]/g, '\\$&')
 }
 
 /** 把 glob 单段转成正则 (无 ** 跨段; ** 在段内退化为 *). */

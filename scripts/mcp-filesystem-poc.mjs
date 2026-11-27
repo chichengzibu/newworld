@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 //
-// PiPiClaw - MCP filesystem server PoC (真链路测试)
+// New World - MCP filesystem server PoC (真链路测试)
 //
 // 目的: 验证 stdio transport + filesystem server 能跑通真实工具调用
 // 不需要启动 electron — 直接 import McpManager, 跑全套:
-//   1. startServer(pipiclaw-filesystem) -> spawn 子进程 + initialize + tools/list
+//   1. startServer(newworld-filesystem) -> spawn 子进程 + initialize + tools/list
 //   2. listAllTools() -> 期望 5 个工具
 //   3. invoke list_directory -> 期望 .vue 文件列表
 //   4. invoke read_file(package.json) -> 期望 content
@@ -84,7 +84,7 @@ const SAMPLE_FILE = path.join(PROJECT_ROOT, 'package.json');
 const SAMPLE_FILE_MD = path.join(PROJECT_ROOT, 'CHANGELOG.md');
 const BAD_PATH = 'C:\\Windows\\System32\\drivers\\etc\\hosts';
 
-console.log('========== PiPiClaw MCP filesystem PoC ==========');
+console.log('========== New World MCP filesystem PoC ==========');
 console.log(`project root: ${PROJECT_ROOT}`);
 console.log(`fs script:    ${FS_SCRIPT}`);
 console.log(`allowed:      ${JSON.stringify(ALLOWED_PATHS)}`);
@@ -252,16 +252,17 @@ async function phase1_directStdio() {
         const text = readFileResp.result.content?.[0]?.text ?? '{}';
         const parsed = JSON.parse(text);
         const hasName = parsed.content?.includes('"name"');
-        const isPipiclaw = parsed.content?.includes('pipiclaw');
-        readOk = hasName && isPipiclaw;
-        readDetail = `size=${parsed.size}, hasName=${hasName}, isPipiclaw=${isPipiclaw}`;
+        // package.json 的 name 字段为 new-world
+        const isNewworld = parsed.content?.includes('new-world');
+        readOk = hasName && isNewworld;
+        readDetail = `size=${parsed.size}, hasName=${hasName}, isNewworld=${isNewworld}`;
       } catch (e) {
         readDetail = `parse error: ${e.message}`;
       }
     } else {
       readDetail = `error: ${JSON.stringify(readFileResp)}`;
     }
-    record('read_file(package.json) 含 "name" + "pipiclaw"', readOk, readDetail);
+    record('read_file(package.json) 含 "name" + "new-world"', readOk, readDetail);
 
     // 5. search_files
     const searchResp = await client.request('tools/call', {

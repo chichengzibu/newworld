@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - 预加载脚本
+ * New World - 预加载脚本
  * 
  * 职责：
  * 1. 暴露安全的contextBridge API
@@ -10,7 +10,10 @@
 import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron';
 
 // NOVA #005-B · M4 — 语音设置类型(第②笔, IPC 接线配套 import; 不新增模块)
-import type { VoiceSettings } from '../core/voice';
+// 【M3-F 修断链】原路径是 '../core/voice' —— 但本文件在 electron/ 下,
+// '../core/voice' 指向仓库根(不存在)。正确是 './core/voice';
+// 又因 tsconfig 用 moduleResolution:'bundler'(不解析目录索引),需指到 barrel 文件。
+import type { VoiceSettings } from './core/voice/index';
 
 // Sentry 渲染↔主进程桥接:必须在 preload 顶部引入,使渲染端事件能转发到主进程上报。
 import '@sentry/electron/preload';
@@ -20,17 +23,19 @@ import '@sentry/electron/preload';
 const IpcChannels = {
   // ========== NOVA #003-C · M2 — BootDirector handshake(第②笔, 纯追加) ==========
   //   命名空间 nova:* 与既有 webcontainer:* / runtime:* 不冲突
-  //   交叉引用: IpcServer.ts L386-397 的 nova:renderer-ready / nova:boot-skip handler
-  //   splash.html(第③笔) 在 window.nova 命名空间下消费
+  //   交叉引用: IpcServer.ts 的 nova:renderer-ready handler
+  //   splash.html 在 window.electronAPI.nova 下消费 onBootEvent 真实日志流
   NOVA_RENDERER_READY: 'nova:renderer-ready',
-  NOVA_BOOT_SKIP: 'nova:boot-skip',
   NOVA_BOOT_EVENT: 'nova:boot-event',
   NOVA_SEARCH: 'nova:search',
+  NOVA_SEARCH_GET_SETTINGS: 'nova:search:get-settings',
+  NOVA_SEARCH_SET_SETTINGS: 'nova:search:set-settings',
   NOVA_VOICE_GET_SETTINGS: 'nova:voice:get-settings',
   NOVA_VOICE_SET_SETTINGS: 'nova:voice:set-settings',
 
   // 文件选择器
   DIALOG_OPEN_FILE: 'dialog:openFile',
+  DIALOG_SAVE_FILE: 'dialog:saveFile',
 
   // 窗口管理
   WINDOW_MINIMIZE: 'window:minimize',
@@ -62,6 +67,15 @@ const IpcChannels = {
   CONFIG_GET: 'config:get',
   CONFIG_SET: 'config:set',
   CONFIG_GET_ALL: 'config:getAll',
+
+  // 本地备份（无服务器方案的导出导入通道）
+  BACKUP_CREATE: 'backup:create',
+  BACKUP_LIST: 'backup:list',
+  BACKUP_RESTORE: 'backup:restore',
+  BACKUP_EXPORT: 'backup:exportToFile',
+  BACKUP_EXPORT_SKILLS: 'backup:exportSkills',
+  BACKUP_COPY: 'backup:copy',
+  BACKUP_OPEN_FOLDER: 'backup:openFolder',
 
   // 模型管理
   MODELS_LIST: 'models:list',
@@ -105,9 +119,15 @@ const IpcChannels = {
   CHAT_ON_MESSAGE: 'chat:onMessage',
   CHAT_ON_CONVERSATION_UPDATE: 'chat:onConversationUpdate',
   CHAT_ON_STREAM_UPDATE: 'chat:streamUpdate',
+  // 【NW】真实 token usage → 生命体 Orb 精确遥测
+  CHAT_ON_USAGE: 'chat:usage',
 
   // 应用信息
   APP_VERSION: 'app:version',
+
+  // 错误台账(渲染端 → 主进程, 见 electron/core/ErrorLedger.ts)
+  ERROR_REPORT: 'error:report',
+  ERROR_SUMMARY: 'error:summary',
 
   // 任务执行
   TASK_EXECUTE: 'task:execute',
@@ -121,6 +141,15 @@ const IpcChannels = {
   EXECUTION_MODE_SET: 'execution:mode:set',
   EXECUTION_MODE_CHECK: 'execution:mode:check',
   EXECUTION_MODE_CANCEL: 'execution:mode:cancel',
+
+  // 【M1-D】任务计划确认 —— 主进程生成计划后 emit,渲染层弹确认框
+  CHAT_ON_TASK_PLAN: 'chat:onTaskPlan',
+  CHAT_ON_TASK_STEP: 'chat:onTaskStep',
+  CHAT_ON_AGENT_EVENT: 'agent:onEvent',
+  CHAT_TASK_CONFIRM: 'chat:task:confirm',
+
+  // 【M4-A】技能提案通知 —— 主进程 emit,渲染层 SkillsView 订阅
+  SKILLS_NEW_PROPOSAL: 'skills:new-proposal',
 
   // 任务日志
   TASK_LOG_GET: 'task:log:get',
@@ -144,6 +173,8 @@ const IpcChannels = {
   FILE_READ_CLIPBOARD_IMAGE: 'file:readClipboardImage',
   FILE_GET_INFO: 'file:getInfo',
   FILE_GET_ALLOWED_EXTENSIONS: 'file:getAllowedExtensions',
+  FILE_OPEN: 'file:open',
+  FILE_SHOW_IN_FOLDER: 'file:showInFolder',
   FILE_UPLOAD_TO_IM: 'file:upload-to-im',
   FILE_LIST_SUPPORTED_PLATFORMS: 'file:list-supported-platforms',
 
@@ -160,6 +191,14 @@ const IpcChannels = {
   // Hermes 记忆管理
   HERMES_GET_MEMORIES: 'hermes:getMemories',
   HERMES_SAVE_CORE_MEMORY: 'hermes:saveCoreMemory',
+  // 【M3-A】嵌入后端配置 —— 真向量的入口
+  HERMES_EMBEDDING_GET: 'hermes:embedding:get',
+  HERMES_EMBEDDING_SET: 'hermes:embedding:set',
+  HERMES_EMBEDDING_DETECT: 'hermes:embedding:detect',
+  HERMES_EMBEDDING_TEST: 'hermes:embedding:test',
+  // 【M4-F】用户接受度信号
+  LEARNING_RECORD_ACCEPTANCE: 'learning:recordAcceptance',
+  LEARNING_GET_ACCEPTANCE: 'learning:getAcceptance',
 
   // Phase 2: 任务预览与确认
   TASK_TRACE: 'task:trace',
@@ -172,6 +211,25 @@ const IpcChannels = {
   // ========== 技能管理 ==========
   SKILLS_LIST: 'skills:list',
   SKILLS_TOGGLE: 'skills:toggle',
+  SKILLS_GET_EFFECTIVENESS: 'skills:getEffectiveness',
+  // 【M4-E】技能效用对照实验
+  SKILLS_RUN_UTILITY_TRIAL: 'skills:runUtilityTrial',
+  // 【M4-V】裁判放行门禁状态
+  SKILLS_JUDGE_TRUST: 'skills:judgeTrust',
+  // 【M4-AG】对照实验的样本量指引
+  SKILLS_TRIAL_GUIDANCE: 'skills:trialGuidance',
+  // 【M4-X】开源技能库(搜索/推荐/下载安装)
+  SKILLS_HUB_SEARCH: 'skills:hub:search',
+  SKILLS_HUB_RECOMMEND: 'skills:hub:recommend',
+  SKILLS_HUB_REFRESH: 'skills:hub:refresh',
+  SKILLS_HUB_INSTALL: 'skills:hub:install',
+  // 【M4-AC】安装前预览(列出包内文件/可执行脚本)
+  SKILLS_HUB_PREVIEW: 'skills:hub:preview',
+  // 【M4-AD】自定义源管理
+  SKILLS_HUB_SOURCES_LIST: 'skills:hub:sources:list',
+  SKILLS_HUB_SOURCES_ADD: 'skills:hub:sources:add',
+  SKILLS_HUB_SOURCES_REMOVE: 'skills:hub:sources:remove',
+  SKILLS_GET_UTILITY: 'skills:getUtility',
   SKILLS_RELOAD: 'skills:reload',
   SKILLS_IMPORT_FILE: 'skills:importFile',
   SKILLS_IMPORT_URL: 'skills:importUrl',
@@ -222,6 +280,7 @@ const IpcChannels = {
   CHANNEL_SEND: 'channel:send',
   CHANNEL_MESSAGE_STATS: 'channel:message-stats',
   CHANNEL_MESSAGE_HISTORY: 'channel:message-history',
+  CHANNEL_POLLER_STATUS: 'channel:poller-status',
 
   // 路由规则
   ROUTING_LIST: 'routing:list',
@@ -232,17 +291,10 @@ const IpcChannels = {
   PERMISSION_LIST: 'permission:list',
   PERMISSION_EXPORT: 'permission:export',
   PERMISSION_IMPORT: 'permission:import',
+  PERMISSION_GRANT: 'permission:grant',
+  PERMISSION_REVOKE: 'permission:revoke',
 
   // ClawHub 技能市场
-  CLAWHUB_PUBLISH: 'clawhub:publish',
-  CLAWHUB_REVIEW: 'clawhub:review',
-  CLAWHUB_SEARCH: 'clawhub:search',
-  CLAWHUB_RATE: 'clawhub:rate',
-  CLAWHUB_LIST_PENDING: 'clawhub:list-pending',
-  CLAWHUB_LIST_TEMPLATES: 'clawhub:list-templates',
-  CLAWHUB_GET_TEMPLATE: 'clawhub:get-template',
-  CLAWHUB_LIST_TEMPLATE_CATEGORIES: 'clawhub:list-template-categories',
-  CLAWHUB_INSTANTIATE_TEMPLATE: 'clawhub:instantiate-template',
 
   // ClawHub 远程仓库 (registry)
   CLAWHUB_REGISTRY_LIST: 'skills:clawhub:registry:list',
@@ -268,6 +320,9 @@ const IpcChannels = {
   INSIGHT_TRACE_START: 'insight:trace:start',
   INSIGHT_TRACE_END: 'insight:trace:end',
   INSIGHT_COST_TODAY: 'insight:cost:today',
+  // 【M4-H】模型定价(用户可维护自己的模型单价)
+  INSIGHT_GET_PRICING: 'insight:getPricing',
+  INSIGHT_SET_PRICING: 'insight:setPricing',
 
   // ========== W7.0.2: D5 录屏转技能 IPC ==========
   D5_RUN: 'd5:run',
@@ -276,6 +331,7 @@ const IpcChannels = {
   CHANNEL_CONFIG_GET: 'channel-config:get',
   CHANNEL_CONFIG_SAVE: 'channel-config:save',
   CHANNEL_CONFIG_TEST: 'channel-config:test',
+  CHANNEL_CONFIG_DELETE: 'channel-config:delete',
 
   // ========== W13.A: 5 demo IPC ==========
   D1_DEMO_RUN: 'd1-demo:run',
@@ -618,7 +674,8 @@ interface ToolDefinition {
 const electronAPI = {
   // ========== 文件选择器 ==========
   dialog: {
-    openFile: (options: any) => ipcRenderer.invoke(IpcChannels.DIALOG_OPEN_FILE, options)
+    openFile: (options: any) => ipcRenderer.invoke(IpcChannels.DIALOG_OPEN_FILE, options),
+    saveFile: (options: any) => ipcRenderer.invoke(IpcChannels.DIALOG_SAVE_FILE, options)
   },
 
   // ========== 窗口管理 ==========
@@ -647,12 +704,43 @@ const electronAPI = {
     getVersion: () => ipcRenderer.invoke(IpcChannels.APP_VERSION),
     getPlatform: () => process.platform
   },
+
+  // ========== 错误台账(渲染端错误上报, P0 工程规范可观测性) ==========
+  errors: {
+    report: (record: { kind?: string; message: string; source?: string; stack?: string }) =>
+      ipcRenderer.invoke(IpcChannels.ERROR_REPORT, record),
+    summary: () => ipcRenderer.invoke(IpcChannels.ERROR_SUMMARY)
+  },
   
   // ========== 全局配置 ==========
   config: {
     get: (key: string) => ipcRenderer.invoke(IpcChannels.CONFIG_GET, key),
     set: (key: string, value: any) => ipcRenderer.invoke(IpcChannels.CONFIG_SET, key, value),
     getAll: () => ipcRenderer.invoke(IpcChannels.CONFIG_GET_ALL)
+  },
+
+  // ========== 本地备份：配置/技能导出导入，无账号云同步 ==========
+  backup: {
+    create: (options?: { includeApiKeys?: boolean }): Promise<IpcResponse<{
+      filePath: string; size: number; manifest: Record<string, unknown>
+    }>> => ipcRenderer.invoke(IpcChannels.BACKUP_CREATE, options),
+    list: (): Promise<IpcResponse<Array<{
+      fileName: string; filePath: string; createdAt: number; size: number;
+      appVersion: string; apiKeysIncluded: boolean
+    }>>> => ipcRenderer.invoke(IpcChannels.BACKUP_LIST),
+    restore: (filePath: string): Promise<IpcResponse<{
+      manifest: Record<string, unknown>; safetyBackupPath: string; restored: string[];
+      redactedKeys: number; skillCount: number
+    }>> => ipcRenderer.invoke(IpcChannels.BACKUP_RESTORE, filePath),
+    exportToFile: (filePath: string, options?: { includeApiKeys?: boolean }): Promise<IpcResponse<{
+      filePath: string; size: number; manifest: Record<string, unknown>
+    }>> => ipcRenderer.invoke(IpcChannels.BACKUP_EXPORT, filePath, options),
+    exportSkills: (filePath: string): Promise<IpcResponse<{
+      filePath: string; size: number; skillCount: number
+    }>> => ipcRenderer.invoke(IpcChannels.BACKUP_EXPORT_SKILLS, filePath),
+    copy: (sourcePath: string, targetPath: string): Promise<IpcResponse<{ filePath: string; size: number }>> =>
+      ipcRenderer.invoke(IpcChannels.BACKUP_COPY, sourcePath, targetPath),
+    openFolder: (): Promise<IpcResponse<void>> => ipcRenderer.invoke(IpcChannels.BACKUP_OPEN_FOLDER)
   },
   
   // ========== 网关管理 ==========
@@ -817,6 +905,38 @@ const electronAPI = {
       return () => ipcRenderer.removeListener(IpcChannels.CHAT_ON_MESSAGE, handler);
     },
 
+    /**
+     * 【M1-D】订阅任务执行计划 —— 主进程在执行前 emit,渲染层弹确认框。
+     * 这条通道此前完全不存在,导致 Chat.vue 的确认弹窗成为死代码:
+     * showTaskConfirmDialog 从未被置 true,用户永远看不到。
+     */
+    onTaskPlan: (callback: (plan: any) => void) => {
+      const handler: IpcCallback = (_, plan) => callback(plan);
+      ipcRenderer.on(IpcChannels.CHAT_ON_TASK_PLAN, handler);
+      return () => ipcRenderer.removeListener(IpcChannels.CHAT_ON_TASK_PLAN, handler);
+    },
+
+    /** 【M1-D】订阅单步状态流 —— 让执行过程实时可见(而非一行静态文字挂到结束) */
+    onTaskStep: (callback: (data: any) => void) => {
+      const handler: IpcCallback = (_, data) => callback(data);
+      ipcRenderer.on(IpcChannels.CHAT_ON_TASK_STEP, handler);
+      return () => ipcRenderer.removeListener(IpcChannels.CHAT_ON_TASK_STEP, handler);
+    },
+
+    /** 【M1-C】订阅 agent 运行事件(tool_call / tool_result)—— 工具调用可视化 */
+    onAgentEvent: (callback: (data: any) => void) => {
+      const handler: IpcCallback = (_, data) => callback(data);
+      ipcRenderer.on(IpcChannels.CHAT_ON_AGENT_EVENT, handler);
+      return () => ipcRenderer.removeListener(IpcChannels.CHAT_ON_AGENT_EVENT, handler);
+    },
+
+    /**
+     * 【M1-D】回传用户对执行计划的确认/拒绝。
+     * 执行权在主进程 —— 这里只是把用户的决定送回去,绝不自己执行。
+     */
+    confirmTaskPlan: (planId: string, confirmed: boolean): Promise<IpcResponse<boolean>> =>
+      ipcRenderer.invoke(IpcChannels.CHAT_TASK_CONFIRM, { planId, confirmed }),
+
     onConversationUpdate: (callback: (data: { conversation: Conversation }) => void) => {
       const handler: IpcCallback = (_, data) => callback(data);
       ipcRenderer.on(IpcChannels.CHAT_ON_CONVERSATION_UPDATE, handler);
@@ -827,6 +947,16 @@ const electronAPI = {
       const handler: IpcCallback = (_, data) => callback(data);
       ipcRenderer.on(IpcChannels.CHAT_ON_STREAM_UPDATE, handler);
       return () => ipcRenderer.removeListener(IpcChannels.CHAT_ON_STREAM_UPDATE, handler);
+    },
+
+    // 【NW】真实 token usage (prompt/completion/total) — 来自主进程 CostTracker 同源
+    onUsage: (callback: (data: {
+      conversationId: string;
+      usage: { promptTokens: number; completionTokens: number; totalTokens: number; reasoningTokens?: number; model: string };
+    }) => void) => {
+      const handler: IpcCallback = (_, data) => callback(data);
+      ipcRenderer.on(IpcChannels.CHAT_ON_USAGE, handler);
+      return () => ipcRenderer.removeListener(IpcChannels.CHAT_ON_USAGE, handler);
     }
   },
 
@@ -928,6 +1058,12 @@ const electronAPI = {
     getAllowedExtensions: (): Promise<IpcResponse<string[]>> =>
       ipcRenderer.invoke(IpcChannels.FILE_GET_ALLOWED_EXTENSIONS),
 
+    // 成品交付：只接受主进程白名单目录内的真实文件，路径由主进程再次校验
+    open: (filePath: string): Promise<IpcResponse<{ path: string }>> =>
+      ipcRenderer.invoke(IpcChannels.FILE_OPEN, filePath),
+    showInFolder: (filePath: string): Promise<IpcResponse<{ path: string }>> =>
+      ipcRenderer.invoke(IpcChannels.FILE_SHOW_IN_FOLDER, filePath),
+
     // P0-06: 文件上传到 IM 平台
     uploadToIM: (args: { platform: string; filePath: string; channelId: string; targetUserId: string; accessToken?: string }): Promise<IpcResponse<any>> =>
       ipcRenderer.invoke(IpcChannels.FILE_UPLOAD_TO_IM, args),
@@ -937,7 +1073,9 @@ const electronAPI = {
 
   // ========== 对话导出 ==========
   conversation: {
-    export: (conversation: any, format: 'markdown' | 'pdf' | 'word', outputPath?: string): Promise<IpcResponse<{ filePath: string }>> =>
+    export: (conversation: any, format: 'markdown' | 'pdf' | 'word', outputPath?: string): Promise<IpcResponse<{
+      filePath: string; actualFormat?: string; degraded?: boolean
+    }>> =>
       ipcRenderer.invoke(IpcChannels.CONVERSATION_EXPORT, conversation, format, outputPath)
   },
 
@@ -970,7 +1108,24 @@ const electronAPI = {
       ipcRenderer.invoke(IpcChannels.HERMES_GET_MEMORIES),
 
     saveCoreMemory: (content: string): Promise<IpcResponse<void>> =>
-      ipcRenderer.invoke(IpcChannels.HERMES_SAVE_CORE_MEMORY, content)
+      ipcRenderer.invoke(IpcChannels.HERMES_SAVE_CORE_MEMORY, content),
+
+    /** 【M3-A】嵌入后端配置 —— 此前真后端代码在,但没有任何配置入口 */
+    embedding: {
+      get: (): Promise<IpcResponse<{ config: any; model: string; realVectors: boolean }>> =>
+        ipcRenderer.invoke(IpcChannels.HERMES_EMBEDDING_GET),
+
+      set: (cfg: { provider?: string; apiKey?: string; baseUrl?: string; model?: string }): Promise<IpcResponse<any>> =>
+        ipcRenderer.invoke(IpcChannels.HERMES_EMBEDDING_SET, cfg),
+
+      /** 探测本地 ollama:可达吗?装了哪些嵌入模型? */
+      detect: (baseUrl?: string): Promise<IpcResponse<{ available: boolean; models: string[]; error?: string }>> =>
+        ipcRenderer.invoke(IpcChannels.HERMES_EMBEDDING_DETECT, baseUrl),
+
+      /** 探测后端可用性 + 语义是否成立(伪向量也"连得上",但召回是噪声) */
+      test: (opts?: { provider?: string; baseUrl?: string; apiKey?: string; modelName?: string }): Promise<IpcResponse<any>> =>
+        ipcRenderer.invoke(IpcChannels.HERMES_EMBEDDING_TEST, opts),
+    }
   },
 
   // ========== 技能管理 ==========
@@ -980,6 +1135,63 @@ const electronAPI = {
 
       toggle: (id: string, enabled: boolean): Promise<IpcResponse<boolean>> =>
         ipcRenderer.invoke(IpcChannels.SKILLS_TOGGLE, id, enabled),
+
+      /** 【M4-B】效果判定列表(工具/技能的调用成败结论) */
+      getEffectiveness: (): Promise<IpcResponse<any[]>> =>
+        ipcRenderer.invoke(IpcChannels.SKILLS_GET_EFFECTIVENESS),
+
+      /**
+       * 【M4-E】跑一次技能效用对照实验(每个任务跑两遍:带/不带技能)。
+       * **token 成本翻倍** —— 调用前须向用户说明。
+       */
+      runUtilityTrial: (payload: { skillId: string; tasks: Array<{ id: string; instruction: string; expectation?: any }>; enableJudge?: boolean; repeats?: number }): Promise<IpcResponse<any>> =>
+        ipcRenderer.invoke(IpcChannels.SKILLS_RUN_UTILITY_TRIAL, payload),
+
+      /**
+       * 【M4-X】在开源技能库里搜索。
+       * 索引是本地缓存的 → **断网也能搜**(只有下载安装需要网络)。
+       */
+      /** 【M4-AG】开跑前的样本量指引（要检出多大差异、约需多少个任务） */
+      trialGuidance: (): Promise<IpcResponse<{ minTasks: number; byEffect: Array<{ delta: number; pairs: number }> }>> =>
+        ipcRenderer.invoke(IpcChannels.SKILLS_TRIAL_GUIDANCE),
+
+      hubSearch: (opts: { q?: string; sourceId?: string; category?: string; limit?: number }): Promise<IpcResponse<any[]>> =>
+        ipcRenderer.invoke(IpcChannels.SKILLS_HUB_SEARCH, opts),
+
+      /** 【M4-X】推荐可下载的技能(已装的不会重复推荐) */
+      hubRecommend: (opts?: { limit?: number }): Promise<IpcResponse<{ items: any[]; index: any }>> =>
+        ipcRenderer.invoke(IpcChannels.SKILLS_HUB_RECOMMEND, opts ?? {}),
+
+      /** 【M4-X】刷新索引(联网抓取开源技能库) */
+      hubRefresh: (): Promise<IpcResponse<any>> =>
+        ipcRenderer.invoke(IpcChannels.SKILLS_HUB_REFRESH),
+
+      /** 【M4-AD】自定义源:列出 / 添加 / 删除 */
+      hubSourcesList: (): Promise<IpcResponse<{ builtin: any[]; custom: any[] }>> =>
+        ipcRenderer.invoke(IpcChannels.SKILLS_HUB_SOURCES_LIST),
+      hubSourcesAdd: (payload: { name: string; repo: string; branch?: string; indexUrl: string; kind?: string }): Promise<IpcResponse<any>> =>
+        ipcRenderer.invoke(IpcChannels.SKILLS_HUB_SOURCES_ADD, payload),
+      hubSourcesRemove: (id: string): Promise<IpcResponse<any>> =>
+        ipcRenderer.invoke(IpcChannels.SKILLS_HUB_SOURCES_REMOVE, { id }),
+
+      /** 【M4-AC】安装前预览:列出包内文件与可执行脚本 */
+      hubPreview: (id: string): Promise<IpcResponse<{ files: string[]; executables: string[] }>> =>
+        ipcRenderer.invoke(IpcChannels.SKILLS_HUB_PREVIEW, { id }),
+
+      /** 【M4-X】下载并安装一个技能 */
+      hubInstall: (id: string): Promise<IpcResponse<any>> =>
+        ipcRenderer.invoke(IpcChannels.SKILLS_HUB_INSTALL, { id }),
+
+      /**
+       * 【M4-V】查当前裁判能不能用(校准门禁)。
+       * 界面用它决定"启用裁判对照"的勾选框能不能勾 —— 不通过时禁用并说明原因。
+       */
+      judgeTrust: (): Promise<IpcResponse<{ trusted: boolean; model: string; reason: string; basis?: string }>> =>
+        ipcRenderer.invoke(IpcChannels.SKILLS_JUDGE_TRUST),
+
+      /** 【M4-D】技能的边际效用(同类别任务下,带它 vs 不带它的成功率差) */
+      getUtility: (): Promise<IpcResponse<any[]>> =>
+        ipcRenderer.invoke(IpcChannels.SKILLS_GET_UTILITY),
 
       reload: (): Promise<IpcResponse<void>> =>
         ipcRenderer.invoke(IpcChannels.SKILLS_RELOAD),
@@ -1079,6 +1291,18 @@ const electronAPI = {
 
   // ========== Hermes 学习统计 ==========
   learning: {
+    /**
+     * 【M4-F】上报用户对某条助手答复的接受度。
+     * 用户点了「重新生成」= 明确不要;下一条消息含纠正词 = 不满意;
+     * 含认可词 = 满意;都没命中 = unknown(**不猜**)。
+     */
+    recordAcceptance: (payload: { conversationId: string; messageId: string; verdict: 'accepted' | 'rejected' | 'unknown'; reason?: string }): Promise<IpcResponse<any>> =>
+      ipcRenderer.invoke(IpcChannels.LEARNING_RECORD_ACCEPTANCE, payload),
+
+    /** 【M4-F】按技能查接受度 */
+    getAcceptance: (skillId?: string): Promise<IpcResponse<any>> =>
+      ipcRenderer.invoke(IpcChannels.LEARNING_GET_ACCEPTANCE, skillId),
+
     getStats: (): Promise<IpcResponse<Record<string, number>>> =>
       ipcRenderer.invoke(IpcChannels.LEARNING_GET_STATS),
 
@@ -1092,7 +1316,21 @@ const electronAPI = {
       ipcRenderer.invoke(IpcChannels.LEARNING_GET_PENDING_PROPOSAL),
 
     clearPendingProposal: (): Promise<IpcResponse<void>> =>
-      ipcRenderer.invoke(IpcChannels.LEARNING_CLEAR_PENDING_PROPOSAL)
+      ipcRenderer.invoke(IpcChannels.LEARNING_CLEAR_PENDING_PROPOSAL),
+
+    /**
+     * 【M4-A 修复】订阅新技能提案。
+     *
+     * 此前 SkillsView 用 `window.require('electron').ipcRenderer` 订阅
+     * 'skills:new-proposal',但渲染窗口是 contextIsolation: true +
+     * nodeIntegration: false —— window.require 是 undefined,订阅永远注册不上,
+     * 提案横幅永远不会出现。必须经 preload 暴露。
+     */
+    onNewProposal: (callback: (proposal: any) => void) => {
+      const handler: IpcCallback = (_, proposal) => callback(proposal);
+      ipcRenderer.on(IpcChannels.SKILLS_NEW_PROPOSAL, handler);
+      return () => ipcRenderer.removeListener(IpcChannels.SKILLS_NEW_PROPOSAL, handler);
+    }
   },
 
   // ========== Agent 能力域 (W3 新增) ==========
@@ -1107,8 +1345,14 @@ const electronAPI = {
 
   // ========== Channel 能力域 (W3 新增) ==========
   channel: {
-    list: (): Promise<IpcResponse<Array<{ id: string; name: string; healthy: boolean }>>> =>
-      ipcRenderer.invoke(IpcChannels.CHANNEL_LIST),
+    list: (): Promise<IpcResponse<Array<{
+      id: string
+      name: string
+      kind: string
+      enabled: boolean
+      healthy: boolean
+      healthError?: string
+    }>>> => ipcRenderer.invoke(IpcChannels.CHANNEL_LIST),
     messageStats: (): Promise<IpcResponse<{
       total: number
       byChannel: Record<string, { in: number; out: number; total: number }>
@@ -1130,28 +1374,6 @@ const electronAPI = {
     permissionImport: (args: { json: string; mode?: 'merge' | 'replace' }): Promise<IpcResponse<any>> =>
       ipcRenderer.invoke(IpcChannels.PERMISSION_IMPORT, args),
 
-    // P1-03~06 ClawHub 技能市场
-    clawhubPublish: (args: any): Promise<IpcResponse<any>> => ipcRenderer.invoke(IpcChannels.CLAWHUB_PUBLISH, args),
-    clawhubReview: (args: { skillId: string; approve: boolean; reviewerId: string; reason?: string }): Promise<IpcResponse<any>> =>
-      ipcRenderer.invoke(IpcChannels.CLAWHUB_REVIEW, args),
-    clawhubSearch: (opts?: any): Promise<IpcResponse<any[]>> => ipcRenderer.invoke(IpcChannels.CLAWHUB_SEARCH, opts || {}),
-    clawhubRate: (args: any): Promise<IpcResponse<any>> => ipcRenderer.invoke(IpcChannels.CLAWHUB_RATE, args),
-    clawhubListPending: (): Promise<IpcResponse<any[]>> => ipcRenderer.invoke(IpcChannels.CLAWHUB_LIST_PENDING),
-
-    // P2-03 技能模板
-    clawhubListTemplates: (opts?: { category?: string; query?: string }): Promise<IpcResponse<any[]>> =>
-      ipcRenderer.invoke(IpcChannels.CLAWHUB_LIST_TEMPLATES, opts || {}),
-    clawhubGetTemplate: (id: string): Promise<IpcResponse<any>> =>
-      ipcRenderer.invoke(IpcChannels.CLAWHUB_GET_TEMPLATE, id),
-    clawhubListTemplateCategories: (): Promise<IpcResponse<string[]>> =>
-      ipcRenderer.invoke(IpcChannels.CLAWHUB_LIST_TEMPLATE_CATEGORIES),
-    clawhubInstantiateTemplate: (args: {
-      templateId: string
-      customName?: string
-      authorId: string
-      authorName: string
-    }): Promise<IpcResponse<any>> => ipcRenderer.invoke(IpcChannels.CLAWHUB_INSTANTIATE_TEMPLATE, args),
-
     // ClawHub 远程仓库 (registry): 检查更新 / 一键安装
     clawhubRegistryList: (baseUrl?: string): Promise<IpcResponse<any[]>> =>
       ipcRenderer.invoke(IpcChannels.CLAWHUB_REGISTRY_LIST, baseUrl),
@@ -1170,10 +1392,16 @@ const electronAPI = {
     modelUsageTop: (opts?: { n?: number; sortBy?: 'tokens' | 'cost' | 'calls' }): Promise<IpcResponse<any[]>> =>
       ipcRenderer.invoke(IpcChannels.MODEL_USAGE_TOP, opts || {}),
     modelUsageTotal: (): Promise<IpcResponse<any>> => ipcRenderer.invoke(IpcChannels.MODEL_USAGE_TOTAL),
-    health: (channelId: string): Promise<IpcResponse<{ healthy: boolean; latencyMs: number; stub: boolean; channelId: string }>> =>
+    health: (channelId: string): Promise<IpcResponse<{ healthy: boolean; latencyMs?: number; error?: string; channelId: string }>> =>
       ipcRenderer.invoke(IpcChannels.CHANNEL_HEALTH, channelId),
-    send: (msg: { channelId: string; to: string; text?: string }): Promise<IpcResponse<{ messageId: string; stub: boolean }>> =>
-      ipcRenderer.invoke(IpcChannels.CHANNEL_SEND, msg)
+    send: (msg: { channelId: string; to: string; text?: string }): Promise<IpcResponse<{ channelId: string; to: string }>> =>
+      ipcRenderer.invoke(IpcChannels.CHANNEL_SEND, msg),
+    pollerStatus: (): Promise<IpcResponse<{ running: boolean; offset: number; polls: number }>> =>
+      ipcRenderer.invoke(IpcChannels.CHANNEL_POLLER_STATUS),
+    permissionGrant: (args: { channelKind: string; userId: string }): Promise<IpcResponse<void>> =>
+      ipcRenderer.invoke(IpcChannels.PERMISSION_GRANT, args),
+    permissionRevoke: (args: { channelKind: string; userId: string }): Promise<IpcResponse<{ revoked: boolean }>> =>
+      ipcRenderer.invoke(IpcChannels.PERMISSION_REVOKE, args)
   },
 
   // ========== P7 Sandbox 能力域 (W3 新增) ==========
@@ -1185,7 +1413,19 @@ const electronAPI = {
     preview: (): Promise<IpcResponse<{ url: string; port: number; expiresAt: number; stub: boolean }>> =>
       ipcRenderer.invoke(IpcChannels.SANDBOX_PREVIEW),
     stop: (): Promise<IpcResponse<{ stub: boolean }>> =>
-      ipcRenderer.invoke(IpcChannels.SANDBOX_STOP)
+      ipcRenderer.invoke(IpcChannels.SANDBOX_STOP),
+    /** M4.9：Codex 式砂箱档位 / 自动审查配置 */
+    getApprovalConfig: (): Promise<IpcResponse<{
+      tier: 'read-only' | 'workspace' | 'full'
+      autoReview: boolean
+      limits: { maxConcurrent: number; maxMemoryMB: number; maxChildProcesses: number; sampleIntervalMs: number }
+    }>> => ipcRenderer.invoke('sandbox:get-approval-config'),
+    setApprovalConfig: (patch: {
+      tier?: 'read-only' | 'workspace' | 'full'
+      autoReview?: boolean
+      limits?: Partial<{ maxConcurrent: number; maxMemoryMB: number; maxChildProcesses: number }>
+    }): Promise<IpcResponse<{ tier: string; autoReview: boolean }>> =>
+      ipcRenderer.invoke('sandbox:set-approval-config', patch)
   },
 
   // ========== Insight 能力域 (W3 新增) ==========
@@ -1194,8 +1434,28 @@ const electronAPI = {
       ipcRenderer.invoke(IpcChannels.INSIGHT_TRACE_START, name, attrs),
     traceEnd: (spanId: string): Promise<IpcResponse<{ spanId: string; endMs: number; stub: boolean }>> =>
       ipcRenderer.invoke(IpcChannels.INSIGHT_TRACE_END, spanId),
-    costToday: (): Promise<IpcResponse<{ totalCostUsd: number; totalTokens: number; stub: boolean }>> =>
-      ipcRenderer.invoke(IpcChannels.INSIGHT_COST_TODAY)
+    /**
+     * 【M3-E】今日成本 —— 此前 handler 是**硬编码 0 的 stub**,
+     * 而 CostTracker 一直在真实记账。现返回真数据。
+     */
+    costToday: (): Promise<IpcResponse<{
+      totalCostUsd: number
+      totalTokens: number
+      totalInputTokens: number
+      totalOutputTokens: number
+      byModel: Record<string, number>
+      recent: any[]
+      stub: boolean
+    }>> =>
+      ipcRenderer.invoke(IpcChannels.INSIGHT_COST_TODAY),
+
+    /** 【M4-H】已知定价(默认表 + 用户自定义) */
+    getPricing: (): Promise<IpcResponse<any[]>> =>
+      ipcRenderer.invoke(IpcChannels.INSIGHT_GET_PRICING),
+
+    /** 【M4-H】给自己用的模型配单价(每 1k token 的美元价) */
+    setPricing: (payload: { model: string; inputPer1kUsd: number; outputPer1kUsd: number }): Promise<IpcResponse<any>> =>
+      ipcRenderer.invoke(IpcChannels.INSIGHT_SET_PRICING, payload),
   },
 
   // ========== W7.0.2: D5 录屏转技能 IPC ==========
@@ -1208,7 +1468,8 @@ const electronAPI = {
   channelConfig: {
     get: (): Promise<IpcResponse<any[]>> => ipcRenderer.invoke(IpcChannels.CHANNEL_CONFIG_GET),
     save: (args: { platform: string; config: any }): Promise<IpcResponse<void>> => ipcRenderer.invoke(IpcChannels.CHANNEL_CONFIG_SAVE, args),
-    test: (args: { platform: string; config: any }): Promise<IpcResponse<{ message: string }>> => ipcRenderer.invoke(IpcChannels.CHANNEL_CONFIG_TEST, args)
+    test: (args: { platform: string; config: any }): Promise<IpcResponse<{ message: string }> & { message?: string }> => ipcRenderer.invoke(IpcChannels.CHANNEL_CONFIG_TEST, args),
+    delete: (args: { platform: string }): Promise<IpcResponse<{ removed: boolean }>> => ipcRenderer.invoke(IpcChannels.CHANNEL_CONFIG_DELETE, args)
   },
 
   // ========== W13.A: 5 demo IPC ==========
@@ -1244,10 +1505,9 @@ const electronAPI = {
 
   // ========== NOVA #003-C · M2 — Boot handshake(第②笔, 纯追加) ==========
   //   渲染端 Chat 壳首帧后 → window.electronAPI.nova.notifyRendererReady()
-  //   splash 内 click/keydown → window.electronAPI.nova.skip()
+  //   splash 只消费 nova:boot-event 真实日志流; 跳过入口已移除
   nova: {
     notifyRendererReady: () => ipcRenderer.invoke(IpcChannels.NOVA_RENDERER_READY),
-    skip: () => ipcRenderer.send(IpcChannels.NOVA_BOOT_SKIP),
     onBootEvent: (handler: (ev: Record<string, unknown>) => void) => {
       const wrapped = (_e: IpcRendererEvent, payload: Record<string, unknown>) => handler(payload);
       ipcRenderer.on(IpcChannels.NOVA_BOOT_EVENT, wrapped);
@@ -1258,6 +1518,12 @@ const electronAPI = {
     // 出参: { success: boolean, data?: SearchResult[], error?: string, code?: string, elapsedMs?: number }
     search: (q: { query: string; count?: number; locale?: string }) =>
       ipcRenderer.invoke(IpcChannels.NOVA_SEARCH, q),
+    // ========== v4.8 — 联网搜索「给模型用」的开关(第②笔, 纯追加) ==========
+    // 语义: 开启后模型可在回答时自主调用 web_search；关闭时工具不进入 LLM schema。
+    searchGetSettings: (): Promise<IpcResponse<{ enabled: boolean }>> =>
+      ipcRenderer.invoke(IpcChannels.NOVA_SEARCH_GET_SETTINGS),
+    searchSetSettings: (patch: { enabled: boolean }): Promise<IpcResponse<{ enabled: boolean }>> =>
+      ipcRenderer.invoke(IpcChannels.NOVA_SEARCH_SET_SETTINGS, patch),
     // ========== NOVA #005-B · M4 — 语音设置(第②笔, 纯追加) ==========
     // 入参: getSettings 无; setSettings(patch) patch = Partial<{ enabled / autoRead / rate / pitch / volume }>
     // 出参: { success: boolean, data?: VoiceSettings, error?: string }

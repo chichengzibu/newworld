@@ -1,4 +1,4 @@
-# PiPiClaw IPC 协议
+# New World IPC 协议
 
 > 主进程 ↔ 渲染端 107 个 handler + 多个 event 的完整索引。
 > 实测来源:`dist-electron/main.js` 启动后 `ipcMain.eventNames().length`。

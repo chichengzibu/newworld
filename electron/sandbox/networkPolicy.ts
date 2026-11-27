@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - Sandbox 网络白名单(W10.2)
+ * New World - Sandbox 网络白名单(W10.2)
  *
  * 职责:
  * 1. 默认白名单(9 个包管理镜像:npm / pypi / maven / go proxy 国内+官方)

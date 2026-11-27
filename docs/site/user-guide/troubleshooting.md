@@ -227,7 +227,7 @@ rm -rf ~/.config/PiPiClaw
 **根因**: GitHub Release 未上传 `latest.yml`(electron-builder 自动生成,需 CI 走 publish 流程)。
 
 **修复**:
-- **本地开发**: 跳过更新检查: `PIPICLAW_SKIP_UPDATE_CHECK=1`
+- **本地开发**: 跳过更新检查: `NW_SKIP_UPDATE_CHECK=1`
 - **生产**: 重新发布 Release,确认 CI 配置 `GH_TOKEN` + `npm run build` 跑完整 publish
 
 ### F17. update download 403

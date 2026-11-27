@@ -6,7 +6,7 @@ export const viteReactTs: TemplateConfig = {
   description: '快速的前端 SPA 项目,使用 Vite 构建 + React 18 + TypeScript 5',
   triggers: ['vite', 'react', 'spa', '前端', '博客', 'blog', 'frontend', 'react-app'],
   devPort: 5173,
-  image: 'pipiclaw/sandbox-base:latest',
+  image: 'newworld/sandbox-base:latest',
   files: [
     {
       path: 'package.json',
@@ -98,7 +98,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
     {
       path: 'src/App.tsx',
       content: `export default function App() {
-  return <h1>Hello from Vite + React + TypeScript (PiPiClaw sandbox)</h1>
+  return <h1>Hello from Vite + React + TypeScript (New World sandbox)</h1>
 }
 `,
     },

@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - 路由冒烟测试 (B1-Bugfix regression guard)
+ * New World - 路由冒烟测试 (B1-Bugfix regression guard)
  *
  * 历史 bug: Chat.vue 用动态模板字符串 import(`highlight.js/lib/languages/${lang}`),
  *   浏览器原生 dynamic import 无法解析,导致 Chat.vue 挂载失败,
@@ -66,7 +66,6 @@ const CORE_ROUTES: RouteCase[] = [
   { path: '/schedule', expectClass: 'schedule-page' },
   { path: '/permissions', expectClass: 'permissions-page' },
   { path: '/settings', expectClass: 'settings-page' },
-  { path: '/help', expectClass: 'help-page' },
 ]
 
 /** v4.5 回归:Dashboard 已删除,/ 应重定向到 /chat(router/index.ts:17-19) */

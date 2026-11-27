@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * PiPiClaw - MCP filesystem server (stdio child process)
+ * New World - MCP filesystem server (stdio child process)
  *
  * 协议: MCP 2025-06-18 (JSON-RPC 2.0 over stdio, newline-delimited)
  * 实现: 5 个工具
@@ -180,10 +180,14 @@ function resolveInSandbox(inputPath) {
   if (inputPath.includes('\0')) {
     throw new Error('path contains null byte');
   }
-  // 不强制 absolute, 但 relative 会被解析到 cwd
+  // 不强制 absolute。**relative 的基准是第一个白名单根**(不是 cwd)——
+  // 【M4-P 修】默认白名单是 userData/sandbox,与进程 cwd 毫无关系;
+  // 若相对路径按 cwd 解析,相对路径永远落在沙箱外 → 工具"配了却用不了"。
+  // 按白名单根解析后,相对路径的语义就是"在我被允许的那个目录里"。
+  const relativeBase = allowedRoots[0] ?? process.cwd();
   const absolute = path.isAbsolute(inputPath)
     ? inputPath
-    : path.resolve(process.cwd(), inputPath);
+    : path.resolve(relativeBase, inputPath);
 
   // 用 realpath 解析 symlink; 不存在则用 normalized 路径
   let resolved;
@@ -390,7 +394,7 @@ async function handleRequest(msg) {
       case 'initialize': {
         return reply(id, {
           protocolVersion: '2025-06-18',
-          serverInfo: { name: 'pipiclaw-filesystem', version: '1.0.0' },
+          serverInfo: { name: 'newworld-filesystem', version: '1.0.0' },
           capabilities: { tools: {} },
         });
       }

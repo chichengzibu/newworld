@@ -1,10 +1,10 @@
 /**
- * PiPiClaw - Auto-updater
+ * New World - Auto-updater
  *
  * 职责:
  *   1. 包装 electron-updater 的 autoUpdater,接收事件 -> webContents.send
  *   2. 注册 IPC handler (autoUpdater:check / download / install)
- *   3. 可选 5 秒后自动 check 一次 (PIPICLAW_SKIP_UPDATE_CHECK=1 可关闭)
+ *   3. 可选 5 秒后自动 check 一次 (NW_SKIP_UPDATE_CHECK=1 可关闭)
  */
 
 import { app, BrowserWindow, dialog, ipcMain } from 'electron';
@@ -72,7 +72,7 @@ export class AutoUpdater {
 
     this.registerIpcHandlers();
 
-    if (!process.env.PIPICLAW_SKIP_UPDATE_CHECK) {
+    if (!process.env.NW_SKIP_UPDATE_CHECK) {
       setTimeout(() => {
         autoUpdater.checkForUpdates().catch((e: Error) => {
           this.log.warn('[AutoUpdater] auto check failed', e);

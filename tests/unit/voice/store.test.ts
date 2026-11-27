@@ -14,7 +14,7 @@
  *   - speechSynthesis 缺失(ttsImpl=null)
  *   - rate/pitch/volume 透传
  *   - queue 排空(emit done 后 pending=false)
- *   - PIPICLAW_E2E stub = 即时 onend(同 production 状态机, 但 speak() 内部走 stub 路径)
+ *   - NW_E2E stub = 即时 onend(同 production 状态机, 但 speak() 内部走 stub 路径)
  *   - speaking/thinking 不叠加(单独的 state listener 监听序列正确)
  *   - enabled=false 静默 ignore(默认关; 静默 vs error 区分)
  */

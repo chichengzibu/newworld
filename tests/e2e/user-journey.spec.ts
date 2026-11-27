@@ -1,10 +1,10 @@
-import { test, expect, shouldRunElectronE2E } from './helpers/electron-app'
+import { test, expect, shouldRunElectronE2E, gotoRoute, addProviderAndReload } from './helpers/electron-app'
 
 /**
  * P5-UX T+0: 新用户首次启动 — 完整真实用户旅程
  *
  * 模拟一个真实用户的第一次启动:
- * 1. 打开 PiPiClaw → 看首页 (Dashboard)
+ * 1. 打开 New World → 看首页 (Dashboard)
  * 2. 看到什么?有引导吗?
  * 3. 怎么找到 AI 对话?
  * 4. 进 Chat 后看到什么?空状态友好吗?
@@ -18,14 +18,12 @@ import { test, expect, shouldRunElectronE2E } from './helpers/electron-app'
 test.describe('T+0 新用户首次启动旅程', () => {
   test.skip(!shouldRunElectronE2E, 'requires E2E_ELECTRON=1')
 
-  test('J1: 首页加载 — 看到 PiPiClaw 品牌', async ({ window }) => {
-    // 默认路由是 /dashboard
-    await window.waitForURL(/#\/dashboard/, { timeout: 5_000 })
-    // 验证品牌可见
-    const brand = await window.locator('body').textContent()
-    expect(brand).toMatch(/PiPiClaw/i)
-    // 验证有"工作台"或"Dashboard"字样
-    expect(brand).toMatch(/工作台|Dashboard/i)
+  test('J1: 首页加载 — 看到 New World 品牌', async ({ window }) => {
+    // 【v4.4 起】默认路由已从 /dashboard 改成 /chat —— 「移除 Dashboard 主页」
+    // (91a9093)。旧 spec 等 /#/dashboard → 永远等不到 → 超时。
+    await window.waitForURL(/#\/chat/, { timeout: 10_000 })
+    // 验证品牌可见(标题栏)
+    await expect(window.locator('.title-bar .app-name')).toHaveText(/New World/i)
   })
 
   test('J2: 首页 — 看到 gateway 状态(没配置会引导)', async ({ window }) => {
@@ -38,25 +36,30 @@ test.describe('T+0 新用户首次启动旅程', () => {
 
   test('J3: 用户进 Chat(从 SideNav 找 AI Chat)', async ({ window }) => {
     // 找 AI Chat 链接(中英文都试)
-    const chatLink = window.locator('a.nav-item:has-text("AI Chat"), a.nav-item:has-text("对话")').first()
+    const chatLink = window.locator('nav.sidenav a.nav-icon[href$="#/chat"]').first()
     await expect(chatLink).toBeVisible({ timeout: 5_000 })
     await chatLink.click()
     await window.waitForURL(/#\/chat/, { timeout: 5_000 })
     expect(window.url()).toContain('/chat')
   })
 
-  test('J4: Chat 空状态 — 看到 6 个 prompt 模板', async ({ window }) => {
-    await window.click('a.nav-item:has-text("AI Chat"), a.nav-item:has-text("对话")').catch(() => {})
-    await window.waitForTimeout(500)
+  test('J4: Chat 空状态 — 建议 chips + 模型选择器(新空态契约)', async ({ window }) => {
+    // 【设计审计后新空态】QuickPrompts 模板卡已移除; 现为 3 条建议 chips + 卡片式输入区(含模型 pill)。
+    // 有可用 provider 才渲染 chips(没模型可调,给建议也没用)。
+    await addProviderAndReload(window, {
+      name: 'Mock (J4)',
+      baseUrl: 'http://127.0.0.1:9/v1',
+      models: [{ id: 'mock-model', name: 'mock-model', capabilities: ['chat'] }],
+    })
+    await window.click('nav.sidenav a.nav-icon[href$="#/chat"]').catch(() => {})
+    await window.waitForTimeout(1200)
 
-    // 验证 6 个 prompt 模板卡片(P5-UX 加的)
-    const promptCards = window.locator('.empty-prompt-card')
-    const cardCount = await promptCards.count()
-    expect(cardCount).toBeGreaterThanOrEqual(4) // 至少有 4 个模板
+    const chips = window.locator('.nova-chip')
+    const chipCount = await chips.count()
+    expect(chipCount, '有 provider 时应出现建议 chips').toBeGreaterThanOrEqual(3)
 
-    // 至少看到一个 emoji
-    const emojis = window.locator('.empty-prompt-emoji')
-    expect(await emojis.count()).toBeGreaterThan(0)
+    // 卡片式输入区内的模型选择器
+    await expect(window.locator('.model-pill').first()).toBeVisible()
   })
 
   test('J5: Chat 空状态 — 有时间感知问候', async ({ window }) => {
@@ -143,44 +146,46 @@ test.describe('T+0 新用户首次启动旅程', () => {
 
   test('J12: 用户找设置(右上角或 sidebar)', async ({ window }) => {
     // Sidebar 的 Settings 链接
-    const settingsLink = window.locator('a.nav-item:has-text("Settings"), a.nav-item:has-text("设置")').first()
+    const settingsLink = window.locator('nav.sidenav a.nav-icon[href$="#/settings"]').first()
     await expect(settingsLink).toBeVisible({ timeout: 5_000 })
   })
 
-  test('J13: 找 IM 管理入口(v4.1 核心功能)', async ({ window }) => {
-    // 用户升级到 v4.1 应该有 IM 管理入口
-    const imLink = window.locator('a.nav-item:has-text("IM Management"), a.nav-item:has-text("IM 管理")').first()
-    if (await imLink.count() > 0) {
-      await expect(imLink).toBeVisible()
-    }
+  test('J13: 找 IM 管理入口(v4.7 收进设置页配置中心)', async ({ window }) => {
+    // v4.7: IM 管理属于「配置容器」,不再占 rail 一级导航。
+    // 真实路径是 设置 → 配置中心 → IM 通道接入。
+    await gotoRoute(window, '/settings')
+    const configNav = window.locator('[data-testid="settings-config-nav"]')
+    await expect(configNav).toBeVisible({ timeout: 8_000 })
+    const imLink = configNav.locator('a.settings-link[href$="#/im-management"]').first()
+    await expect(imLink).toHaveCount(1)
+    await expect(imLink).toBeVisible()
+    // rail 上不该再有它
+    await expect(window.locator('nav.sidenav a.nav-icon[href$="#/im-management"]')).toHaveCount(0)
   })
 
-  test('J14: 找 ClawHub 技能市场入口(v4.1 核心功能)', async ({ window }) => {
-    const clawhubLink = window.locator('a.nav-item:has-text("ClawHub")').first()
-    if (await clawhubLink.count() > 0) {
-      await expect(clawhubLink).toBeVisible()
-    }
+  test('J14: ClawHub 技能市场可达(v4.1 核心功能)', async ({ window }) => {
+    // 【注意】私有技能仓库在「更多」面板与命令面板(Ctrl+K →「技能市场」)里有入口。
+    // 这里验的是「路由可达 + 页面能渲染」,而不是「侧栏有图标」。
+    await gotoRoute(window, '/clawhub')
+    await expect(window.locator('h1').first()).toBeVisible({ timeout: 10_000 })
   })
 
-  test('J15: 找模型对比入口(v4.1 核心功能)', async ({ window }) => {
-    const compareLink = window.locator('a.nav-item:has-text("Model Compare"), a.nav-item:has-text("模型对比")').first()
-    if (await compareLink.count() > 0) {
-      await expect(compareLink).toBeVisible()
-    }
+  test('J16: 快捷键提示可见(命令面板入口)', async ({ window }) => {
+    // 【v4.4 起】没有状态栏了 → 快捷键提示在**悬浮命令按钮**上
+    // (标题「命令面板 (Ctrl+K)」+ kbd 提示)。版本号挪到设置页「关于」
+    // (由 auto-updater spec 的 AU3 覆盖)。
+    const cmdBtn = window.locator('button.floating-cmd-btn').first()
+    await expect(cmdBtn).toHaveCount(1)
+    await expect(cmdBtn).toBeVisible()
+    const tip = await cmdBtn.getAttribute('title')
+    expect(tip ?? '').toMatch(/Ctrl\+K|⌘K/i)
   })
 
-  test('J16: 状态栏 — 有版本号 + 快捷键提示', async ({ window }) => {
-    const statusBar = window.locator('.app-status-bar').first()
-    if (await statusBar.count() > 0) {
-      const text = await statusBar.textContent()
-      expect(text).toMatch(/v?\d+\.\d+\.\d+/)  // v4.3.0 之类
-    }
-  })
-
-  test('J17: 命令面板按钮 — 状态栏有"命令"快捷入口', async ({ window }) => {
-    const cmdBtn = window.locator('.status-shortcut, [title*="Ctrl"]').first()
-    if (await cmdBtn.count() > 0) {
-      await expect(cmdBtn).toBeVisible()
-    }
+  test('J17: 命令面板按钮 — 有"命令"快捷入口', async ({ window }) => {
+    // 悬浮命令按钮(带「命令」文字 + ⌘K 提示)
+    const cmdBtn = window.locator('button.floating-cmd-btn').first()
+    await expect(cmdBtn).toHaveCount(1)
+    await expect(cmdBtn).toBeVisible()
+    await expect(cmdBtn).toContainText(/命令/)
   })
 })

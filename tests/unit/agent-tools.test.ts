@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - Agent 5 工具单测 (M1 v0.1)
+ * New World - Agent 5 工具单测 (M1 v0.1)
  *
  * 覆盖: Read / Edit / Bash / Glob / Grep
  * 策略: 用 os.tmpdir() 下建真目录, 然后在 beforeAll 用 vi.spyOn(app, 'getPath') 把 userData 指到那.
@@ -56,7 +56,7 @@ describe('Agent 5 工具 metadata', () => {
 describe('ReadTool', () => {
   const tool = new ReadTool()
   beforeEach(async () => {
-    await fs.writeFile(path.join(SANDBOX_DIR, 'sample.txt'), 'Hello PiPiClaw\n第二行\n', 'utf-8')
+    await fs.writeFile(path.join(SANDBOX_DIR, 'sample.txt'), 'Hello New World\n第二行\n', 'utf-8')
   })
   afterEach(async () => {
     await fs.rm(path.join(SANDBOX_DIR, 'sample.txt'), { force: true })
@@ -65,7 +65,7 @@ describe('ReadTool', () => {
   it('读 sandbox 内文件', async () => {
     const r = await tool.execute({ file_path: 'sample.txt' })
     expect(r.ok).toBe(true)
-    expect(r.result).toContain('PiPiClaw')
+    expect(r.result).toContain('New World')
   })
   it('缺 file_path 报错', async () => {
     const r = await tool.execute({})
@@ -235,7 +235,7 @@ describe('GrepTool', () => {
   const tool = new GrepTool()
   beforeEach(async () => {
     await fs.writeFile(path.join(SANDBOX_DIR, 'app.ts'), 'const version = "1.0"\nexport default version\n', 'utf-8')
-    await fs.writeFile(path.join(SANDBOX_DIR, 'note.md'), '# PiPiClaw notes\nversion 1.0 draft\n', 'utf-8')
+    await fs.writeFile(path.join(SANDBOX_DIR, 'note.md'), '# New World notes\nversion 1.0 draft\n', 'utf-8')
   })
   afterEach(async () => {
     await fs.rm(path.join(SANDBOX_DIR, 'app.ts'), { force: true })
@@ -248,7 +248,7 @@ describe('GrepTool', () => {
     expect(r.result).toContain('app.ts:')
   })
   it('ignoreCase 默认 true', async () => {
-    const r = await tool.execute({ pattern: 'PIPICLAW', include: '*.md' })
+    const r = await tool.execute({ pattern: 'NEW WORLD', include: '*.md' })
     expect(r.ok).toBe(true)
     expect(r.result).toContain('note.md:')
   })

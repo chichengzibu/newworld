@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - Agent / AgentConfig (W5.2.1)
+ * New World - Agent / AgentConfig (W5.2.1)
  *
  * Singleton config backed by ConfigStore. Lets the user tweak thinking depth,
  * sub-agent recursion limit, default model, checkpoint cadence, etc.

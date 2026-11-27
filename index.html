@@ -3,8 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:;" />
-    <title>PiPiClaw - AI自动化助手</title>
+    <!-- CSP 安全加固(第九轮):
+         - script-src 仅 'self' — 移除 unsafe-eval(消除 Electron 安全警告)与 unsafe-inline;
+           Vue3 生产构建是预编译 render 函数, 无需 eval; boot-splash 只有外链 module script
+         - style-src 保留 'unsafe-inline' — Element Plus 动态样式注入 + boot-splash 内联样式
+         - img-src 加 blob: — 附件图片预览的 objectURL
+         - connect-src: LLM 请求全走主进程(ChatManager), 渲染进程仅需 self + 本地网关/Ollama 直连 + dev HMR ws -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' https: http://127.0.0.1:* http://localhost:* ws://127.0.0.1:* ws://localhost:*" />
+    <title>New World (NW) - AI 自动化助手</title>
   </head>
   <body>
     <div id="app">
@@ -12,12 +18,16 @@
         id="boot-splash"
         style="position:fixed;inset:0;z-index:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;background:#0f1115;color:#e5e7eb;font-family:-apple-system,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif"
       >
-        <div style="font-size:22px;font-weight:600;letter-spacing:0.5px;color:#e5e7eb">PiPiClaw</div>
+        <div style="font-size:22px;font-weight:600;letter-spacing:2px;color:#e5e7eb;background:linear-gradient(100deg,#22d3ee,#a78bfa);-webkit-background-clip:text;background-clip:text;color:transparent">NEW WORLD</div>
         <div
           class="boot-spinner"
-          style="width:26px;height:26px;border-radius:50%;border:3px solid rgba(255,255,255,0.15);border-top-color:#4f8cff"
+          style="width:30px;height:30px;border-radius:50%;background:radial-gradient(circle at 40% 38%,#fff,#22d3ee 34%,#a78bfa 70%,transparent 74%);box-shadow:0 0 18px rgba(34,211,238,.6),0 0 36px rgba(167,139,250,.35);animation:nwBootBreath 3s ease-in-out infinite"
           aria-label="加载中"
         ></div>
+        <style>
+          @keyframes nwBootBreath{0%,100%{transform:scale(.82);opacity:.7}50%{transform:scale(1.08);opacity:1}}
+          @media(prefers-reduced-motion:reduce){.boot-spinner{animation:none!important}}
+        </style>
       </div>
     </div>
     <script type="module" src="/src/main.ts"></script>

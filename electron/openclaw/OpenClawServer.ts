@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - OpenClaw 网关服务入口
+ * New World - OpenClaw 网关服务入口
  *
  * 核心能力：
  * 1. 基于Node.js http模块创建HTTP服务，监听18789端口
@@ -135,7 +135,7 @@ export class OpenClawServer {
         'http://127.0.0.1:5173',
         'http://localhost',
         'http://localhost:5173',
-        'app://pipiclaw',           // Electron 自定义协议
+        'app://newworld',           // Electron 自定义协议
         'file://',                   // 本地文件 (renderer 走 file:// 的兜底)
       ],
       ...config
@@ -146,7 +146,7 @@ export class OpenClawServer {
       const tokenPath = this.config.tokenFile || join(getHost().getPath('userData'), 'openclaw-token.json');
       this.authToken = loadOrCreateToken(tokenPath, this.log);
     } else {
-      this.log.warn('[OpenClawServer] ⚠️ token 鉴权已禁用 (PIPICLAW_OPENCLAW_NO_AUTH=1)');
+      this.log.warn('[OpenClawServer] ⚠️ token 鉴权已禁用 (NW_OPENCLAW_NO_AUTH=1)');
     }
 
     this.log.info('[OpenClawServer] 初始化网关服务');

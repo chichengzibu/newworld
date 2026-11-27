@@ -4,7 +4,7 @@ import * as path from 'node:path'
 import * as os from 'node:os'
 
 vi.mock('electron', () => ({
-  app: { getPath: vi.fn(() => '/tmp/pipiclaw-filetransfer-test') },
+  app: { getPath: vi.fn(() => '/tmp/newworld-filetransfer-test') },
   safeStorage: {
     isEncryptionAvailable: vi.fn(() => false),
     encryptString: (s: string) => Buffer.from(s),
@@ -29,7 +29,7 @@ vi.mock('electron-log', () => ({
 import { FileTransferManager } from '../../electron/channel/FileTransferManager'
 import { IMConfigStore } from '../../electron/channel/IMConfigStore'
 
-const TEST_USER_DATA = '/tmp/pipiclaw-filetransfer-test'
+const TEST_USER_DATA = '/tmp/newworld-filetransfer-test'
 let tmpDir: string
 
 describe('P0-06: FileTransferManager.uploadToIM', () => {
@@ -39,7 +39,7 @@ describe('P0-06: FileTransferManager.uploadToIM', () => {
     if (fs.existsSync(TEST_USER_DATA)) {
       fs.rmSync(TEST_USER_DATA, { recursive: true, force: true })
     }
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pipiclaw-filetransfer-'))
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'newworld-filetransfer-'))
   })
 
   it('singleton returns same instance', () => {

@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - ClawHub 远程仓库 (registry) 拉取 + 验签 + 安装
+ * New World - ClawHub 远程仓库 (registry) 拉取 + 验签 + 安装
  *
  * 这是把"作者推送技能 / 用户检查更新一键装"做实的最后一公里:
  *  - 之前 ClawHubManager 是纯本地模拟云端, fetchRegistry 为零, 用户装不进任何第三方技能。
@@ -8,16 +8,16 @@
  *
  * 信任链:
  *  - 作者用 Ed25519 私钥对 zip 字节签名。私钥不入仓,开发私钥外置在
- *    C:\Users\<user>\.pipiclaw-secrets\clawhub-dev-ed25519.key,通过环境变量
- *    PIPICLAW_CLAWHUB_KEY 指向(见 scripts/build-registry.mjs 的查找链)。生产请换自己的私钥。
+ *    C:\Users\<user>\.newworld-secrets\clawhub-dev-ed25519.key,通过环境变量
+ *    NW_CLAWHUB_KEY 指向(见 scripts/build-registry.mjs 的查找链)。生产请换自己的私钥。
  *  - App 端用内置/配置的 Ed25519 公钥验签。公钥优先级:
- *      1. 环境变量 PIPICLAW_CLAWHUB_PUBKEY
+ *      1. 环境变量 NW_CLAWHUB_PUBKEY
  *      2. userData/clawhub-pubkey.txt
  *      3. 代码内置 DEFAULT_PUBLIC_KEY (开发用, 与上述外置开发私钥配对)
  *  - 若三处都没有公钥 -> 跳过验签并 warn（仅限内部/可信源场景, 不建议对外分发时这样）。
  *
  * registry 基址优先级:
- *      1. 环境变量 PIPICLAW_CLAWHUB_REGISTRY
+ *      1. 环境变量 NW_CLAWHUB_REGISTRY
  *      2. userData/clawhub-registry.txt
  *      3. DEFAULT_REGISTRY 占位（请改成你的真实地址）
  *
@@ -35,12 +35,12 @@ import * as http from 'node:http'
 import { URL } from 'node:url'
 import { createHash, createPublicKey, verify as cryptoVerify } from 'node:crypto'
 
-/** 开发用内置公钥 (SPKI DER, hex) — 与外置开发私钥 (~/.pipiclaw-secrets/clawhub-dev-ed25519.key) 配对。生产请替换为自有公钥。 */
+/** 开发用内置公钥 (SPKI DER, hex) — 与外置开发私钥 (~/.newworld-secrets/clawhub-dev-ed25519.key) 配对。生产请替换为自有公钥。 */
 const DEFAULT_PUBLIC_KEY =
   '302a300506032b65700321001204d8cad802577773f194d0a1e6577496a81d1116e1f027136729a34a7b0c2c'
 
 /** registry 默认基址 (结尾不要带 /)。请改成你的真实地址, 或靠环境变量覆盖。 */
-const DEFAULT_REGISTRY = 'https://example.com/pipiclaw-clawhub'
+const DEFAULT_REGISTRY = 'https://example.com/nw-clawhub'
 
 export interface ClawHubRegistryEntry {
   id: string
@@ -84,7 +84,7 @@ export class ClawHubRegistry {
 
   /** 解析 registry 基址 */
   private resolveBaseUrl(): string {
-    const env = process.env.PIPICLAW_CLAWHUB_REGISTRY
+    const env = process.env.NW_CLAWHUB_REGISTRY
     if (env && env.trim()) return env.trim().replace(/\/+$/, '')
     try {
       const file = path.join(getHost().getPath('userData'), 'clawhub-registry.txt')
@@ -100,7 +100,7 @@ export class ClawHubRegistry {
 
   /** 解析验签公钥 (hex) */
   private resolvePublicKey(): string | null {
-    const env = process.env.PIPICLAW_CLAWHUB_PUBKEY
+    const env = process.env.NW_CLAWHUB_PUBKEY
     if (env && env.trim()) return env.trim()
     try {
       const file = path.join(getHost().getPath('userData'), 'clawhub-pubkey.txt')
@@ -238,7 +238,7 @@ export class ClawHubRegistry {
         const lib = u.protocol === 'https:' ? https : http
         const req = lib.request(
           urlStr,
-          { method: 'GET', headers: { 'User-Agent': 'PiPiClaw-ClawHub/1.0' } },
+          { method: 'GET', headers: { 'User-Agent': 'New World-ClawHub/1.0' } },
           (res) => {
             const code = res.statusCode ?? 0
             if (code >= 300 && code < 400 && res.headers.location) {

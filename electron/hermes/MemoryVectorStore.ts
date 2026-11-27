@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - MemoryVectorStore: 向量缓存持久化层 (#006)
+ * New World - MemoryVectorStore: 向量缓存持久化层 (#006)
  *
  * ═══ 设计依据 (docs/#006-memory-persistence-design.md) ═══
  * 本层是 **语义向量缓存** (memoryId → vector) — 不是文本真源 (真源在 HermesMemory / ConfigStore)。
@@ -137,6 +137,18 @@ export class MemoryVectorStore {
       this.log.warn('MemoryVectorStore: 空向量,跳过')
       return
     }
+    /**
+     * 【M3-A】拒收含 NaN/Infinity 的向量。
+     *
+     * 一个 NaN 会让整条召回链**静默失效**:余弦算出 NaN →
+     * `score >= minScore` 恒为 false → 搜索返回空 → 记忆检索"没反应",
+     * 而且不报任何错。用户只会觉得"这软件记忆功能坏了"。
+     * 宁可丢掉这一条,也不能让一条坏向量毒死整个索引。
+     */
+    if (vector.some((v) => !Number.isFinite(v))) {
+      this.log.warn('MemoryVectorStore: 向量含 NaN/Infinity,拒绝入库(否则整库召回静默失效)')
+      return
+    }
     // 维度 / 模型切换: 清空旧索引重建 (既有语义, 保留)
     if (this.dimension !== 0 && (vector.length !== this.dimension || (model && this.activeModel && model !== this.activeModel))) {
       this.log.warn(`MemoryVectorStore: 嵌入维度/模型变化(${this.activeModel}@${this.dimension} → ${model}@${vector.length}), 清空旧索引重建`)
@@ -195,6 +207,19 @@ export class MemoryVectorStore {
   }
   /** 当前容量上限 (生产 = MAX_CACHE_ENTRIES 200, 测试注入后 = 注入值) */
   maxEntries(): number { return this.maxE }
+
+  /**
+   * 【M3-A】索引当前用的嵌入模型标识。
+   *
+   * 换后端/换模型后,库里的旧向量属于**另一个语义空间** ——
+   * 拿新模型的查询向量去和旧模型的记忆向量算余弦,结果毫无意义
+   * (不是"噪声",是"错的")。
+   * 上层据此判断是否需要重新嵌入。
+   */
+  getActiveModel(): string | null { return this.activeModel }
+
+  /** 当前索引的向量维度 */
+  getDimension(): number { return this.dimension }
 
   // ── reset (清全量 + 立即落盘, 防退出前丢) ────────────────────────────
   async reset(): Promise<void> {

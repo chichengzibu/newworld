@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - OpenClaw 核心网关执行引擎
+ * New World - OpenClaw 核心网关执行引擎
  * 
  * 职责：
  * 1. 本地文件系统操作

@@ -31,7 +31,7 @@ test.describe('T+90 Chat 真链路 send/receive', () => {
     // 1) 清理同名旧 provider,避免测试运行间重复
     // 2) 注入新 provider
     const result = await window.evaluate(async () => {
-      const api = (window as any).electronAPI || (window as any).pipiclaw
+      const api = (window as any).electronAPI || (window as any).newworld
       if (!api?.models?.add) return { ok: false, error: 'no models.add API', full: null }
 
       // 清旧:列出所有 provider,删掉 "Ollama Local (T+90)" 同名
@@ -47,7 +47,7 @@ test.describe('T+90 Chat 真链路 send/receive', () => {
       const r = await api.models.add({
         name: 'Ollama Local (T+90)',
         type: 'openai',
-        baseUrl: 'http://localhost:11434/v1',
+        baseUrl: 'http://127.0.0.1:11434/v1',
         apiKey: 'no-key',
         enabled: true,
         timeout: 60_000,
@@ -84,7 +84,7 @@ test.describe('T+90 Chat 真链路 send/receive', () => {
     console.log('R2 provider list:', JSON.stringify(providerList))
 
     // 进 Chat
-    await window.click('a.nav-item[href$="#/chat"]').catch(() => {})
+    await window.click('nav.sidenav a.nav-icon[href$="#/chat"]').catch(() => {})
     await window.waitForTimeout(1500)
 
     // 优先点 sidebar 已有的会话(用 .conversation-item 第一个,而不是 new-chat)
@@ -169,7 +169,7 @@ test.describe('T+90 Chat 真链路 send/receive', () => {
     await window.waitForSelector('#app', { timeout: 10_000 })
     await window.waitForTimeout(1200)
 
-    await window.click('a.nav-item[href$="#/chat"]').catch(() => {})
+    await window.click('nav.sidenav a.nav-icon[href$="#/chat"]').catch(() => {})
     await window.waitForTimeout(1500)
 
     // 点现有会话

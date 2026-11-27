@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - Channel / ChannelTypes (W7.1)
+ * New World - Channel / ChannelTypes (W7.1)
  *
  * 通道域核心类型定义:ChannelKind / ChannelMetadata / RouteRule /
  * ChannelAuditEntry / ProcessedMessage。

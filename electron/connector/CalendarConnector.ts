@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - Connector / CalendarConnector (W7.4 stub)
+ * New World - Connector / CalendarConnector (W7.4 stub)
  *
  * 日历连接器。W7 阶段:stub 实现 Connector 接口,W8+ 接真实 Calendar API。
  * 提供 4 个常见 verb:

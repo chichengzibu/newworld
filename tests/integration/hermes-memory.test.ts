@@ -4,8 +4,8 @@ import * as path from 'node:path'
 
 vi.mock('electron', () => ({
   app: {
-    getPath: vi.fn(() => '/tmp/pipiclaw-hermes-test'),
-    getName: () => 'pipiclaw',
+    getPath: vi.fn(() => '/tmp/newworld-hermes-test'),
+    getName: () => 'newworld',
     getVersion: () => '0.0.0',
   },
 }))

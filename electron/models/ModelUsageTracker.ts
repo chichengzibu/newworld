@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - ModelUsageTracker (P2-02)
+ * New World - ModelUsageTracker (P2-02)
  *
  * 模型使用量排行:
  * - 每次 LLM 调用完,record(modelId, provider, tokens, cost)
@@ -226,11 +226,19 @@ export class ModelUsageTracker {
         | Record<string, UsageRecord>
         | { records?: Record<string, UsageRecord>; callHistory?: UsageCallEntry[] }
       // 兼容旧版 schema (只有 records)
+      // 【M3-F】schema 有两代(旧:直接是 model→record 映射;新:{records, callHistory}),
+      // 联合类型在 else 分支里被窄化成旧形态 → 读不到 callHistory。
+      // 这里显式收窄,别让联合类型在这里把两个分支搅在一起。
       if (raw && typeof raw === 'object' && 'records' in raw && raw.records) {
         for (const [k, v] of Object.entries(raw.records)) this.records.set(k, v)
-        this.callHistory = raw.callHistory ?? []
+        // 【M3-F】raw 是联合类型,直接读 .callHistory 会拿到
+        // `UsageRecord | UsageCallEntry[]`(旧形态分支没有这个字段)。
+        // 这里显式收窄到新形态。
+        this.callHistory = (raw as { callHistory?: UsageCallEntry[] }).callHistory ?? []
       } else if (raw && typeof raw === 'object') {
-        for (const [k, v] of Object.entries(raw as Record<string, UsageRecord>)) this.records.set(k, v)
+        const legacy = raw as Record<string, UsageRecord>;
+        for (const [k, v] of Object.entries(legacy)) this.records.set(k, v)
+        this.callHistory = []
       }
       this.log.info(
         `ModelUsageTracker: 加载 ${this.records.size} models + ${this.callHistory.length} call history`,

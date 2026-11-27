@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - GlobTool (M1 v0.1)
+ * New World - GlobTool (M1 v0.1)
  *
  * 文件匹配, 跟 ClaudeCode Glob tool 协议对齐:
  *   args: { pattern: string, cwd?: string }

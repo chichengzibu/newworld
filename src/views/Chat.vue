@@ -24,9 +24,17 @@
               </el-tag>
             </div>
             <!-- NOVA #002: 生命体 Orb 状态区 (28px + i18n statusText; 纯展示, 不动消息逻辑) -->
-            <div class="nova-orb-status nova-tech-surface nova-hud-corner" role="status" :aria-label="t(orbStore.statusText)">
-              <NovaOrb :size="28" :state="orbStore.state" />
-              <span class="nova-orb-text">{{ t(orbStore.statusText) }}</span>
+            <div class="nova-orb-status nova-tech-surface nova-hud-corner" role="status" :aria-label="t(orbStore.statusText)" :title="orbTooltip">
+              <NovaOrb
+                :size="28"
+                :state="orbStore.state"
+                :breath-ms="orbStore.breathDuration"
+                :activity="orbStore.activity"
+                :token-rate="orbStore.tokenRate"
+                :context-usage="orbStore.contextUsage"
+                :pulse-seq="orbStore.pulseSeq"
+              />
+              <span class="nova-orb-text">{{ t(orbStore.statusText) }}<span v-if="orbStore.tokenRate > 0" class="nova-orb-rate"> · {{ orbStore.tokenRate }} tok/s<span v-if="orbStore.usageSource === 'exact'" class="nova-orb-exact" title="主进程真实 usage"> ✦</span></span></span>
             </div>
           </div>
 
@@ -138,11 +146,22 @@
                   </div>
                 <div class="message-content">
                   <!-- P1-4: thinking 可视化改用 ThinkingBlock (替代原 inline 实现) -->
-                  <!-- TODO v4.4: 接入 LLM 流式后,补 message.thinkingDurationMs / thinkingTokens 字段 -->
+                  <!-- 【P2】reasoningTokens 来自 provider 真实 usage,未回传时组件不显示计数 -->
                   <ThinkingBlock
                     v-if="row.message.thinking"
                     :reasoning="row.message.thinking"
                     :streaming="row.message.status === 'streaming'"
+                    :reasoning-tokens="row.message.thinkingTokens"
+                  />
+                  <!-- 【M1-C】agent 工具调用可视化 —— 让用户看到 agent 在调用什么 -->
+                  <ToolCallCard
+                    v-if="chatStore.agentTrace.length > 0"
+                    :entries="chatStore.agentTrace"
+                  />
+                  <!-- 【P3】并行子任务状态 —— 与工具轨迹并列，用户可以看见分派与完成情况 -->
+                  <SubtaskPanel
+                    v-if="chatStore.subtaskTrace.length > 0"
+                    :entries="chatStore.subtaskTrace"
                   />
                   <!-- 任务执行结果详情 -->
                   <TaskResultCard 
@@ -153,6 +172,11 @@
                     :error="row.message.taskResult.error"
                     :steps="row.message.taskResult.steps || []"
                     :defaultExpanded="false"
+                  />
+                  <!-- 【P3-补短】真实成品交付 —— 只有主进程 stat 过的文件才出现在这里 -->
+                  <ArtifactPanel
+                    v-if="row.message.artifacts && row.message.artifacts.length > 0"
+                    :artifacts="row.message.artifacts"
                   />
                   <!-- 普通消息文本 -->
                   <div class="message-text" v-if="row.message.content && !row.message.taskResult">
@@ -235,28 +259,35 @@
             @remove-attached="removeAttachedFile"
             @clear-attached="clearAllAttachedFiles"
             @clear-quoted="chatStore.clearQuotedMessage"
+            @files-picked="processFiles"
           />
         </template>
 
         <div class="empty-chat" v-else>
           <div class="empty-content">
-            <!-- NOVA #002: 空状态中央 120px 生命体 Orb (idle 呼吸) -->
+            <!-- NOVA #002: 空态 72px 生命体 Orb (缩小, 输入框才是主角) -->
             <div class="nova-empty-orb">
-              <NovaOrb :size="120" :state="orbStore.state" />
-              <span class="nova-empty-orb-text">{{ t(orbStore.statusText) }}</span>
+              <NovaOrb
+                :size="72"
+                :state="orbStore.state"
+                :breath-ms="orbStore.breathDuration"
+                :activity="orbStore.activity"
+                :token-rate="orbStore.tokenRate"
+                :context-usage="orbStore.contextUsage"
+                :pulse-seq="orbStore.pulseSeq"
+              />
             </div>
             <div class="empty-greeting">
-              <el-icon class="empty-icon" :size="36" color="var(--fg-tertiary)"><Sunny /></el-icon>
               <h2 class="empty-title">{{ greetingText }}</h2>
-              <p class="empty-desc">PiPiClaw 已经准备就绪。从下面挑一个开始,或者直接输入问题。</p>
+              <p class="empty-desc">直接输入问题开始对话,或从下面的建议挑一个。</p>
             </div>
 
-            <!-- NOVA #002: 4 条建议 chips (i18n 静态文案; 点击填入输入框并发送) -->
+            <!-- NOVA #002: 3 条建议 chips (按能力/状态动态生成, 见 suggestionKeys; 点击填入输入框并发送) -->
             <div class="nova-suggest-chips" v-if="enabledProviders.length > 0" role="list">
               <button
-                v-for="key in ['s1', 's2', 's3', 's4']"
+                v-for="key in suggestionKeys"
                 :key="key"
-                class="nova-chip nova-tech-surface nova-scanline"
+                class="nova-chip nova-tech-surface"
                 role="listitem"
                 @click="handleNovaSuggestion(key)"
               >
@@ -264,28 +295,30 @@
               </button>
             </div>
 
-            <div class="empty-prompts-host" v-if="enabledProviders.length > 0">
-              <!-- 已抽出到 src/components/chat/QuickPrompts.vue -->
-              <QuickPrompts
-                :enabled-providers-count="enabledProviders.length"
-                @prompt-selected="handleQuickPrompt"
+            <!-- 空态同屏渲染输入框: 发送时 chatStore.sendMessage 自动创建会话 -->
+            <div class="empty-input-host">
+              <ChatInput
+                v-model:model-value-provider="currentProviderId"
+                v-model:model-value-model="currentModelId"
+                v-model:model-value-input="inputMessage"
+                :enabled-providers="enabledProviders"
+                :current-models="currentModels"
+                :can-select-model="canSelectModel"
+                :attached-files="attachedFiles"
+                :is-generating="chatStore.isGenerating"
+                :quoted-message="chatStore.quotedMessage"
+                @provider-change="handleProviderChange"
+                @send="handleSend"
+                @shift-enter="handleShiftEnter"
+                @stop-generation="chatStore.stopGeneration"
+                @drag-over="handleDragOver"
+                @drop="handleDrop"
+                @paste="handlePaste"
+                @remove-attached="removeAttachedFile"
+                @clear-attached="clearAllAttachedFiles"
+                @clear-quoted="chatStore.clearQuotedMessage"
+            @files-picked="processFiles"
               />
-            </div>
-
-            <div class="empty-actions">
-              <el-button type="primary" size="large" @click="handleNewChat" class="empty-new-chat">
-                <el-icon><Plus /></el-icon>
-                新建对话
-              </el-button>
-              <el-button size="large" @click="$router.push('/models')" v-if="enabledProviders.length === 0">
-                <el-icon><Setting /></el-icon>
-                去配置模型
-              </el-button>
-              <el-button size="large" @click="openCommandPalette">
-                <el-icon><Search /></el-icon>
-                命令面板
-                <kbd>Ctrl K</kbd>
-              </el-button>
             </div>
 
             <div class="empty-tip" v-if="enabledProviders.length === 0">
@@ -481,23 +514,24 @@
 
 <script setup lang="ts">
 import { ref, computed, reactive, onMounted, watch, nextTick, onUnmounted } from 'vue';
-import { useVirtualizer, type Virtualizer } from '@tanstack/vue-virtual';
+import { useVirtualizer } from '@tanstack/vue-virtual';
 import { useRoute, useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { ElMessage } from "element-plus/es/components/message/index"
 import { ElMessageBox } from "element-plus/es/components/message-box/index";
-import { Plus, Promotion, CopyDocument, RefreshRight, DArrowRight, Search, Close, Loading, Setting, WarningFilled, Memo, EditPen, MagicStick, ChatDotRound, Lightning, User, Sunny, CircleCheck, CircleClose, Refresh, Clock } from '@element-plus/icons-vue';
+import { Promotion, CopyDocument, RefreshRight, DArrowRight, Close, Loading, WarningFilled, Memo, EditPen, MagicStick, ChatDotRound, Lightning, User, CircleCheck, CircleClose, Refresh, Clock } from '@element-plus/icons-vue';
 // P1-6: marked + highlight.js 改动态导入,避免 vendor-text 988KB 进首屏
 // (用户进入 Chat 页才会触发首条消息渲染,延迟加载 ≈0 感知)
 
 import TaskResultCard from '@/components/chat/TaskResultCard.vue';
 import HermesMemoryDrawer from '@/components/chat/HermesMemoryDrawer.vue';
-import QuickPrompts from '@/components/chat/QuickPrompts.vue';
 import ThinkingBlock from '@/components/chat/ThinkingBlock.vue';
+import ToolCallCard from '@/components/chat/ToolCallCard.vue';
+import SubtaskPanel from '@/components/chat/SubtaskPanel.vue';
+import ArtifactPanel from '@/components/chat/ArtifactPanel.vue';
 import ChatSidebar from '@/components/chat/ChatSidebar.vue';
 import ChatInput from '@/components/chat/ChatInput.vue';
 import NovaOrb from '@/components/nova/NovaOrb.vue';
-
 import { useChatStore } from '@/stores/chat';
 import { useModelsStore } from '@/stores/models';
 import { useExecutionModeStore } from '@/stores/executionMode';
@@ -586,13 +620,51 @@ const permissionsStore = usePermissionsStore();
 const orbStore = useOrbStore();
 const { t } = useI18n();
 const route = useRoute();
+
+// NW: 上下文占用 = 当前会话真实消息字符量 / 估算窗口(128k tokens, ~4 字符/token)
+// 这是"真实数据驱动"的压力环: 对话越长, 环越满, 颜色由青→紫→橙。
+const CONTEXT_WINDOW_TOKENS = 128000;
+watch(
+  () => {
+    const msgs = chatStore.currentConversation?.messages ?? [];
+    let chars = 0;
+    for (const m of msgs) chars += (m.content?.length ?? 0) + (m.thinking?.length ?? 0);
+    return chars;
+  },
+  (chars) => {
+    const estimatedTokens = chars / 4;
+    orbStore.setContextUsage(estimatedTokens / CONTEXT_WINDOW_TOKENS);
+  },
+  { immediate: true },
+);
+
+// NW: 生命体征悬浮说明 — 呼吸快慢/神经放电/token 消耗都有数据含义
+const orbTooltip = computed(() => {
+  const ctx = Math.round(orbStore.contextUsage * 100);
+  const exact = orbStore.usageSource === 'exact';
+  const source = exact ? '真实 usage' : '流式估算';
+  const lines = [
+    `状态: ${t(orbStore.statusText)}`,
+    `呼吸周期: ${(orbStore.breathDuration / 1000).toFixed(2)}s`,
+    `神经激活: ${Math.round(orbStore.activity * 100)}%`,
+    `生成速率: ${orbStore.tokenRate} tok/s（${source}）`,
+    `上下文占用: ${ctx}%（累计 ${orbStore.tokenCount} tokens）`,
+  ];
+  if (exact) {
+    lines.push(`输入: ${orbStore.exactPromptTokens} / 输出: ${orbStore.exactCompletionTokens} tokens`);
+    // 只在 provider 真回传时显示 —— 没有数据就别拿估算值冒充
+    if (orbStore.exactReasoningTokens > 0) lines.push(`思考: ${orbStore.exactReasoningTokens} tokens`);
+    if (orbStore.usageModel) lines.push(`模型: ${orbStore.usageModel}`);
+  }
+  return lines.join('\n');
+});
 const router = useRouter();
 
 const inputMessage = ref('');
 const chatSidebarWidth = ref(280);
 const CHAT_SIDEBAR_MIN_WIDTH = 200;
 
-// P5-UX: 快速提示词模板 — 已抽出到 src/components/chat/QuickPrompts.vue
+// P5-UX: 快速提示词模板组件已在首屏精简中移除(与建议 chips 重复)
 
 const greetingText = computed(() => {
   const hour = new Date().getHours()
@@ -614,30 +686,6 @@ function stepStatusIcon(status: string): string {
   }
 }
 
-async function handleQuickPrompt(p: { prompt: string }): Promise<void> {
-  if (enabledProviders.value.length === 0) {
-    ElMessage.warning('请先到「模型管理」配置 LLM')
-    router.push('/models')
-    return
-  }
-  // 先创建新对话,再填入 prompt
-  const conv = await chatStore.createConversation({
-    providerId: currentProviderId.value || undefined,
-    modelId: currentModelId.value || undefined,
-  })
-  if (conv) {
-    inputMessage.value = p.prompt
-    ElMessage.success('已创建新对话,prompt 已填入')
-    nextTick(() => {
-      const el = document.querySelector('.chat-input textarea') as HTMLTextAreaElement | null
-      el?.focus()
-    })
-  }
-}
-
-function openCommandPalette(): void {
-  window.dispatchEvent(new CustomEvent('cmd:open-palette'))
-}
 const CHAT_SIDEBAR_MAX_WIDTH = 400;
 let isChatSidebarResizing = false;
 
@@ -695,32 +743,40 @@ const messagesContainer = ref<HTMLElement | null>(null);
 // ============ 虚拟滚动 (大厂 Chat 体感优化) ============
 // 长对话只渲染可视区 + overscan 缓冲,避免全量 DOM 导致滚动卡顿。
 const messages = computed(() => chatStore.currentConversation?.messages ?? []);
-// 类型清零 (v3 Step A)：@tanstack/vue-virtual d.ts 声明 options.count: number,
-// 且 virtual-core 不 import unref/toValue (不内部解包 count 字段)——
-// 原写法 `count: computed(() => length)` 会把 ComputedRef 塞进 core,
-// `this.options.count - 1` 得 NaN。这里解包成 number,类型正确、运行期不劣于原实现。
+// 【M4-K 修复 —— 这是个藏了 36 天的 P0】
+// `useVirtualizer` 返回的是 **Ref<Virtualizer>**,不是 Virtualizer 实例。
+//   · 模板里写 `virtualizer.getTotalSize()` **没事** —— Vue 模板会自动解包顶层 ref
+//   · 脚本里写 `virtualizer.getVirtualItems()` **必炸** —— 脚本不解包
+// 实测症状:打开任何**有消息的会话** → `getVirtualItems is not a function` →
+// paintFatalError 盖一层全屏红框 → **整个聊天界面不可用**(2026-10-09 引入,
+// 一直带在 master 上;之前没人发现,是因为实跑只覆盖了首屏空状态)。
 //
-// ⚠️ 已知限制 (非本轮引入, 列 backlog)：count 是初始长度快照,
-//   会话消息动态增减时 virtualizer 的 count 不自动重算 (vue-virtual 的
-//   watch 监听 options 对象引用, 不追踪 count 字段值)。彻底修需把整个
-//   options 作为响应式源 (computed 包裹 useVirtualizer 入参)——属行为重构,
-//   超出"类型清零"范围, 留后续批处理。
-const virtualizer = useVirtualizer({
+// 为什么 typecheck 一直是绿的:上一版用 `as unknown as Virtualizer<...>`
+// 断言把类型错误一并吞了。**断言能骗过 tsc,骗不过运行期** —— 现已删掉断言,
+// 让类型系统继续守着这条线。
+//
+// 【顺手修掉原注释里的已知限制】count 之前是**初始长度快照**
+// (options 是普通对象 → vue-virtual 只监听 options 的**对象引用**,不追踪 count 字段)
+// → 会话消息动态增减时 count 不重算 → 新消息可能不渲染。
+// vue-virtual 的正确用法是**把整个 options 作为响应式源**:
+//   useVirtualizer(computed(() => ({...})))
+// 它的 watch(() => unref(options)) 会在 options 变化时 setOptions → count 跟上。
+const virtualizer = useVirtualizer(computed(() => ({
   count: messages.value.length,
   getScrollElement: () => messagesContainer.value,
   estimateSize: () => 140,
   overscan: 8,
   getItemKey: (index) => messages.value[index]?.id ?? index,
-}) as unknown as Virtualizer<HTMLElement, Element>;
+})));
 // 模板 ref 回调的 el 类型偏宽 (Element | ComponentPublicInstance | null),
 // measureElement 只要 Element | null —— 收窄包装 (el 为 null 时返回 null, 组件实例丢弃)
 const measureRow = (el: unknown): void => {
   const node = (el instanceof Element ? el : null) as Element | null
-  virtualizer.measureElement(node)
+  virtualizer.value.measureElement(node)
 }
 // 把每条消息对象挂到虚拟行上,模板用 row.message 访问
 const virtualRows = computed(() =>
-  virtualizer.getVirtualItems().map((vi) => ({
+  virtualizer.value.getVirtualItems().map((vi) => ({
     ...vi,
     message: messages.value[vi.index],
   }))
@@ -926,7 +982,7 @@ function handleFillChat(e: CustomEvent<{ text: string }>): void {
   const text = e.detail?.text || ''
   inputMessage.value = text
   nextTick(() => {
-    const el = document.querySelector('.chat-input textarea') as HTMLTextAreaElement | null
+    const el = document.querySelector('.input-area textarea') as HTMLTextAreaElement | null
     el?.focus()
   })
 }
@@ -968,7 +1024,7 @@ function scrollToBottom(force = false, instant = false): void {
       return;
     }
     // 虚拟滚动:滚动到最后一条(对齐底部),流式输出时持续跟随
-    virtualizer.scrollToIndex(len - 1, {
+    virtualizer.value.scrollToIndex(len - 1, {
       align: 'end',
       behavior: instant ? 'auto' : 'smooth',
     });
@@ -1068,6 +1124,22 @@ async function handleCopy(message: any): Promise<void> {
 async function handleRegenerate(messageId: string): Promise<void> {
   const conv = chatStore.currentConversation;
   if (!conv) return;
+
+  /**
+   * 【M4-F】用户点「重新生成」= 明确不要上一条答复。
+   * 这是可采集的**最强负面信号**(比任何关键词判断都硬)——
+   * 用户主动花了一次 token 来换答案,就是不满意。
+   */
+  try {
+    void (window as any).electronAPI?.learning?.recordAcceptance?.({
+      conversationId: conv.id,
+      messageId,
+      verdict: 'rejected',
+      reason: '用户点击了「重新生成」',
+    });
+  } catch (e) {
+    console.warn('[Chat] 上报接受度信号失败', e);
+  }
 
   // 执行前校验并启动网关
   await gatewayStore.ensureRunning();
@@ -1325,6 +1397,18 @@ function handleNovaSuggestion(key: string): void {
   void handleSend();
 }
 
+/** 【P1 迭代】建议 chips 按能力/状态动态生成(不再写死 s1-s3):
+ *  - 新用户(无会话) → s1 文件清单打头; 老用户 → s2 整理截图打头
+ *  - 未开记忆 → s3(记住偏好, 顺带推荐记忆体验); 已开记忆 → s4(任务回顾)
+ *  - 补足到 3 条, 池子始终来自已翻译的 s1-s4 */
+const suggestionKeys = computed<string[]>(() => {
+  const isNew = (chatStore.conversations?.length ?? 0) === 0;
+  const keys: string[] = [isNew ? 's1' : 's2'];
+  keys.push(hermesMemoryStore.memoryEnabled ? 's4' : 's3');
+  keys.push(isNew ? 's2' : 's1');
+  return keys.slice(0, 3);
+});
+
 async function handleSend(): Promise<void> {
   const content = inputMessage.value.trim();
   if ((!content && attachedFiles.value.length === 0) || chatStore.sending) return;
@@ -1532,8 +1616,8 @@ async function handleSaveSettings(): Promise<void> {
   justify-content: space-between;
   align-items: center;
   padding: var(--space-sm) var(--space-lg);
-  border-bottom: 1px solid var(--el-border-color-lighter);
-  background: rgba(255, 255, 255, 0.7);
+  border-bottom: 1px solid var(--border-subtle);
+  background: var(--bg-material);
   backdrop-filter: blur(10px);
 }
 
@@ -1665,7 +1749,6 @@ async function handleSaveSettings(): Promise<void> {
       radial-gradient(circle at 70% 30%, rgba(255, 200, 0, 0.25) 1px, transparent 1px),
       radial-gradient(circle at 50% 60%, rgba(255, 180, 0, 0.2) 2px, transparent 2px);
     background-size: 8px 8px, 6px 6px, 10px 10px;
-    animation: pixelSparkle 3s ease-in-out infinite;
   }
 }
 
@@ -1678,7 +1761,6 @@ async function handleSaveSettings(): Promise<void> {
   width: 100%;
   height: 100%;
   transform: scale(1);
-  animation: pixelBob 2s ease-in-out infinite;
 }
 
 .pixel-pip {
@@ -1697,16 +1779,6 @@ async function handleSaveSettings(): Promise<void> {
   border-radius: 50%;
   background: var(--accent-soft);
   color: var(--accent-base);
-}
-
-@keyframes pixelSparkle {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.7; }
-}
-
-@keyframes pixelBob {
-  0%, 100% { transform: translateY(0) scale(1); }
-  50% { transform: translateY(-2px) scale(1.05); }
 }
 
 .avatar-img {
@@ -1915,20 +1987,12 @@ async function handleSaveSettings(): Promise<void> {
 
 .input-area {
   padding: var(--space-md) var(--space-lg);
-  border-top: 1px solid var(--el-border-color-lighter);
-  background: rgba(255, 255, 255, 0.8);
+  border-top: 1px solid var(--border-subtle);
+  background: var(--bg-material);
   backdrop-filter: blur(10px);
 }
 
-.model-selector {
-  display: flex;
-  gap: var(--space-sm);
-  margin-bottom: var(--space-md);
-
-  .el-select {
-    flex: 1;
-  }
-}
+/* 旧版 .model-selector 死 CSS 已删除 — 输入区已抽到 ChatInput.vue(审计残留清查) */
 
 .input-row {
   display: flex;
@@ -2026,22 +2090,12 @@ async function handleSaveSettings(): Promise<void> {
 }
 
 .empty-greeting {
-  margin-bottom: var(--space-2xl);
-}
-
-.empty-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 64px;
-  height: 64px;
-  border-radius: 16px;
-  background: var(--accent-soft);
   margin-bottom: var(--space-md);
 }
 
 .empty-title {
-  font-size: var(--font-size-display, 28px);
+  /* 【P0 迭代】字重梯度: 问候语抬到 display 档(34px), 与 15px 副标题拉开两级层次 */
+  font-size: var(--font-size-display, 34px);
   font-weight: var(--font-weight-semibold);
   color: var(--text-color);
   margin: 0 0 var(--space-sm);
@@ -2050,86 +2104,17 @@ async function handleSaveSettings(): Promise<void> {
 
 .empty-desc {
   font-size: var(--font-size-body);
-  color: var(--el-text-color-secondary);
+  /* 灰度再压一档: 主标题(实色) → 副标题(次灰), 层次差更大 */
+  color: var(--fg-tertiary, var(--el-text-color-secondary));
   margin: 0;
   line-height: var(--line-height-relaxed);
 }
 
-.empty-prompts {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: var(--space-md);
-  margin-bottom: var(--space-xl);
-}
-
-.empty-prompt-card {
-  display: flex;
-  align-items: flex-start;
-  gap: var(--space-md);
-  padding: var(--space-md) var(--space-lg);
-  background: var(--bg-elevated);
-  border: 1px solid var(--border-base);
-  border-radius: var(--radius-lg);
-  cursor: pointer;
+/* 空态输入框宿主: 与会话内输入区同宽, 发送即建会话 */
+.empty-input-host {
+  max-width: 720px;
+  margin: var(--space-lg) auto 0;
   text-align: left;
-  font-family: inherit;
-  color: var(--fg-primary);
-  transition: background-color var(--duration-fast) var(--ease-standard),
-    border-color var(--duration-fast) var(--ease-standard),
-    transform var(--duration-fast) var(--ease-standard);
-
-  &:hover {
-    background: var(--bg-hover);
-    border-color: var(--accent-base);
-    transform: translateY(-1px);
-  }
-
-  &:active {
-    transform: translateY(0);
-  }
-}
-
-.empty-prompt-emoji {
-  font-size: 24px;
-  flex-shrink: 0;
-  line-height: 1;
-}
-
-.empty-prompt-body {
-  flex: 1;
-  min-width: 0;
-}
-
-.empty-prompt-title {
-  font-size: 14px;
-  font-weight: var(--font-weight-medium);
-  color: var(--fg-primary);
-  margin-bottom: 2px;
-}
-
-.empty-prompt-desc {
-  font-size: 12px;
-  color: var(--fg-tertiary);
-  line-height: var(--line-height-normal);
-}
-
-.empty-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: var(--space-sm);
-  justify-content: center;
-  margin-bottom: var(--space-md);
-
-  kbd {
-    font-family: var(--font-family-mono);
-    font-size: 10px;
-    background: var(--bg-elevated);
-    border: 1px solid var(--border-base);
-    border-radius: 3px;
-    padding: 1px 4px;
-    margin-left: 4px;
-    color: var(--fg-tertiary);
-  }
 }
 
 .empty-tip {
@@ -2159,7 +2144,7 @@ async function handleSaveSettings(): Promise<void> {
 
 /* Phase 6: 任务执行状态样式 */
 .task-execution-status {
-  background: linear-gradient(135deg, var(--gradient-start)15 0%, var(--gradient-end)15 100%);
+  background: var(--bg-tertiary);
   border: 1px solid var(--el-color-primary-light-7);
   border-radius: var(--radius-lg);
   padding: var(--space-md);
@@ -2255,13 +2240,8 @@ async function handleSaveSettings(): Promise<void> {
 }
 .step-icon-svg.is-success { color: var(--el-color-success); }
 .step-icon-svg.is-failed  { color: var(--el-color-danger); }
-.step-icon-svg.is-running { color: var(--accent-base); animation: step-spin 1.2s linear infinite; }
+.step-icon-svg.is-running { color: var(--accent-base); animation: nw-spin 1.2s linear infinite; }
 .step-icon-svg.is-pending { color: var(--fg-tertiary); }
-
-@keyframes step-spin {
-  from { transform: rotate(0deg); }
-  to   { transform: rotate(360deg); }
-}
 
 .step-desc {
   color: var(--text-color);
@@ -2382,7 +2362,7 @@ async function handleSaveSettings(): Promise<void> {
 
 /* Hermes记忆面板样式 */
 .memory-panel {
-  background: linear-gradient(135deg, var(--gradient-start)10 0%, var(--gradient-end)10 100%);
+  background: var(--bg-secondary);
   border: 1px solid var(--el-color-primary-light-7);
   border-radius: var(--radius-lg);
   margin-bottom: var(--space-md);
@@ -2394,7 +2374,7 @@ async function handleSaveSettings(): Promise<void> {
   justify-content: space-between;
   align-items: center;
   padding: var(--space-sm) var(--space-md);
-  background: linear-gradient(135deg, var(--gradient-start)15 0%, var(--gradient-end)15 100%);
+  background: var(--bg-tertiary);
   border-bottom: 1px solid var(--el-color-primary-light-7);
 }
 
@@ -2753,19 +2733,21 @@ async function handleSaveSettings(): Promise<void> {
   color: rgba(255, 255, 255, 0.72);
   white-space: nowrap;
 }
+.nova-orb-rate {
+  color: #ffb454;
+  font-variant-numeric: tabular-nums;
+  text-transform: none;
+}
+.nova-orb-exact {
+  color: var(--accent-base);
+  font-size: 12px;
+}
 .nova-empty-orb {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: var(--space-md, 12px);
-  margin-bottom: var(--space-lg, 24px);
-}
-.nova-empty-orb-text {
-  font-size: var(--font-size-sm, 12px);
-  font-weight: 500;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--fg-tertiary, rgba(0, 0, 0, 0.52));
+  gap: var(--space-sm, 8px);
+  margin-bottom: var(--space-md, 16px);
 }
 .nova-suggest-chips {
   display: flex;
@@ -2789,10 +2771,26 @@ async function handleSaveSettings(): Promise<void> {
 }
 .nova-chip:hover {
   transform: translateY(-1px);
-  box-shadow: 0 4px 18px rgba(34, 211, 238, 0.20), inset 0 0 0 1px rgba(34, 211, 238, 0.35);
+  box-shadow: 0 4px 18px rgba(160, 168, 186, 0.20), inset 0 0 0 1px rgba(160, 168, 186, 0.35);
 }
 .nova-chip:focus-visible {
-  outline: 2px solid var(--nova-cyan, #22d3ee);
+  outline: 2px solid var(--accent-base, #7c8db5);
   outline-offset: 2px;
+}
+
+/* 用户视角走查修复: .nova-chip 同时挂了全局 .nova-tech-surface
+   (强制深色玻璃面 + 白字)。浅色主题下整页是白底, 仍套深底玻璃面 →
+   胶囊发黑、文字对比度极低, 三条建议几乎读不出来。
+   这里按主题切换成浅色描边 chip; scoped 选择器优先级高于全局类。 */
+:root[data-theme='light'] .nova-chip {
+  background: rgba(15, 23, 42, 0.045);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border: 1px solid rgba(15, 23, 42, 0.16);
+  box-shadow: none;
+  color: #1f2937;
+}
+:root[data-theme='light'] .nova-chip:hover {
+  box-shadow: 0 4px 14px rgba(15, 23, 42, 0.10), inset 0 0 0 1px rgba(160, 168, 186, 0.45);
 }
 </style>

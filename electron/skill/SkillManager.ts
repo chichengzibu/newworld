@@ -1,233 +1,287 @@
 /**
- * PiPiClaw - 技能管理器
+ * New World - 技能目录路径单点
+ * ═══════════════════════════════════════════════════════════════════════
+ * 【M3-F 瘦身 —— 本文件曾经是第二个技能存储】
+ *
+ * 旧实现(232 行)自带一套技能 CRUD:
+ *   listSkills / getSkill / saveSkill / deleteSkill / toggleSkill
+ *   / executeSkill(stub) / exportSkill / importSkill
+ * 外加一个自己的 `skills: Skill[]` 存储(落在 ConfigStore 的 `skills` 键)。
+ *
+ * 【为什么它是死的】
+ * 全仓审计(能力可达性):这套 CRUD **零生产调用方**。
+ * 真正在跑的技能系统是:
+ *   - `electron/skill/SkillLoader.ts` —— 扫盘(SKILL.md)→ Map → 注入/工具/UI
+ *   - 状态(启用/统计)落在 ConfigStore `skills.states`
+ * 也就是说项目里有过**两个技能存储**,而只有一个是活的。
+ *
+ * 【为什么留着它是负担】
+ * 读代码的人会问「哪个才是真的?」—— 一个自洽的 CRUD 看起来完全能用,
+ * 于是后来者可能往 phantom 存储里写数据,写完发现没有任何东西读它。
+ * 静默的空转比缺功能更难查。
+ *
+ * 【现在只留什么】
+ * `getSkillsDir()` —— **路径单点**。全仓三个模块(SkillLoader / AutoCreator /
+ * SelfLearner)都用它拼技能目录,自己 join(userData,'skills') 就是路径双源
+ * (项目历史上踩过同一个坑:写 `appPath/../skills`、读 `userData/skills`)。
+ *
+ * 【技能的真实存储在哪 —— 别再找了】
+ *   技能正文:文件系统 `<skillsDir>/<skillId>/SKILL.md`
+ *   技能状态:ConfigStore `skills.states`
+ *   技能内容接口:SkillLoader(加载/注入/工具/UI)
+ *
+ * ─────────────────────────────────────────────────────────────────
+ * 【M4-X 技能包存储位置】
+ *
+ * 用户要求:「技能包存储位置添加为**应用本身结构目录**的 skills 下面」。
+ * 于是技能目录从 `<userData>/skills` 改到**应用自身目录**下的 `skills`:
+ *   - 开发态:`<appPath>/skills`(= 仓库根的 skills/ —— 正好是原来放样例技能的地方)
+ *   - 打包后:`<install>/skills`(app.asar 在 `<install>/resources/` 下,取其上两级)
+ *
+ * 【但必须守住一条:读写同源】
+ * 本文件的历史注释写得很清楚 —— 曾经**写** `appPath/../skills`、**读**
+ * `userData/skills`,两个不同路径,导致「保存的技能永远扫不到」。
+ * 这次改路径,最怕的就是改出一模一样的岔路。故:
+ *   ① 选中的目录**落盘记住**(ConfigStore `skills.dir`),一旦定了就不再变
+ *   ② 读与写都走这一个函数 —— 没有第二个拼路径的地方
+ *   ③ 选之前**实测可写**(真写一个探针文件),不可写就落到 userData
+ *      (装到 Program Files 这类只读位置时,否则用户下载的技能会静默丢失)
  */
-
 import * as fs from 'fs';
 import { getHost } from '../platform/runtime'
 import * as path from 'path';
-
-import { LogManager } from '../core/LogManager';
 import { ConfigStore } from '../core/ConfigStore';
-import { PermissionManager } from '../permissions/PermissionManager';
-import type { Skill, SkillExecutionResult } from '../../types/skill';
+
+/** 选定的技能目录 —— 记住它,别每次重算(重算可能得出不同答案) */
+const SKILLS_DIR_KEY = 'skills.dir';
+
+export interface SkillsDirInfo {
+  /** 最终选定的技能目录 */
+  path: string;
+  /** 是否可写(不可写时所有下载/导入都会失败) */
+  writable: boolean;
+  /** 人话说明 —— 界面上要如实展示,别让人猜技能去哪了 */
+  reason: string;
+  /** 候选目录(按优先级)—— 排查时用 */
+  candidates: string[];
+}
 
 export class SkillManager {
-  private static instance: SkillManager;
-  private log = LogManager.getInstance();
-  private configStore = ConfigStore.getInstance();
-  private permissionManager = PermissionManager.getInstance();
-  private skillsDir: string;
-  private skills: Skill[] = [];
-
-  /** W7.0.4: 路径单点 — 其它模块应使用这个而非自己 join(userData,'skills') */
+  /**
+   * W7.0.4: 路径单点 —— 其它模块应使用这个,而非自己 join(userData, 'skills')。
+   *
+   * 【为什么是单点】历史上踩过同一个坑:技能**写**到 `appPath/../skills`
+   * (安装目录的兄弟目录,Windows 打包后在 Program Files → 只读),
+   * **读** `userData/skills` —— 两个不同路径,导致保存的技能永远扫不到。
+   *
+   * 【M4-X】目录改为**应用自身结构目录**下的 `skills`;不可写时落回 userData。
+   * 详见 `getSkillsDirInfo()`。
+   */
   public static getSkillsDir(): string {
-    const userDataPath = getHost().getPath('userData');
-    const dir = path.join(userDataPath, 'skills');
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
-    }
-    return dir;
-  }
-
-  private constructor() {
-    this.skillsDir = SkillManager.getSkillsDir();
-    this.ensureSkillsDir();
-    this.loadSkills();
-  }
-
-  public static getInstance(): SkillManager {
-    if (!SkillManager.instance) {
-      SkillManager.instance = new SkillManager();
-    }
-    return SkillManager.instance;
-  }
-
-  private ensureSkillsDir(): void {
-    if (!fs.existsSync(this.skillsDir)) {
-      fs.mkdirSync(this.skillsDir, { recursive: true });
-    }
-  }
-
-  private loadSkills(): void {
-    try {
-      const saved = this.configStore.get('skills') as Skill[];
-      if (saved) {
-        this.skills = saved;
-      }
-      this.log.info('[SkillManager] 技能加载成功', { count: this.skills.length });
-    } catch (error) {
-      this.log.error('[SkillManager] 技能加载失败', error);
-    }
-  }
-
-  private saveSkills(): void {
-    try {
-      this.configStore.set('skills', this.skills);
-    } catch (error) {
-      this.log.error('[SkillManager] 技能保存失败', error);
-    }
+    return SkillManager.getSkillsDirInfo().path;
   }
 
   /**
-   * 获取所有技能
+   * 解析技能目录,并说明**为什么是它**。
+   *
+   * 【为什么要有 reason】
+   * 技能目录会因安装位置而变(装到只读位置就落回 userData)。
+   * 用户看到"技能保存在哪"时,界面必须能说清是哪一个、为什么 ——
+   * 否则同一个应用在不同机器上技能"凭空不见了",没人知道去哪找。
    */
-  public listSkills(): Skill[] {
-    return [...this.skills];
-  }
+  public static getSkillsDirInfo(): SkillsDirInfo {
+    const candidates = SkillManager.getCandidates();
+    const remembered = SkillManager.readRemembered();
 
-  /**
-   * 获取指定技能
-   */
-  public getSkill(id: string): Skill | undefined {
-    return this.skills.find(s => s.id === id);
-  }
-
-  /**
-   * 保存或更新技能
-   */
-  public saveSkill(skill: Omit<Skill, 'createdAt' | 'updatedAt' | 'usageCount' | 'successRate'>): Skill {
-    const existingIndex = this.skills.findIndex(s => s.id === skill.id);
-    
-    if (existingIndex !== -1) {
-      const existing = this.skills[existingIndex];
-      const updated: Skill = {
-        ...existing,
-        ...skill,
-        updatedAt: Date.now()
-      };
-      this.skills[existingIndex] = updated;
-      this.saveSkills();
-      this.log.info('[SkillManager] 技能已更新', { id: skill.id });
-      return updated;
-    } else {
-      const newSkill: Skill = {
-        ...skill,
-        id: skill.id || `skill_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-        enabled: true,
-        usageCount: 0,
-        successRate: 100,
-        createdAt: Date.now(),
-        updatedAt: Date.now()
-      };
-      this.skills.push(newSkill);
-      this.saveSkills();
-      this.log.info('[SkillManager] 技能已创建', { id: newSkill.id });
-      return newSkill;
-    }
-  }
-
-  /**
-   * 删除技能
-   */
-  public deleteSkill(id: string): boolean {
-    const index = this.skills.findIndex(s => s.id === id);
-    if (index === -1) return false;
-    
-    this.skills.splice(index, 1);
-    this.saveSkills();
-    this.log.info('[SkillManager] 技能已删除', { id });
-    return true;
-  }
-
-  /**
-   * 启用/禁用技能
-   */
-  public toggleSkill(id: string): boolean {
-    const skill = this.skills.find(s => s.id === id);
-    if (!skill) return false;
-    
-    skill.enabled = !skill.enabled;
-    skill.updatedAt = Date.now();
-    this.saveSkills();
-    this.log.info('[SkillManager] 技能状态已切换', { id, enabled: skill.enabled });
-    return true;
-  }
-
-  /**
-   * 执行技能
-   */
-  public async executeSkill(skillId: string, _parameters: Record<string, any>): Promise<SkillExecutionResult> {
-    const skill = this.skills.find(s => s.id === skillId);
-    if (!skill) {
-      throw new Error('技能不存在');
-    }
-    if (!skill.enabled) {
-      throw new Error('技能已禁用');
-    }
-
-    // 权限校验
-    for (const _perm of skill.requiredPermissions) {
-      const check = this.permissionManager.checkPermission({
-        category: 'filesystem',
-        action: 'read'
-      });
-      if (!check.allowed) {
-        throw new Error(`权限不足: ${check.reason}`);
+    // ① 之前定过 → 优先沿用(保证"装好的技能还在原地")
+    if (remembered) {
+      const stillThere = SkillManager.ensureDir(remembered);
+      if (stillThere) {
+        return {
+          path: remembered,
+          writable: SkillManager.probeWritable(remembered),
+          reason: SkillManager.isUnder(remembered, getHost().getPath('userData'))
+            ? '用户数据目录(应用结构目录不可写时的落点)'
+            : '应用自身目录下的 skills',
+          candidates,
+        };
       }
     }
 
-    const startTime = Date.now();
-    
+    // ② 首次:按优先级挑第一个**可写**的
+    for (const c of candidates) {
+      if (!SkillManager.ensureDir(c)) continue;
+      if (!SkillManager.probeWritable(c)) continue;
+      SkillManager.remember(c);
+      return {
+        path: c,
+        writable: true,
+        reason: SkillManager.isUnder(c, getHost().getPath('userData'))
+          ? '用户数据目录(应用结构目录不可写时的落点)'
+          : '应用自身目录下的 skills',
+        candidates,
+      };
+    }
+
+    // ③ 都不行 → userData(至少能建目录)
+    const fallback = path.join(getHost().getPath('userData'), 'skills');
+    SkillManager.ensureDir(fallback);
+    return {
+      path: fallback,
+      writable: SkillManager.probeWritable(fallback),
+      reason: '用户数据目录(应用结构目录不可写)',
+      candidates,
+    };
+  }
+
+  /**
+   * 候选目录(按优先级)。
+   *
+   * - 开发态:`<appPath>/skills` —— 实测 dev 下 electron 以 `"."` 启动
+   *   (vite-plugin-electron 的 `startup(['.', '--no-sandbox'])`),故 appPath 就是**仓库根**,
+   *   `<repo>/skills` 正是"应用自身结构目录下的 skills"。
+   * - 打包后:`<dirname(appPath)>/skills` —— appPath 是 `<install>/resources/app.asar`,
+   *   取其父目录即 `<install>/resources/skills`;NSIS 默认装到 `%LOCALAPPDATA%\Programs\` → 可写。
+   *   (app.asar **内部**不可写,所以不能直接用 `<appPath>/skills`。)
+   * - 兜底:`<userData>/skills` —— 只读安装位置(Program Files)时的落点
+   */
+  private static getCandidates(): string[] {
+    const out: string[] = [];
+    const appPath = getHost().getAppPath();
     try {
-      // 更新使用次数
-      skill.usageCount++;
-      skill.updatedAt = Date.now();
-      
-      // 这里调用 TaskExecutor 执行技能
-      // 简化版本
-      this.log.info('[SkillManager] 技能执行开始', { id: skillId, name: skill.name });
-      
-      const endTime = Date.now();
-      const duration = endTime - startTime;
-      
-      // 更新成功率（简化计算）
-      skill.successRate = Math.min(100, (skill.successRate * skill.usageCount + 100) / (skill.usageCount + 1));
-      
-      this.saveSkills();
-      
-      this.log.info('[SkillManager] 技能执行成功', { id: skillId, duration });
-      
-      return {
-        success: true,
-        skillId,
-        duration,
-        output: { message: '执行成功' }
-      };
-    } catch (error: any) {
-      const endTime = Date.now();
-      const duration = endTime - startTime;
-      
-      // 更新成功率
-      skill.successRate = Math.max(0, (skill.successRate * skill.usageCount) / (skill.usageCount + 1));
-      this.saveSkills();
-      
-      this.log.error('[SkillManager] 技能执行失败', { id: skillId, error: error.message });
-      
-      return {
-        success: false,
-        skillId,
-        duration,
-        error: error.message
-      };
+      if (getHost().isPackaged()) {
+        // <install>/resources/app.asar → <install>/resources/skills
+        out.push(path.join(path.dirname(appPath), 'skills'));
+        // 再退一级:<install>/skills
+        out.push(path.resolve(path.dirname(appPath), '..', 'skills'));
+      } else {
+        // 开发态:appPath = 仓库根 → <repo>/skills
+        out.push(path.join(appPath, 'skills'));
+      }
+    } catch {
+      // 取不到 appPath(如某些宿主)→ 跳过这一档
+    }
+    out.push(path.join(getHost().getPath('userData'), 'skills'));
+    return [...new Set(out)];
+  }
+
+  /**
+   * 【M4-AH】把旧位置（`<userData>/skills`）里的技能迁到新位置。
+   *
+   * 【为什么必须有】M4-X 把技能目录从 `<userData>/skills` 改到了「应用自身目录的 skills」。
+   * 只改路径不迁移 = **升级上来的用户原有技能全部"消失"**（旧目录还在，但没人读）。
+   * 测试发现不了：测试环境里 appPath 与 userData 是同一个目录，新旧路径恰好重合。
+   *
+   * 【口径 —— 三条，都是为了不伤数据】
+   * ① **复制，不移动**：旧目录原样保留。迁移出错时用户还能从原处找回。
+   * ② **只补缺，不覆盖**：目标里已有同名技能就跳过（用户在新位置改过的版本优先）。
+   * ③ **幂等**：重复调用不会重复复制，也不会报错。
+   *
+   * 【跳过的情况】新旧目录相同（fallback 到 userData 时）；两者互相包含（避免递归自复制）。
+   */
+  public static migrateLegacySkillsDir(
+    targetDir: string = SkillManager.getSkillsDir(),
+  ): { migrated: string[]; skippedExisting: string[]; error?: string } {
+    const result: { migrated: string[]; skippedExisting: string[]; error?: string } = {
+      migrated: [],
+      skippedExisting: [],
+    };
+    try {
+      const legacyDir = path.join(getHost().getPath('userData'), 'skills');
+      const target = path.resolve(targetDir);
+      const legacy = path.resolve(legacyDir);
+
+      // 同一目录(fallback 场景)或互相包含 → 不动
+      const norm = (p: string) => p.toLowerCase();
+      const isUnder = (child: string, parent: string) =>
+        norm(child) === norm(parent) || norm(child).startsWith(norm(parent) + path.sep);
+      if (isUnder(target, legacy) || isUnder(legacy, target)) return result;
+      if (!fs.existsSync(legacyDir)) return result;
+
+      let entries: fs.Dirent[] = [];
+      try {
+        entries = fs.readdirSync(legacyDir, { withFileTypes: true });
+      } catch (e) {
+        result.error = String(e);
+        return result;
+      }
+
+      for (const e of entries) {
+        if (!e.isDirectory()) continue;
+        const src = path.join(legacyDir, e.name);
+        // 只迁移看起来像技能的目录（含 SKILL.md / skill.md），别把杂物搬过去
+        const hasDoc = ['SKILL.md', 'skill.md'].some(f => fs.existsSync(path.join(src, f)));
+        if (!hasDoc) continue;
+        const dest = path.join(target, e.name);
+        if (fs.existsSync(dest)) {
+          result.skippedExisting.push(e.name);
+          continue;
+        }
+        try {
+          // 复制而不是移动 —— 原目录保留，便于用户回退
+          fs.cpSync(src, dest, { recursive: true });
+          result.migrated.push(e.name);
+        } catch (err) {
+          result.error = `${e.name}: ${String(err)}`;
+        }
+      }
+    } catch (e) {
+      result.error = String(e);
+    }
+    return result;
+  }
+
+  /** 建目录 —— 失败返回 false(不抛:不可写是**正常**情形,不是异常) */
+  private static ensureDir(dir: string): boolean {
+    try {
+      if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+      return fs.existsSync(dir);
+    } catch {
+      return false;
     }
   }
 
   /**
-   * 导出技能
+   * 实测可写 —— **真写一个探针文件**,不靠猜。
+   *
+   * 【为什么必须真写】目录权限可能与父目录不同(继承被显式收紧),
+   * existsSync 说存在不代表写得进去。装到 Program Files 时就是这种情形。
    */
-  public exportSkill(id: string): string {
-    const skill = this.skills.find(s => s.id === id);
-    if (!skill) {
-      throw new Error('技能不存在');
+  private static probeWritable(dir: string): boolean {
+    const probe = path.join(dir, '.write-probe');
+    try {
+      fs.writeFileSync(probe, 'x');
+      fs.unlinkSync(probe);
+      return true;
+    } catch {
+      return false;
     }
-    return JSON.stringify(skill, null, 2);
   }
 
-  /**
-   * 导入技能
-   */
-  public importSkill(skillJson: string): Skill {
-    const skill = JSON.parse(skillJson) as Skill;
-    return this.saveSkill(skill);
+  private static isUnder(child: string, parent: string): boolean {
+    try {
+      const c = path.resolve(child).toLowerCase();
+      const p = path.resolve(parent).toLowerCase();
+      return c === p || c.startsWith(p + path.sep);
+    } catch {
+      return false;
+    }
+  }
+
+  private static readRemembered(): string | null {
+    try {
+      const v = ConfigStore.getInstance().get(SKILLS_DIR_KEY);
+      return typeof v === 'string' && v.trim() ? v : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private static remember(dir: string): void {
+    try {
+      ConfigStore.getInstance().set(SKILLS_DIR_KEY, dir);
+    } catch {
+      // 记不住就记不住 —— 下次重算也还是同一个(可写性不会变)
+    }
   }
 }

@@ -1,10 +1,14 @@
-name: PiPiClaw CI
+name: New World CI
 
 on:
   push:
     branches: [master, main]
   pull_request:
     branches: [master, main]
+  # 【P1 迭代】夜间门禁: 每天 UTC 20:00(北京 04:00)跑真实模型 e2e
+  schedule:
+    - cron: '0 20 * * *'
+  workflow_dispatch: {}
 
 jobs:
   build-and-test:
@@ -29,6 +33,13 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # 【P0 工程规范】依赖审计硬门禁(2026-11-24):
+      # 只审生产依赖(--omit=dev) —— dev 链(vitest/tinypool 等)不随安装包发布。
+      # 级别定 critical: 当前生产面 0 critical / 7 high(已知, 见 docs/adr/0004-dependency-audit-baseline.md),
+      # intlify 9→11 等 high 修复属 breaking 升级, 由 Dependabot 持续提案 + 专项升级消化。
+      - name: Dependency audit (production deps, hard gate)
+        run: npm audit --omit=dev --audit-level=critical
+
       # Linux rpm target 需要 rpmbuild(默认 ubuntu runner 不带)
       - name: Install rpm tooling (linux only)
         if: matrix.os == 'ubuntu-latest'
@@ -43,8 +54,16 @@ jobs:
       - name: ESLint
         run: npm run lint
 
-      - name: Vitest unit
-        run: npx vitest run --reporter=verbose
+      - name: Vitest unit (with coverage thresholds)
+        run: npx vitest run --reporter=verbose --coverage
+
+      - name: Upload coverage summary
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-summary
+          path: coverage/coverage-summary.json
+          if-no-files-found: ignore
 
       - name: Build renderer (vite)
         run: npm run build
@@ -53,19 +72,28 @@ jobs:
         run: npm run smoke
 
       # Phase 0 P0-T0.3: 防止 v3.0.0 SideNav broken 重演
-      # build 本身不会 catch 图标没注册 / CSP 缺 unsafe-eval
-      # 所以加这两道防线:
-      - name: Verify element-plus icons registered in bundle
-        # P0-T0.3: 防止 v3.0.0 SideNav broken 重演
-        # bundle 本身不能 catch 缺图标注册 / 缺 unsafe-eval CSP,
-        # 所以加两道防线:
-        #   1) dist/index.html 包含 'unsafe-eval' (Vue runtime 必需)
+      # 【2026-11-23 CSP 加固后反转】CSP 基线从「必须含 unsafe-eval」改为「必须不含」:
+      #   script-src 'self'(无 unsafe-eval/unsafe-inline), i18n 走构建期 AST 预编译
+      #   + vue-i18n runtime bundle JIT(build/precompile-i18n.ts 三配置管线),
+      #   产物出现 new Function 即会在 build 步被 build-report 隐患4 门禁拦下。
+      #   所以这里验证 CSP 收紧形态, 而不是验证 eval 放行。
+      - name: Verify CSP hardened + element-plus icons registered in bundle
+        # 两道防线:
+        #   1) dist/index.html CSP 为 script-src 'self' 且不含 unsafe-eval / unsafe-inline
         #   2) main bundle 包含 element-plus 图标的实际组件名
         #      (vite 会重命名 import,但组件的 name 属性保留原始字符串,
         #       可作为 'icons registered' 的可靠信号)
         run: |
-          if ! grep -q "unsafe-eval" dist/index.html; then
-            echo "❌ dist/index.html missing 'unsafe-eval' in CSP (Vue runtime will fail)"
+          if ! grep -q "script-src 'self'" dist/index.html; then
+            echo "❌ dist/index.html CSP missing \"script-src 'self'\" (CSP 加固回退)"
+            exit 1
+          fi
+          if grep -q "unsafe-eval" dist/index.html; then
+            echo "❌ dist/index.html still contains 'unsafe-eval' (CSP 加固回退, i18n 必须走 AST 预编译管线)"
+            exit 1
+          fi
+          if grep -q "unsafe-inline" dist/index.html; then
+            echo "❌ dist/index.html still contains 'unsafe-inline' in CSP (加固回退)"
             exit 1
           fi
           missing=0
@@ -84,15 +112,89 @@ jobs:
       - name: Sandbox selfcheck
         run: node scripts/sandbox-selfcheck.mjs || echo "sandbox soft-fail no docker in CI"
 
-      - name: Playwright e2e - active specs (ubuntu only, hard-fail)
+      # 【M4-Q】e2e 全量进门禁
+      # 此前这一步只跑 **4 个 spec**(chat-agent / settings-p7 / a5-computer-use /
+      # ui-smoke)—— 而近几批挖到的 P0 全都**不在那 4 个里**:
+      #   · Chat 虚拟列表红屏(打开有消息的会话就整屏报错)
+      #   · 悬浮命令按钮压住「发送」按钮
+      #   · MCP 沙箱拒绝被报告成「调用成功」
+      # 「跑」没有变成「门禁」,bug 就会再来一遍。现:跑**全量**。
+      #
+      # 两个前置:
+      #   ① xvfb —— Linux runner 没有 X server,Electron 起不来
+      #   ② mock LLM 顶在 11434 —— 依赖 LLM 端点的 spec(error-recovery /
+      #      network-failure / …)用仓库自带的 mock,**不装 6GB 真模型**(也不下载)，
+      #      断言保持确定性
+      - name: Playwright e2e - FULL suite (ubuntu only, hard-fail)
         if: matrix.os == 'ubuntu-latest'
-        # 仅跑非 placeholder 的 active spec,hard-fail
-        # placeholder specs(需要 docker/飞书凭证)继续 skip
         run: |
           npx playwright install --with-deps chromium
-          E2E_ELECTRON=1 npx playwright test \
-            tests/e2e/chat-agent.spec.ts \
-            tests/e2e/settings-p7.spec.ts \
-            tests/e2e/a5-computer-use.spec.ts \
-            tests/e2e/ui-smoke.spec.ts \
-            --reporter=line
+          sudo apt-get update && sudo apt-get install -y xvfb
+          # mock LLM:让依赖 LLM 端点的 spec 有确定性响应
+          node scripts/mock-llm-server.mjs 11434 &
+          sleep 3
+          xvfb-run -a env E2E_ELECTRON=1 npx playwright test --reporter=line
+          # mock LLM 不用主动杀 —— job 结束即回收
+
+
+  # 【P1 迭代】夜间真实模型 e2e: ubuntu runner 装 Ollama + 拉 qwen3.5:9b,
+  # 跑 final-acceptance 全量(A0 CSP 终验 / A1 注入 / A2 真实流式 / A3 持久化 / A4 走查)。
+  # 只在 schedule / 手动触发时跑 —— PR/Push 不拉 6.6GB 模型。
+  e2e-real-llm-nightly:
+    name: Nightly real-LLM e2e (Ollama qwen3.5:9b)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Ollama
+        run: |
+          curl -fsSL https://ollama.com/install.sh | sh
+          ollama serve &
+          sleep 3
+          curl -fs http://localhost:11434/api/version
+
+      - name: Pull qwen3.5:9b
+        run: ollama pull qwen3.5:9b
+
+      - name: Build (dist + dist-electron)
+        run: node scripts/build.mjs --ci
+
+      - name: Run final-acceptance e2e (real LLM)
+        run: |
+          npx playwright install --with-deps chromium
+          sudo apt-get update && sudo apt-get install -y xvfb
+          xvfb-run -a env E2E_ELECTRON=1 OLLAMA_URL=http://localhost:11434 \
+            npx playwright test tests/e2e/final-acceptance.spec.ts --reporter=line
+
+      # 【P0 工程规范】夜间性能基准采集: 先不设失败阈值(攒 2-3 周数据),
+      #   baseline.json 每轮上传 artifact, 后续做对比门禁(超 10% 告警)。
+      - name: Perf benchmark (baseline collection)
+        run: node scripts/perf-benchmark.mjs || echo "perf soft-fail (collection only)"
+
+      - name: Upload perf baseline
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-baseline
+          path: docs/perf/baseline.json
+          if-no-files-found: ignore
+
+      - name: Upload screenshots on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: acceptance-screenshots
+          path: e2e-screenshots/
+          if-no-files-found: ignore

@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - 配置存储管理器
+ * New World - 配置存储管理器
  * 
  * 职责：
  * 1. 管理应用配置（JSON文件存储）
@@ -173,6 +173,20 @@ export class ConfigStore {
    */
   public getAll(): Record<string, any> {
     return { ...this.config };
+  }
+
+  /**
+   * 【本地备份】从备份数据整体恢复配置。
+   * 与 reset() 的区别：reset 丢掉用户设置；这里是把备份里的设置写回来。
+   * 未知键保留（允许新版本向前兼容），缺失键用默认值补齐。
+   */
+  public importAll(data: Record<string, any>): void {
+    if (!data || typeof data !== 'object' || Array.isArray(data)) {
+      throw new Error('备份配置格式错误：config 必须是对象');
+    }
+    this.config = { ...this.getDefaultConfig(), ...data };
+    this.saveConfig();
+    this.log.info('配置已从本地备份恢复');
   }
 
   /**

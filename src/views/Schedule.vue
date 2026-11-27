@@ -17,7 +17,12 @@
     </div>
 
     <div class="schedule-content">
-      <el-empty v-if="tasks.length === 0" :description="t('schedule.title')" />
+      <!-- 视觉打磨: 空态不再只重复页面标题, 给引导文案 + 直接可点的主操作 -->
+      <el-empty v-if="tasks.length === 0" :description="t('schedule.emptyText')">
+        <el-button type="primary" @click="openCreateDialog">
+          <el-icon><Plus /></el-icon>{{ t('schedule.createTask') }}
+        </el-button>
+      </el-empty>
 
       <el-table v-else :data="tasks" stripe>
         <el-table-column :label="t('common.name')" prop="name" min-width="160" />

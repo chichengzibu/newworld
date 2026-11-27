@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * PiPiClaw - 为鸿蒙 HAP 内的 Electron app 收集运行期 node_modules
+ * New World - 为鸿蒙 HAP 内的 Electron app 收集运行期 node_modules
  *
  * 背景:
  *   vite 以 ssr:true 构建主进程,node_modules 依赖默认被 external

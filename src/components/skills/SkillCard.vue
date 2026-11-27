@@ -32,9 +32,14 @@
           <el-icon><View /></el-icon>
           {{ skill.usageCount }} 次使用
         </span>
-        <span class="stat-item">
+        <!--
+          【M4-D】无数据时显示 "—" 而非 100%。
+          此前写这两个字段的 recordSkillUsage() 零调用方 → 永远显示
+          「0 次使用 / 100% 成功率」—— 那不是"还没数据",那是编造的。
+        -->
+        <span class="stat-item" :title="skill.successRate === null ? '暂无使用记录' : ''">
           <el-icon><CircleCheck /></el-icon>
-          {{ skill.successRate }}% 成功率
+          {{ skill.successRate === null || skill.successRate === undefined ? '—' : `${skill.successRate}%` }} 成功率
         </span>
         <span class="stat-item" v-if="skill.fileSize !== undefined">
           <el-icon><Document /></el-icon>
@@ -58,7 +63,8 @@ interface SkillProps {
     triggerKeywords: string[];
     enabled: boolean;
     usageCount: number;
-    successRate: number;
+    /** 【M4-D】null = 暂无使用记录(此前恒为 100,是编造的) */
+    successRate: number | null;
     fileSize?: number;
   };
 }
@@ -74,12 +80,13 @@ const emit = defineEmits(['toggle']);
 
 const isEnabled = ref(props.skill.enabled);
 
+// v4.9：低饱和柔和色阶 —— 仍用于区分不同技能，但去掉高饱和「AI 感」撞色
 const iconColors = [
-  '#F59E0B', // 暖橙色
-  '#3B82F6', // 蓝色
-  '#10B981', // 绿色
-  '#8B5CF6', // 紫色
-  '#EC4899'  // 粉色
+  '#C08A3E', // 柔和琥珀
+  '#6E86A8', // 柔和靛蓝
+  '#5C9A7B', // 柔和青绿
+  '#8A7FA8', // 柔和紫灰
+  '#B0788A'  // 柔和玫瑰
 ];
 
 const iconColor = computed(() => {

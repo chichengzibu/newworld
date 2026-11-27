@@ -1,690 +1,188 @@
 <template>
-  <div class="clawhub">
-    <header class="page-header">
-      <h1>ClawHub 技能市场</h1>
-      <p class="subtitle">发布 / 审核 / 搜索 / 评分 — 社区驱动的技能生态</p>
-    </header>
+  <div class="clawhub-page">
+    <div class="page-header">
+      <div class="header-left">
+        <h1 class="page-title">{{ '私有技能仓库' }}</h1>
+        <p class="page-desc">
+          {{ '连接你自己托管的技能仓库（带 Ed25519 签名的 zip 包），查看并安装。' }}
+        </p>
+      </div>
+    </div>
 
-    <el-tabs v-model="activeTab" class="clawhub-tabs">
-      <!-- Tab 1: 浏览市场(P1-05 搜索/发现) -->
-      <el-tab-pane label="浏览市场(本地)" name="browse">
-        <el-alert
-          type="warning"
-          :closable="false"
-          show-icon
-          title="本地演示模式"
-          description="此市场为单机本地存储（未接入共享后端），数据仅存于本机、不与他人同步。要获取社区共享技能，请使用「远程仓库」标签页（支持签名校验的一键安装）。"
-          style="margin-bottom: 12px"
+    <!--
+      【M4-X 清理】本页原先有 5 个页签,其中 4 个是**本地演示**:
+      「浏览市场(本地)」「发布技能(本地)」「审核队列(本地)」「技能模板」。
+      审计结论(逐条查过读写路径):
+      - 本地市场的"下载"按钮是 **stub**(只弹 toast,什么都不装)
+      - 本地市场"审核通过"的条目**永远装不上** —— 它只写 userData/clawhub-skills.json
+      - 「一键实例化」把技能写到 `userData/templates/` —— **SkillLoader 从不扫这个目录**
+        (它只扫技能目录 + 用户自加目录),所以模板实例化出来的东西**不是技能**;
+        且 SelfLearner 也不读模板 → 整条链是死的
+      故这 4 个页签连同其后端(ClawHubManager)一并删除 —— M3-F 已有先例:
+      「零生产调用方的 CRUD 是负担,静默的空转比缺功能更难查」。
+
+      留下的这一页是**远程仓库** —— 唯一真正走网络、且**信任模型不同**的能力:
+      自建仓库的包由作者私钥签名、应用验签(公开可校验);
+      与「开源技能库」那些无签名的公开 SKILL.md 集合不是一回事。
+    -->
+    <el-alert
+      type="info"
+      :closable="false"
+      show-icon
+      style="margin-bottom: var(--space-md);"
+      :title="'公开的开源技能在技能页的「开源技能库」里找；本页用于自建仓库（签名包）。'"
+    />
+
+    <el-card>
+      <div class="registry-header">
+        <el-input
+          v-model="registryBaseUrl"
+          placeholder="registry 基址，例如 https://example.com/my-registry"
+          clearable
+          style="width: 420px;"
         />
-        <div class="filter-bar">
-          <el-input v-model="searchQuery" placeholder="搜索技能名/描述/标签" clearable style="width: 300px" @keyup.enter="doSearch" />
-          <el-select v-model="searchCategory" placeholder="分类" clearable style="width: 160px">
-            <el-option label="开发" value="dev" />
-            <el-option label="生产力" value="productivity" />
-            <el-option label="数据" value="data" />
-            <el-option label="AI" value="ai" />
-          </el-select>
-          <el-select v-model="sortBy" style="width: 140px">
-            <el-option label="最新发布" value="recent" />
-            <el-option label="下载最多" value="downloads" />
-            <el-option label="评分最高" value="rating" />
-          </el-select>
-          <el-button @click="doSearch">搜索</el-button>
-        </div>
+        <el-button type="primary" :loading="registryLoading" @click="loadRegistry">
+          {{ registryList.length ? '检查更新' : '连接仓库' }}
+        </el-button>
+        <span v-if="registryList.length" class="registry-meta">
+          共 {{ registryList.length }} 个 · 可更新 {{ registryList.filter((r) => r.hasUpdate).length }} 个
+        </span>
+        <span v-else-if="!registryLoading" class="registry-meta registry-meta--muted">
+          {{ '未连接或离线。先在远端放好 index.json 与签名 .zip。' }}
+        </span>
+      </div>
 
-        <div v-if="searchResults.length === 0" class="empty-state">
-          <el-empty description="还没有技能,点击「发布技能」成为第一个" />
-        </div>
+      <div v-if="registryList.length === 0 && registryLoading" class="empty-state">
+        <el-skeleton :rows="3" animated />
+      </div>
 
-        <div v-else class="skill-grid">
-          <div v-for="s in searchResults" :key="s.id" class="skill-card">
-            <div class="card-header">
-              <h3>{{ s.name }}</h3>
-              <el-tag size="small">{{ s.category }}</el-tag>
+      <div v-else-if="registryList.length === 0" class="empty-hint">
+        <!-- 【设计审计 #P1-5】环境变量/文件路径是运维细节 → 用户视角一句话, 细节收进 hover -->
+        <p :title="'基址: 环境变量 NW_CLAWHUB_REGISTRY 或页面内填写; 签名公钥: 环境变量 NW_CLAWHUB_PUBKEY 或 userData/clawhub-pubkey.txt'">
+          {{ '尚未连接私有技能仓库 — 在上方填入仓库地址并连接，即可浏览与安装签名技能包。' }}
+        </p>
+      </div>
+
+      <el-row v-else :gutter="16" class="registry-grid">
+        <el-col v-for="r in registryList" :key="r.id" :xs="24" :sm="12" :md="8" :lg="6">
+          <el-card class="registry-card" shadow="hover">
+            <div class="registry-card-header">
+              <h4>{{ r.name }}</h4>
+              <el-tag size="small" type="info">{{ r.category }}</el-tag>
             </div>
-            <p class="card-desc">{{ s.description }}</p>
-            <div class="card-tags">
-              <el-tag v-for="t in s.tags" :key="t" size="small" type="info">{{ t }}</el-tag>
+            <p class="registry-desc">{{ r.description }}</p>
+            <div class="registry-tags">
+              <el-tag v-for="t in r.tags" :key="t" size="small" effect="plain">{{ t }}</el-tag>
             </div>
-            <div class="card-meta">
-              <span><el-icon :size="12"><User /></el-icon> {{ s.authorName }}</span>
-              <span><el-icon :size="12"><Star /></el-icon> {{ s.ratingCount > 0 ? s.ratingSum / s.ratingCount : '—' }} ({{ s.ratingCount }})</span>
-              <span><el-icon :size="12"><Download /></el-icon> {{ s.downloadCount }}</span>
+            <div class="registry-version">
+              <span>{{ '远端' }} v{{ r.version }}</span>
+              <span v-if="r.installedVersion">
+                · {{ '已装' }} v{{ r.installedVersion }}
+                <el-tag v-if="r.hasUpdate" size="small" type="warning">{{ '可更新' }}</el-tag>
+                <el-tag v-else size="small" type="success">{{ '已最新' }}</el-tag>
+              </span>
+              <span v-else>· {{ '未安装' }}</span>
             </div>
-            <div class="card-actions">
-              <el-button size="small" @click="openRateDialog(s)">评分</el-button>
-              <el-button size="small" type="primary" @click="handleDownload(s)">下载</el-button>
-            </div>
-          </div>
-        </div>
-      </el-tab-pane>
-
-      <!-- Tab 2: 发布技能(P1-03) -->
-      <el-tab-pane label="发布技能(本地)" name="publish">
-        <el-alert
-          type="warning"
-          :closable="false"
-          show-icon
-          title="本地演示模式"
-          description="发布仅写入本机本地存储，不会真正进入共享市场。要对外发布技能，请用 scripts/build-registry.mjs 打包签名后托管到远端仓库。"
-          style="margin-bottom: 12px"
-        />
-        <el-card class="publish-card">
-          <h3>发布你的技能</h3>
-          <el-form :model="publishForm" label-width="120px">
-            <el-form-item label="技能名" required>
-              <el-input v-model="publishForm.name" placeholder="如:Git 提交助手" />
-            </el-form-item>
-            <el-form-item label="描述" required>
-              <el-input v-model="publishForm.description" type="textarea" :rows="3" placeholder="技能做什么、解决什么问题" />
-            </el-form-item>
-            <el-form-item label="分类">
-              <el-input v-model="publishForm.category" placeholder="如:dev / productivity" />
-            </el-form-item>
-            <el-form-item label="标签">
-              <el-input v-model="publishForm.tagsText" placeholder="逗号分隔,如:git,code,commit" />
-            </el-form-item>
-            <el-form-item label="manifest 路径">
-              <el-input v-model="publishForm.manifestPath" placeholder="userData/skills/your-skill/skill.md" />
-            </el-form-item>
-            <el-form-item>
-              <el-button type="primary" @click="handlePublish" :loading="publishing">提交审核</el-button>
-            </el-form-item>
-          </el-form>
-        </el-card>
-      </el-tab-pane>
-
-      <!-- Tab 3: 审核队列(P1-04) -->
-      <el-tab-pane label="审核队列(本地)" name="review">
-        <el-alert
-          type="warning"
-          :closable="false"
-          show-icon
-          title="本地演示模式"
-          description="审核队列为单机本地存储，无真实后台流转。仅用于界面演示。"
-          style="margin-bottom: 12px"
-        />
-        <el-table :data="pendingList" stripe>
-          <el-table-column label="技能" prop="name" />          <el-table-column label="作者" prop="authorName" width="120" />
-          <el-table-column label="描述" prop="description" show-overflow-tooltip />
-          <el-table-column label="分类" prop="category" width="100" />
-          <el-table-column label="提交时间" width="180">
-            <template #default="{ row }">
-              {{ new Date(row.publishedAt).toLocaleString() }}
-            </template>
-          </el-table-column>
-          <el-table-column label="操作" width="240">
-            <template #default="{ row }">
-              <el-button size="small" type="success" @click="handleReview(row, true)">通过</el-button>
-              <el-button size="small" type="danger" @click="openRejectDialog(row)">驳回</el-button>
-            </template>
-          </el-table-column>
-        </el-table>
-      </el-tab-pane>
-
-      <!-- Tab 4: 技能模板(P2-03) -->
-      <el-tab-pane label="技能模板" name="templates">
-        <div class="templates-header">
-          <el-input
-            v-model="templateQuery"
-            placeholder="搜索模板名/描述/标签"
-            clearable
-            style="width: 300px"
-            @keyup.enter="loadTemplates"
-          />
-          <el-select v-model="templateCategory" placeholder="分类" clearable style="width: 180px" @change="loadTemplates">
-            <el-option v-for="cat in templateCategories" :key="cat" :label="cat" :value="cat" />
-          </el-select>
-          <el-button @click="loadTemplates">刷新</el-button>
-          <span class="templates-meta">共 {{ templates.length }} 个模板</span>
-        </div>
-        <el-row :gutter="16" class="template-grid">
-          <el-col v-for="tpl in templates" :key="tpl.id" :xs="24" :sm="12" :md="8" :lg="6">
-            <el-card class="template-card" shadow="hover">
-              <div class="template-card-header">
-                <h4>{{ tpl.name }}</h4>
-                <el-tag size="small" type="info">{{ tpl.category }}</el-tag>
-              </div>
-              <p class="template-desc">{{ tpl.description }}</p>
-              <p class="template-usecase"><el-icon :size="13"><Connection /></el-icon> {{ tpl.useCase }}</p>
-              <div class="template-tags">
-                <el-tag v-for="tag in tpl.tags" :key="tag" size="small" effect="plain">{{ tag }}</el-tag>
-              </div>
-              <div class="template-author">by {{ tpl.authorName }}</div>
-              <el-button
-                type="primary"
-                size="small"
-                class="template-instantiate-btn"
-                @click="openInstantiateDialog(tpl)"
-              >
-                一键实例化
-              </el-button>
-            </el-card>
-          </el-col>
-        </el-row>
-      </el-tab-pane>
-
-      <!-- Tab 5: 远程仓库 (registry: 作者推送 / 一键安装) -->
-      <el-tab-pane label="远程仓库" name="registry">
-        <div class="registry-header">
-          <el-input
-            v-model="registryBaseUrl"
-            placeholder="registry 基址,留空用默认/环境变量"
-            clearable
-            style="width: 360px"
-          />
-          <el-button type="primary" :loading="registryLoading" @click="loadRegistry">
-            {{ registryList.length ? '检查更新' : '连接仓库' }}
-          </el-button>
-          <span v-if="registryList.length" class="registry-meta">
-            共 {{ registryList.length }} 个 · 可更新 {{ registryList.filter((r) => r.hasUpdate).length }} 个
-          </span>
-          <span v-else-if="!registryLoading" class="registry-meta registry-meta--muted">
-            未连接或离线。先在远端放好 index.json 与签名 .zip。
-          </span>
-        </div>
-
-        <div v-if="registryList.length === 0 && registryLoading" class="empty-state">
-          <el-skeleton :rows="3" animated />
-        </div>
-
-        <el-row v-else :gutter="16" class="registry-grid">
-          <el-col v-for="r in registryList" :key="r.id" :xs="24" :sm="12" :md="8" :lg="6">
-            <el-card class="registry-card" shadow="hover">
-              <div class="registry-card-header">
-                <h4>{{ r.name }}</h4>
-                <el-tag size="small" type="info">{{ r.category }}</el-tag>
-              </div>
-              <p class="registry-desc">{{ r.description }}</p>
-              <div class="registry-tags">
-                <el-tag v-for="t in r.tags" :key="t" size="small" effect="plain">{{ t }}</el-tag>
-              </div>
-              <div class="registry-version">
-                <span>远端 v{{ r.version }}</span>
-                <span v-if="r.installedVersion">
-                  · 已装 v{{ r.installedVersion }}
-                  <el-tag v-if="r.hasUpdate" size="small" type="warning">可更新</el-tag>
-                  <el-tag v-else size="small" type="success">已最新</el-tag>
-                </span>
-                <span v-else>· 未安装</span>
-              </div>
-              <el-button
-                type="primary"
-                size="small"
-                class="registry-install-btn"
-                :loading="installingId === r.id"
-                @click="installFromRegistry(r)"
-              >
-                {{ r.installedVersion ? (r.hasUpdate ? '更新' : '重装') : '安装' }}
-              </el-button>
-            </el-card>
-          </el-col>
-        </el-row>
-      </el-tab-pane>
-    </el-tabs>
-
-    <!-- 评分弹窗 -->
-    <el-dialog v-model="rateDialogVisible" title="为技能评分" width="500px">
-      <el-form v-if="ratingSkill" :model="rateForm" label-width="100px">
-        <el-form-item label="技能名"><strong>{{ ratingSkill.name }}</strong></el-form-item>
-        <el-form-item label="评分">
-          <el-rate v-model="rateForm.score" :max="5" />
-        </el-form-item>
-        <el-form-item label="短评">
-          <el-input v-model="rateForm.review" type="textarea" :rows="3" placeholder="说点什么" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="rateDialogVisible = false">取消</el-button>
-        <el-button type="primary" @click="handleRate">提交</el-button>
-      </template>
-    </el-dialog>
-
-    <!-- 驳回弹窗 -->
-    <el-dialog v-model="rejectDialogVisible" title="驳回原因" width="500px">
-      <el-input v-model="rejectReason" type="textarea" :rows="3" placeholder="为什么驳回" />
-      <template #footer>
-        <el-button @click="rejectDialogVisible = false">取消</el-button>
-        <el-button type="danger" @click="handleReview(rejectingSkill!, false)">确认驳回</el-button>
-      </template>
-    </el-dialog>
-
-    <!-- 实例化模板弹窗 (P2-03) -->
-    <el-dialog v-model="instantiateDialogVisible" title="从模板实例化技能" width="500px">
-      <el-form v-if="instantiatingTemplate" label-width="100px">
-        <el-form-item label="模板"><strong>{{ instantiatingTemplate.name }}</strong></el-form-item>
-        <el-form-item label="作者">{{ instantiatingTemplate.authorName }}</el-form-item>
-        <el-form-item label="描述">
-          <span class="tpl-desc-inline">{{ instantiatingTemplate.description }}</span>
-        </el-form-item>
-        <el-form-item label="新技能名">
-          <el-input
-            v-model="instantiateForm.customName"
-            :placeholder="`默认: ${instantiatingTemplate.name} (我的副本)`"
-          />
-        </el-form-item>
-        <el-form-item label="作者 ID">
-          <el-input v-model="instantiateForm.authorId" placeholder="你的 userId" />
-        </el-form-item>
-        <el-form-item label="作者名">
-          <el-input v-model="instantiateForm.authorName" placeholder="你的展示名" />
-        </el-form-item>
-        <el-alert
-          type="info"
-          :closable="false"
-          title="实例化后状态为 pending,需要到「审核队列」通过后才会出现在浏览市场。"
-        />
-      </el-form>
-      <template #footer>
-        <el-button @click="instantiateDialogVisible = false">取消</el-button>
-        <el-button type="primary" :loading="instantiating" @click="handleInstantiate">实例化</el-button>
-      </template>
-    </el-dialog>
+            <el-button
+              type="primary"
+              size="small"
+              class="registry-install-btn"
+              :loading="installingId === r.id"
+              @click="installFromRegistry(r)"
+            >
+              {{ r.installedVersion ? (r.hasUpdate ? '更新' : '重装') : '安装' }}
+            </el-button>
+          </el-card>
+        </el-col>
+      </el-row>
+    </el-card>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted } from 'vue'
-import { ElMessage } from "element-plus/es/components/message/index"
+import { ref } from 'vue';
+import { ElMessage } from 'element-plus/es/components/message/index';
 
-const activeTab = ref('browse')
-const searchQuery = ref('')
-const searchCategory = ref('')
-const sortBy = ref('recent')
-const searchResults = ref<any[]>([])
-const pendingList = ref<any[]>([])
-const publishing = ref(false)
-const publishForm = reactive({ name: '', description: '', category: '', tagsText: '', manifestPath: '' })
-const rateDialogVisible = ref(false)
-const rateForm = reactive({ score: 5, review: '' })
-const ratingSkill = ref<any | null>(null)
-const rejectDialogVisible = ref(false)
-const rejectingSkill = ref<any | null>(null)
-const rejectReason = ref('')
-
-// P2-03 技能模板
-const templates = ref<any[]>([])
-const templateCategories = ref<string[]>([])
-const templateQuery = ref('')
-const templateCategory = ref('')
-const instantiateDialogVisible = ref(false)
-const instantiatingTemplate = ref<any | null>(null)
-const instantiating = ref(false)
-const instantiateForm = reactive({ customName: '', authorId: 'current-user', authorName: 'You' })
-
-// Tab 5: 远程仓库 (registry)
-const registryList = ref<any[]>([])
-const registryLoading = ref(false)
-const registryBaseUrl = ref('')
-const installingId = ref<string | null>(null)
+/**
+ * 私有技能仓库（自建、带签名）。
+ *
+ * 【与「开源技能库」的区别 —— 信任模型不同,不是同一件事的两种 UI】
+ * - 开源技能库(SkillHub,技能页内):公开的 SKILL.md 集合,**无签名**,
+ *   靠"公开可校验"取信 —— 拿到的就是上游仓库里那份字节。
+ * - 私有仓库(本页):自建托管,**每个 zip 由作者私钥签名、应用验签**,
+ *   改一个字节就装不上。
+ * 两者可以并存:公开的找开源库,自建的走本页。
+ */
+const registryList = ref<any[]>([]);
+const registryLoading = ref(false);
+const registryBaseUrl = ref('');
+const installingId = ref<string | null>(null);
 
 async function loadRegistry(): Promise<void> {
-  registryLoading.value = true
+  registryLoading.value = true;
   try {
     const r = await (window as any).electronAPI.channel.clawhubRegistryList(
       registryBaseUrl.value.trim() || undefined,
-    )
+    );
     if (r?.success) {
-      registryList.value = r.data || []
+      registryList.value = r.data || [];
       if (registryList.value.length === 0) {
-        ElMessage.info('仓库为空或暂不可达')
+        ElMessage.info('仓库为空或暂不可达');
       }
     } else {
-      ElMessage.error('连接仓库失败: ' + (r?.error || '未知错误'))
+      ElMessage.error('连接仓库失败: ' + (r?.error || '未知错误'));
     }
   } catch (e) {
-    ElMessage.error('连接仓库失败: ' + String(e))
+    ElMessage.error('连接仓库失败: ' + String(e));
   } finally {
-    registryLoading.value = false
+    registryLoading.value = false;
   }
 }
 
 async function installFromRegistry(entry: any): Promise<void> {
-  installingId.value = entry.id
+  installingId.value = entry.id;
   try {
     const r = await (window as any).electronAPI.channel.clawhubRegistryInstall(
       entry.id,
       registryBaseUrl.value.trim() || undefined,
-    )
+    );
     if (r?.success) {
-      ElMessage.success(`已安装: ${entry.name}`)
-      await loadRegistry()
+      ElMessage.success(`已安装: ${entry.name}`);
+      await loadRegistry();
     } else {
-      ElMessage.error('安装失败: ' + (r?.error || '未知错误'))
+      ElMessage.error('安装失败: ' + (r?.error || '未知错误'));
     }
   } catch (e) {
-    ElMessage.error('安装失败: ' + String(e))
+    ElMessage.error('安装失败: ' + String(e));
   } finally {
-    installingId.value = null
+    installingId.value = null;
   }
 }
-
-async function loadTemplates(): Promise<void> {
-  try {
-    const opts: { category?: string; query?: string } = {}
-    if (templateCategory.value) opts.category = templateCategory.value
-    if (templateQuery.value) opts.query = templateQuery.value
-    const [tplRes, catRes] = await Promise.all([
-      (window as any).electronAPI.channel.clawhubListTemplates(opts),
-      (window as any).electronAPI.channel.clawhubListTemplateCategories(),
-    ])
-    if (tplRes?.success) templates.value = tplRes.data || []
-    if (catRes?.success) templateCategories.value = catRes.data || []
-  } catch (e) {
-    console.warn('loadTemplates failed', e)
-  }
-}
-
-function openInstantiateDialog(tpl: any): void {
-  instantiatingTemplate.value = tpl
-  instantiateForm.customName = ''
-  instantiateDialogVisible.value = true
-}
-
-async function handleInstantiate(): Promise<void> {
-  if (!instantiatingTemplate.value) return
-  if (!instantiateForm.authorId.trim() || !instantiateForm.authorName.trim()) {
-    ElMessage.warning('请填写作者 ID 和作者名')
-    return
-  }
-  instantiating.value = true
-  try {
-    const args: any = {
-      templateId: instantiatingTemplate.value.id,
-      authorId: instantiateForm.authorId.trim(),
-      authorName: instantiateForm.authorName.trim(),
-    }
-    if (instantiateForm.customName.trim()) args.customName = instantiateForm.customName.trim()
-    const r = await (window as any).electronAPI.channel.clawhubInstantiateTemplate(args)
-    if (r?.success) {
-      ElMessage.success(`已从模板创建: ${r.data.name},待审核`)
-      instantiateDialogVisible.value = false
-      // 刷新审核队列
-      await loadPending()
-    } else {
-      ElMessage.error('实例化失败: ' + (r?.error || '未知错误'))
-    }
-  } catch (e) {
-    ElMessage.error('实例化失败: ' + String(e))
-  } finally {
-    instantiating.value = false
-  }
-}
-
-async function doSearch(): Promise<void> {
-  try {
-    const opts: any = { sortBy: sortBy.value }
-    if (searchQuery.value) opts.query = searchQuery.value
-    if (searchCategory.value) opts.category = searchCategory.value
-    const r = await (window as any).electronAPI.channel.clawhubSearch(opts)
-    searchResults.value = r?.success ? r.data : []
-  } catch (e) {
-    ElMessage.error('搜索失败:' + String(e))
-  }
-}
-
-async function loadPending(): Promise<void> {
-  try {
-    const r = await (window as any).electronAPI.channel.clawhubListPending()
-    pendingList.value = r?.success ? r.data : []
-  } catch (e) {
-    console.warn('loadPending failed', e)
-  }
-}
-
-async function handlePublish(): Promise<void> {
-  if (!publishForm.name || !publishForm.description) {
-    ElMessage.warning('请填写技能名和描述')
-    return
-  }
-  publishing.value = true
-  try {
-    const r = await (window as any).electronAPI.channel.clawhubPublish({
-      name: publishForm.name,
-      description: publishForm.description,
-      category: publishForm.category || 'uncategorized',
-      tags: publishForm.tagsText.split(',').map((t) => t.trim()).filter(Boolean),
-      manifestPath: publishForm.manifestPath || '/tmp/skill.md',
-      authorId: 'current-user',
-      authorName: 'You',
-    })
-    if (r?.success) {
-      ElMessage.success('已提交,等待审核')
-      Object.assign(publishForm, { name: '', description: '', category: '', tagsText: '', manifestPath: '' })
-      await loadPending()
-    } else {
-      ElMessage.error(r?.error || '发布失败')
-    }
-  } catch (e) {
-    ElMessage.error('发布失败:' + String(e))
-  } finally {
-    publishing.value = false
-  }
-}
-
-async function handleReview(skill: any, approve: boolean): Promise<void> {
-  try {
-    const r = await (window as any).electronAPI.channel.clawhubReview({
-      skillId: skill.id,
-      approve,
-      reviewerId: 'admin-current',
-      reason: approve ? undefined : rejectReason.value,
-    })
-    if (r?.success) {
-      ElMessage.success(approve ? '已通过' : '已驳回')
-      rejectDialogVisible.value = false
-      rejectReason.value = ''
-      await loadPending()
-      await doSearch()
-    }
-  } catch (e) {
-    ElMessage.error('审核失败:' + String(e))
-  }
-}
-
-function openRejectDialog(skill: any): void {
-  rejectingSkill.value = skill
-  rejectReason.value = ''
-  rejectDialogVisible.value = true
-}
-
-function openRateDialog(skill: any): void {
-  ratingSkill.value = skill
-  Object.assign(rateForm, { score: 5, review: '' })
-  rateDialogVisible.value = true
-}
-
-async function handleRate(): Promise<void> {
-  if (!ratingSkill.value) return
-  try {
-    const r = await (window as any).electronAPI.channel.clawhubRate({
-      skillId: ratingSkill.value.id,
-      userId: 'current-user',
-      userName: 'You',
-      score: rateForm.score,
-      review: rateForm.review,
-    })
-    if (r?.success) {
-      ElMessage.success('已评分')
-      rateDialogVisible.value = false
-      await doSearch()
-    }
-  } catch (e) {
-    ElMessage.error('评分失败:' + String(e))
-  }
-}
-
-async function handleDownload(skill: any): Promise<void> {
-  // 实际下载在 Stage 2(走 SkillLoader.importSkillFromUrl)
-  // 这里只展示一个 toast
-  ElMessage.success(`下载 ${skill.name}(Stage 2 实现)`)
-}
-
-onMounted(() => {
-  doSearch()
-  loadPending()
-  loadTemplates()
-})
 </script>
 
 <style lang="scss" scoped>
-.clawhub {
-  padding: var(--content-padding, 16px);
-  max-width: 1200px;
-  margin: 0 auto;
+.clawhub-page {
+  padding: var(--space-lg);
 }
 .page-header {
-  margin-bottom: 16px;
-}
-.filter-bar {
-  display: flex;
-  gap: 12px;
-  margin-bottom: 16px;
-  align-items: center;
-}
-.skill-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
-  gap: 16px;
-}
-.skill-card {
-  background: var(--card-bg, #fff);
-  border: 1px solid var(--border-color, #e4e7ed);
-  border-radius: 8px;
-  padding: 16px;
-  transition: box-shadow 0.2s;
-  &:hover { box-shadow: 0 2px 12px rgba(0,0,0,0.1); }
-  .card-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 8px;
-    h3 { margin: 0; font-size: 15px; }
-  }
-  .card-desc {
-    color: var(--text-secondary, #666);
-    font-size: 13px;
-    margin-bottom: 8px;
-  }
-  .card-tags {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 4px;
-    margin-bottom: 8px;
-  }
-  .card-meta {
-    display: flex;
-    gap: 12px;
-    font-size: 12px;
-    color: var(--text-secondary, #999);
-    margin-bottom: 8px;
-  }
-  .card-meta span {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-  }
-  .card-actions {
-    display: flex;
-    gap: 4px;
-  }
-}
-.publish-card {
-  max-width: 600px;
-}
-.empty-state {
-  padding: 40px;
-  text-align: center;
-}
-
-/* P2-03 技能模板 */
-.templates-header {
-  display: flex;
-  gap: 12px;
-  align-items: center;
-  margin-bottom: 16px;
-}
-.templates-meta {
-  font-size: 12px;
-  color: var(--text-secondary, #999);
-}
-.template-grid {
-  margin-top: 8px;
-}
-.template-card {
-  margin-bottom: 16px;
-  height: 240px;
-  display: flex;
-  flex-direction: column;
-}
-.template-card :deep(.el-card__body) {
-  display: flex;
-  flex-direction: column;
-  height: 100%;
-  padding: 14px;
-}
-.template-card-header {
   display: flex;
   justify-content: space-between;
-  align-items: center;
-  margin-bottom: 8px;
+  align-items: flex-start;
+  margin-bottom: var(--space-lg);
 }
-.template-card-header h4 {
-  margin: 0;
-  font-size: 15px;
+.header-left {
+  min-width: 0;
+}
+.page-title {
+  font-size: 20px;
   font-weight: 600;
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  margin: 0 0 4px;
 }
-.template-desc {
+.page-desc {
+  color: var(--fg-tertiary);
   font-size: 13px;
-  color: var(--text-regular, #444);
-  margin: 0 0 6px;
-  line-height: 1.4;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
+  margin: 0;
 }
-.template-usecase {
-  font-size: 12px;
-  color: var(--text-secondary, #999);
-  margin: 0 0 8px;
-  line-height: 1.4;
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-.card-meta {
-  display: flex;
-  gap: 12px;
-  font-size: 12px;
-  color: var(--text-secondary, #999);
-  margin: 8px 0 12px;
-}
-.template-tags {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-bottom: 8px;
-}
-.template-author {
-  font-size: 11px;
-  color: var(--text-secondary, #999);
-  margin-top: auto;
-  margin-bottom: 8px;
-}
-.template-instantiate-btn {
-  width: 100%;
-}
-.tpl-desc-inline {
-  font-size: 13px;
-  color: var(--text-regular, #444);
-}
-
-/* Tab 5: 远程仓库 */
 .registry-header {
   display: flex;
   gap: 12px;
@@ -693,10 +191,15 @@ onMounted(() => {
 }
 .registry-meta {
   font-size: 12px;
-  color: var(--text-secondary, #999);
+  color: var(--fg-tertiary);
 }
 .registry-meta--muted {
-  color: var(--text-secondary, #bbb);
+  opacity: 0.75;
+}
+.empty-hint {
+  color: var(--fg-tertiary);
+  font-size: 13px;
+  padding: var(--space-md) 0;
 }
 .registry-grid {
   margin-top: 8px;
@@ -721,22 +224,19 @@ onMounted(() => {
 }
 .registry-card-header h4 {
   margin: 0;
-  font-size: 15px;
-  font-weight: 600;
-  flex: 1;
+  font-size: 14px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .registry-desc {
-  font-size: 13px;
-  color: var(--text-regular, #444);
-  margin: 0 0 6px;
-  line-height: 1.4;
+  font-size: 12px;
+  color: var(--fg-tertiary);
+  margin: 0 0 8px;
+  overflow: hidden;
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
-  overflow: hidden;
 }
 .registry-tags {
   display: flex;
@@ -745,14 +245,13 @@ onMounted(() => {
   margin-bottom: 8px;
 }
 .registry-version {
-  font-size: 12px;
-  color: var(--text-secondary, #999);
   margin-top: auto;
-  margin-bottom: 8px;
+  font-size: 12px;
+  color: var(--fg-tertiary);
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
   align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
 }
 .registry-install-btn {
   width: 100%;

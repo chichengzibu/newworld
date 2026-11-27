@@ -25,7 +25,7 @@ test.describe('T+30 日常 Chat 全流程', () => {
 
   test('C1: Chat 输入框存在 + 可写', async ({ window }) => {
     // 进 Chat
-    await window.click('a.nav-item:has-text("AI Chat"), a.nav-item:has-text("对话")').catch(() => {})
+    await window.click('nav.sidenav a.nav-icon[href$="#/chat"]').catch(() => {})
     await window.waitForTimeout(500)
 
     // 找 textarea
@@ -41,7 +41,7 @@ test.describe('T+30 日常 Chat 全流程', () => {
   })
 
   test('C2: 发送按钮存在 + enabled(有内容时)', async ({ window }) => {
-    await window.click('a.nav-item:has-text("AI Chat"), a.nav-item:has-text("对话")').catch(() => {})
+    await window.click('nav.sidenav a.nav-icon[href$="#/chat"]').catch(() => {})
     await window.waitForTimeout(500)
 
     const textarea = window.locator('.chat-input textarea, textarea[placeholder*="输入"]').first()
@@ -57,7 +57,7 @@ test.describe('T+30 日常 Chat 全流程', () => {
   })
 
   test('C3: 点击 prompt 模板 → 自动填入输入框', async ({ window }) => {
-    await window.click('a.nav-item:has-text("AI Chat"), a.nav-item:has-text("对话")').catch(() => {})
+    await window.click('nav.sidenav a.nav-icon[href$="#/chat"]').catch(() => {})
     await window.waitForTimeout(500)
 
     // 先确保有会话
@@ -83,7 +83,7 @@ test.describe('T+30 日常 Chat 全流程', () => {
   })
 
   test('C4: "新建对话"按钮创建新会话(空内容)', async ({ window }) => {
-    await window.click('a.nav-item:has-text("AI Chat"), a.nav-item:has-text("对话")').catch(() => {})
+    await window.click('nav.sidenav a.nav-icon[href$="#/chat"]').catch(() => {})
     await window.waitForTimeout(500)
 
     // 找新建按钮
@@ -102,7 +102,7 @@ test.describe('T+30 日常 Chat 全流程', () => {
   })
 
   test('C5: 多次新建 → 多个会话在 sidebar', async ({ window }) => {
-    await window.click('a.nav-item:has-text("AI Chat"), a.nav-item:has-text("对话")').catch(() => {})
+    await window.click('nav.sidenav a.nav-icon[href$="#/chat"]').catch(() => {})
     await window.waitForTimeout(500)
 
     // sidebar 的 .new-chat-btn — 第一次创建后空状态消失,只剩它
@@ -122,7 +122,7 @@ test.describe('T+30 日常 Chat 全流程', () => {
   })
 
   test('C6: 会话可点击切换', async ({ window }) => {
-    await window.click('a.nav-item:has-text("AI Chat"), a.nav-item:has-text("对话")').catch(() => {})
+    await window.click('nav.sidenav a.nav-icon[href$="#/chat"]').catch(() => {})
     await window.waitForTimeout(500)
 
     // 创建 2 个会话(用稳定的 .new-chat-btn + 空状态按钮)
@@ -150,7 +150,7 @@ test.describe('T+30 日常 Chat 全流程', () => {
   })
 
   test('C7: 模型选择器存在', async ({ window }) => {
-    await window.click('a.nav-item:has-text("AI Chat"), a.nav-item:has-text("对话")').catch(() => {})
+    await window.click('nav.sidenav a.nav-icon[href$="#/chat"]').catch(() => {})
     await window.waitForTimeout(500)
 
     // 找模型选择器
@@ -161,7 +161,7 @@ test.describe('T+30 日常 Chat 全流程', () => {
   })
 
   test('C8: 设置(对话设置)按钮可点', async ({ window }) => {
-    await window.click('a.nav-item:has-text("AI Chat"), a.nav-item:has-text("对话")').catch(() => {})
+    await window.click('nav.sidenav a.nav-icon[href$="#/chat"]').catch(() => {})
     await window.waitForTimeout(500)
 
     // 找对话设置按钮(可能在 toolbar)
@@ -172,7 +172,7 @@ test.describe('T+30 日常 Chat 全流程', () => {
   })
 
   test('C9: 消息历史可滚动(如果有消息)', async ({ window }) => {
-    await window.click('a.nav-item:has-text("AI Chat"), a.nav-item:has-text("对话")').catch(() => {})
+    await window.click('nav.sidenav a.nav-icon[href$="#/chat"]').catch(() => {})
     await window.waitForTimeout(500)
 
     // 找消息列表

@@ -80,7 +80,7 @@
             <span><kbd>↵</kbd> 打开</span>
             <span><kbd>esc</kbd> 关闭</span>
             <span class="palette-footer-spacer" />
-            <span class="palette-footer-tip">由 PiPiClaw 命令面板驱动</span>
+            <span class="palette-footer-tip">由 New World 命令面板驱动</span>
           </div>
         </div>
       </div>
@@ -128,7 +128,7 @@ const placeholder = computed(() => {
 
 const recentConversations = computed<CommandItem[]>(() => {
   try {
-    const all = JSON.parse(localStorage.getItem('pipiclaw_recent_commands') || '[]') as Array<{
+    const all = JSON.parse(localStorage.getItem('nw_recent_commands') || '[]') as Array<{
       id: string
       title: string
       ts: number
@@ -167,8 +167,8 @@ const navigationCommands = computed<CommandItem[]>(() => {
       action: () => router.push('/skills'),
     },
     {
-      id: 'nav-clawhub', kind: 'nav', title: 'ClawHub 技能市场', subtitle: '浏览 / 发布 / 审核技能', icon: 'Box',
-      keywords: ['clawhub', 'market', '市场', '模板'],
+      id: 'nav-clawhub', kind: 'nav', title: '私有技能仓库', subtitle: '自建仓库 · 签名包', icon: 'Box',
+      keywords: ['clawhub', 'registry', '仓库', '私有'],
       action: () => router.push('/clawhub'),
     },
     {
@@ -177,23 +177,13 @@ const navigationCommands = computed<CommandItem[]>(() => {
       action: () => router.push('/models'),
     },
     {
-      id: 'nav-model-compare', kind: 'nav', title: '模型对比', subtitle: '性价比 + 社区评分', icon: 'Lightning',
-      keywords: ['compare', '对比', '价格'],
-      action: () => router.push('/model-compare'),
-    },
-    {
       id: 'nav-im', kind: 'nav', title: 'IM 管理', subtitle: '11 个 IM 平台配置', icon: 'Message',
       keywords: ['im', 'feishu', 'telegram', 'discord', '钉钉', '飞书'],
       action: () => router.push('/im-management'),
     },
     {
-      id: 'nav-tasks', kind: 'nav', title: '自动化任务', subtitle: '查看运行中的任务', icon: 'Lightning',
-      keywords: ['tasks', '任务'],
-      action: () => router.push('/tasks'),
-    },
-    {
-      id: 'nav-schedule', kind: 'nav', title: '定时任务', subtitle: 'Cron 计划', icon: 'Clock',
-      keywords: ['schedule', 'cron', '定时', '计划'],
+      id: 'nav-schedule', kind: 'nav', title: '定时任务', subtitle: '计划任务与执行记录', icon: 'Clock',
+      keywords: ['schedule', 'tasks', 'cron', '定时', '计划', '任务'],
       action: () => router.push('/schedule'),
     },
     {
@@ -205,6 +195,27 @@ const navigationCommands = computed<CommandItem[]>(() => {
       id: 'nav-settings', kind: 'nav', title: '系统设置', subtitle: '主题 / 快捷键 / 自动更新', icon: 'Setting',
       keywords: ['settings', '设置', 'preferences', '偏好'],
       action: () => router.push('/settings'),
+    },
+    // v4.6 侧栏精简后，以下低频页面不再常驻 rail，命令面板必须能搜到它们
+    {
+      id: 'nav-search', kind: 'nav', title: '联网搜索', subtitle: '检索外部网页', icon: 'Search',
+      keywords: ['search', '搜索', '联网', 'web'],
+      action: () => router.push('/search'),
+    },
+    {
+      id: 'nav-voice', kind: 'nav', title: '语音', subtitle: '语音输入与朗读', icon: 'Microphone',
+      keywords: ['voice', '语音', 'tts', '朗读'],
+      action: () => router.push('/voice'),
+    },
+    {
+      id: 'nav-remote-control', kind: 'nav', title: '远程控制', subtitle: '通过 IM 远程下发指令', icon: 'Connection',
+      keywords: ['remote', '远程', '控制'],
+      action: () => router.push('/remote-control'),
+    },
+    {
+      id: 'nav-im-accounts', kind: 'nav', title: 'IM 账号', subtitle: 'IM 平台账号绑定', icon: 'User',
+      keywords: ['im accounts', '账号', '绑定'],
+      action: () => router.push('/settings/im-accounts'),
     },
   ]
   return items
@@ -289,9 +300,16 @@ function scoreItem(item: CommandItem, q: string): number {
   const fields = [item.title, item.subtitle || '', ...(item.keywords || [])]
   let best = 0
   for (const f of fields) best = Math.max(best, fuzzyMatch(q, f))
-  // recent / prompt 优先级高
-  if (item.kind === 'recent') best += 0.5
-  if (item.kind === 'prompt') best += 0.3
+  // 【M4-N 修】优先级加权**只在真的匹配上**才加 ——
+  // 原来无论匹不匹配都加,于是 best=0 的条目(纯 prompt / recent)也变成 0.3/0.5
+  // → 过滤条件 `score > 0` 形同虚设 → 搜「切换主题」时**所有 prompt 模板都还在**
+  //   (实测:输完查询仍列出 5 个模板 + 1 个动作,搜索没起到过滤作用)
+  // 现在:匹配不上的条目 best=0 → 被过滤掉。
+  if (best > 0) {
+    // recent / prompt 优先级高
+    if (item.kind === 'recent') best += 0.5
+    if (item.kind === 'prompt') best += 0.3
+  }
   return best
 }
 
@@ -366,8 +384,15 @@ function moveSelection(delta: number): void {
 }
 
 function commit(): void {
-  const grp = groupedResults.value[activeGroupIdx.value]
-  const item = grp?.items?.[activeItemIdx.value]
+  const groups = groupedResults.value
+  if (!groups.length) return
+  // 【M4-N】越界兜底:即使选中态因为某些原因落在结果集之外,
+  // 也不该让 Enter 变成"什么都没发生" —— 夹到有效范围内。
+  const gi = Math.max(0, Math.min(activeGroupIdx.value, groups.length - 1))
+  const giItems = groups[gi]?.items ?? []
+  if (!giItems.length) return
+  const ii = Math.max(0, Math.min(activeItemIdx.value, giItems.length - 1))
+  const item = giItems[ii]
   if (item) commitItem(item)
 }
 
@@ -375,20 +400,32 @@ async function commitItem(item: CommandItem): Promise<void> {
   // 记录最近使用
   if (item.kind === 'nav' || item.kind === 'prompt') {
     try {
-      const history = JSON.parse(localStorage.getItem('pipiclaw_recent_commands') || '[]') as Array<{
+      const history = JSON.parse(localStorage.getItem('nw_recent_commands') || '[]') as Array<{
         id: string
         title: string
         ts: number
       }>
       const filtered = history.filter((h) => h.id !== item.id)
       filtered.unshift({ id: item.id, title: item.title, ts: Date.now() })
-      localStorage.setItem('pipiclaw_recent_commands', JSON.stringify(filtered.slice(0, 20)))
+      localStorage.setItem('nw_recent_commands', JSON.stringify(filtered.slice(0, 20)))
     } catch {
       // ignore
     }
   }
-  await item.action()
-  close()
+  // 【M4-N 修】动作失败**也要关面板**。
+  // 原来 `await item.action()` 抛出会直接跳出 → `close()` 永远不执行 →
+  // 面板留在屏幕上,用户只能按 Esc。
+  // 典型触发:prompt 模板的 action 是 `router.push('/chat')`,
+  // 而当前已经在 /chat → vue-router 4 抛 NavigationDuplicated(是**拒绝**不是 resolve)
+  // → 面板关不掉(实测 KS4 单独跑必挂、且是在当前路由上执行的模板)。
+  try {
+    await item.action()
+  } catch (err) {
+    // 动作失败不该把用户困在面板里;记一笔便于排查
+    console.warn('[CommandPalette] 命令执行失败:', err)
+  } finally {
+    close()
+  }
 }
 
 function fillInput(text: string): void {
@@ -451,6 +488,20 @@ onMounted(() => window.addEventListener('cmd:open-palette', onExternalOpen))
 onUnmounted(() => window.removeEventListener('cmd:open-palette', onExternalOpen))
 
 // active 自动滚到可见
+/**
+ * 【M4-N 修】查询一变,选中态必须跟着重置。
+ *
+ * 原来:过滤后 `groupedResults` 变短了,但 `activeGroupIdx`/`activeItemIdx`
+ * 还指着**旧列表里的位置** → 结果:
+ *   · 高亮消失(没有一项带 .active)—— 用户不知道 Enter 会执行什么
+ *   · `commit()` 取到 undefined → `if (item)` 不成立 → **Enter 什么都不发生**
+ *     (实测:输完「切换主题」按 Enter,命令面板纹丝不动)
+ */
+watch(query, () => {
+  activeGroupIdx.value = 0
+  activeItemIdx.value = 0
+})
+
 watch([activeGroupIdx, activeItemIdx], () => {
   nextTick(() => {
     const el = resultsRef.value?.querySelector('.palette-item.active') as HTMLElement | null

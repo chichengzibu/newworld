@@ -86,6 +86,7 @@ import { ChatManager } from '../../electron/chat/ChatManager'
 import { ChatConfig } from '../../electron/chat/ChatConfig'
 import { InstructionGenerator } from '../../electron/task/InstructionGenerator'
 import { setConfirmTransport, setAuditSink } from '../../electron/agent/tools/commandDecide'
+import { installAutoConfirm, uninstallAutoConfirm } from './auto-confirm'
 
 const AUDIT_DIR = path.join(TEST_USER_DATA, 'audit')
 const AUDIT_FILE = path.join(AUDIT_DIR, 'openclaw.audit.jsonl')
@@ -114,11 +115,15 @@ let convId: string | undefined
 
 describe('commit B: chat 活跃链 ui 贯穿测试', () => {
   beforeEach(() => {
+    // 【M1-D】执行确认闸门:本测试关心的是命令审计链,不是确认流程,
+    // 装自动确认让任务能真正跑起来
+    installAutoConfirm()
     installAuditSink()
     const cfg = ChatConfig.getInstance() as any
     if (!convId) convId = cfg.createConversation({ title: 'b-chat-test' }).id
   })
   afterEach(() => {
+    uninstallAutoConfirm()
     setConfirmTransport(null)
     setAuditSink(null)
     if (genSpy) { genSpy.mockRestore(); genSpy = null }

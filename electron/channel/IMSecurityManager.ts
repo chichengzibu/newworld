@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - Channel / IMSecurityManager (W7.1)
+ * New World - Channel / IMSecurityManager (W7.1)
  *
  * 消息安全过滤(防 XSS / 命令注入 / 恶意 payload)。
  * W7 阶段:简单正则黑名单。W8+ 接专业清洗库(DOMPurify / sanitize-html)。

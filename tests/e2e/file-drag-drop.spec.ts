@@ -1,4 +1,4 @@
-import { test, expect, shouldRunElectronE2E } from './helpers/electron-app'
+import { test, expect, shouldRunElectronE2E, createConversationViaUi } from './helpers/electron-app'
 
 /**
  * T+270: 拖拽文件到 Chat 真用户测试
@@ -20,15 +20,14 @@ test.describe('T+270 Chat 拖拽文件', () => {
     await window.reload()
     await window.waitForSelector('#app', { timeout: 10_000 })
     await window.waitForTimeout(800)
-    await window.click('a.nav-item[href$="#/chat"]').catch(() => {})
+    await window.click('nav.sidenav a.nav-icon[href$="#/chat"]').catch(() => {})
     await window.waitForTimeout(1500)
 
     // 选一个会话
-    const conv = window.locator('.conversation-item').first()
-    if (await conv.count() > 0) {
-      await conv.click()
-      await window.waitForTimeout(800)
-    }
+    // 【M4-L 修】干净 profile 里**没有历史会话**可选 → 输入区整个不渲染
+    // (`.input-area` 在有会话时才存在)→ 后面所有 drop/paste 断言都无从谈起。
+    // 改成:自己建一个会话(与真实用户同一条路径)。
+    await createConversationViaUi(window)
 
     // 验证 input 区域有 drop handler(通过冒烟)
     // input-area 有 @drop="@drop.prevent='handleDrop'"
@@ -46,14 +45,13 @@ test.describe('T+270 Chat 拖拽文件', () => {
     await window.reload()
     await window.waitForSelector('#app', { timeout: 10_000 })
     await window.waitForTimeout(800)
-    await window.click('a.nav-item[href$="#/chat"]').catch(() => {})
+    await window.click('nav.sidenav a.nav-icon[href$="#/chat"]').catch(() => {})
     await window.waitForTimeout(1500)
 
-    const conv = window.locator('.conversation-item').first()
-    if (await conv.count() > 0) {
-      await conv.click()
-      await window.waitForTimeout(800)
-    }
+    // 【M4-L 修】干净 profile 里**没有历史会话**可选 → 输入区整个不渲染
+    // (`.input-area` 在有会话时才存在)→ 后面所有 drop/paste 断言都无从谈起。
+    // 改成:自己建一个会话(与真实用户同一条路径)。
+    await createConversationViaUi(window)
 
     // 模拟 drop 一个 text 文件
     const result = await window.evaluate(async () => {
@@ -95,14 +93,13 @@ test.describe('T+270 Chat 拖拽文件', () => {
     await window.reload()
     await window.waitForSelector('#app', { timeout: 10_000 })
     await window.waitForTimeout(800)
-    await window.click('a.nav-item[href$="#/chat"]').catch(() => {})
+    await window.click('nav.sidenav a.nav-icon[href$="#/chat"]').catch(() => {})
     await window.waitForTimeout(1500)
 
-    const conv = window.locator('.conversation-item').first()
-    if (await conv.count() > 0) {
-      await conv.click()
-      await window.waitForTimeout(800)
-    }
+    // 【M4-L 修】干净 profile 里**没有历史会话**可选 → 输入区整个不渲染
+    // (`.input-area` 在有会话时才存在)→ 后面所有 drop/paste 断言都无从谈起。
+    // 改成:自己建一个会话(与真实用户同一条路径)。
+    await createConversationViaUi(window)
 
     // 模拟 drop 一个 1x1 PNG(最小有效 PNG)
     const result = await window.evaluate(async () => {
@@ -139,14 +136,13 @@ test.describe('T+270 Chat 拖拽文件', () => {
     await window.reload()
     await window.waitForSelector('#app', { timeout: 10_000 })
     await window.waitForTimeout(800)
-    await window.click('a.nav-item[href$="#/chat"]').catch(() => {})
+    await window.click('nav.sidenav a.nav-icon[href$="#/chat"]').catch(() => {})
     await window.waitForTimeout(1500)
 
-    const conv = window.locator('.conversation-item').first()
-    if (await conv.count() > 0) {
-      await conv.click()
-      await window.waitForTimeout(800)
-    }
+    // 【M4-L 修】干净 profile 里**没有历史会话**可选 → 输入区整个不渲染
+    // (`.input-area` 在有会话时才存在)→ 后面所有 drop/paste 断言都无从谈起。
+    // 改成:自己建一个会话(与真实用户同一条路径)。
+    await createConversationViaUi(window)
 
     const result = await window.evaluate(async () => {
       const target = document.querySelector('.input-area, .chat-input, .chat-main')
@@ -178,14 +174,13 @@ test.describe('T+270 Chat 拖拽文件', () => {
     await window.reload()
     await window.waitForSelector('#app', { timeout: 10_000 })
     await window.waitForTimeout(800)
-    await window.click('a.nav-item[href$="#/chat"]').catch(() => {})
+    await window.click('nav.sidenav a.nav-icon[href$="#/chat"]').catch(() => {})
     await window.waitForTimeout(1500)
 
-    const conv = window.locator('.conversation-item').first()
-    if (await conv.count() > 0) {
-      await conv.click()
-      await window.waitForTimeout(800)
-    }
+    // 【M4-L 修】干净 profile 里**没有历史会话**可选 → 输入区整个不渲染
+    // (`.input-area` 在有会话时才存在)→ 后面所有 drop/paste 断言都无从谈起。
+    // 改成:自己建一个会话(与真实用户同一条路径)。
+    await createConversationViaUi(window)
 
     const textarea = window.locator('.input-area textarea').first()
     await expect(textarea).toBeVisible({ timeout: 10_000 })

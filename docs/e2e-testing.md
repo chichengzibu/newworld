@@ -1,6 +1,6 @@
 # E2E Testing Guide
 
-PiPiClaw 桌面端 (Electron + Vue 3) 的端到端测试指南。
+New World 桌面端 (Electron + Vue 3) 的端到端测试指南。
 
 > Phase 4 Task 3 产出,本目录的所有 `tests/e2e/*.spec.ts` 通过 `_electron` API
 > 直接驱动 Electron renderer,而不是用 chromium + dev server。
@@ -26,7 +26,7 @@ E2E_ELECTRON=1 npx playwright test
 
 | 维度              | 选择                                       | 原因                            |
 |------------------|--------------------------------------------|--------------------------------|
-| 浏览器/进程       | **Electron 主进程 + Renderer**              | PiPiClaw 是桌面 app,不是 web     |
+| 浏览器/进程       | **Electron 主进程 + Renderer**              | New World 是桌面 app,不是 web     |
 | 驱动方式          | `@playwright/test._electron.launch`        | Playwright 官方支持 Electron    |
 | Config webServer  | 关闭                                       | 不需要 vite dev server          |
 | Project           | `electron` 单 project                       | Electron 唯一目标               |

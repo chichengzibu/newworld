@@ -3,11 +3,12 @@
     <div class="title-bar-drag">
       <div class="app-title">
         <el-icon class="app-icon"><Setting /></el-icon>
-        <span class="app-name">PiPiClaw</span>
+        <span class="app-name">New World</span>
       </div>
     </div>
 
-    <!-- 网关状态:居中显示 小圆点 + 端口号,无文字装饰 -->
+    <!-- 网关状态: 只显示状态点(运行=青/停=灰/异常=红)。
+         【设计审计 #P1-5】端口号是开发者信息, 收进 hover tooltip, 不再常驻标题栏。 -->
     <div
       v-if="gatewayStore.status.port"
       class="gateway-indicator"
@@ -15,7 +16,6 @@
       :title="stateTitle"
     >
       <span class="gateway-dot"></span>
-      <span class="gateway-port">{{ gatewayStore.status.port }}</span>
     </div>
 
     <div class="window-controls">
@@ -43,8 +43,8 @@
           xmlns="http://www.w3.org/2000/svg"
           aria-hidden="true"
         >
-          <rect x="5.5" y="5.5" width="8" height="8" rx="1" stroke="currentColor" stroke-width="1.2" fill="none" />
-          <path d="M2.5 10.5V3.5C2.5 2.95 2.95 2.5 3.5 2.5H10.5" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" fill="none" />
+          <rect x="5.5" y="5.5" width="8" height="8" rx="1" stroke="currentColor" stroke-width="1.5" fill="none" />
+          <path d="M2.5 10.5V3.5C2.5 2.95 2.95 2.5 3.5 2.5H10.5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" fill="none" />
         </svg>
         <el-icon v-else><FullScreen /></el-icon>
       </button>
@@ -69,11 +69,11 @@ import { useGatewayStore } from '@/stores/gateway';
 const isMaximized = ref(false);
 const gatewayStore = useGatewayStore();
 
-// 圆点 hover 提示:仅状态语义,不额外装饰
+// 圆点 hover 提示: 状态语义 + 端口(开发者细节收进 tooltip)
 const stateTitle = computed(() => {
   const map: Record<string, string> = {
-    running: '网关运行中',
-    starting: '网关启动中',
+    running: `网关运行中 · 端口 ${gatewayStore.status.port}`,
+    starting: `网关启动中 · 端口 ${gatewayStore.status.port}`,
     stopping: '网关停止中',
     stopped: '网关已停止',
     failed: '网关启动失败'
@@ -177,13 +177,7 @@ onUnmounted(() => {
   transition: background-color var(--duration-fast) var(--ease-standard);
 }
 
-.gateway-port {
-  font-size: 11px;
-  font-weight: 500;
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0.3px;
-  color: var(--fg-secondary);
-}
+/* .gateway-port 已移除 — 端口号收进 hover tooltip(审计 #P1-5) */
 
 // 状态着色 (仅圆点)
 .gateway-indicator.is-running .gateway-dot {

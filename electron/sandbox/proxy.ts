@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - SandboxProxy (W13 真接)
+ * New World - SandboxProxy (W13 真接)
  *
  * HTTP 转发层,把 renderer iframe 预览请求转发到 sandbox 内端口。
  *

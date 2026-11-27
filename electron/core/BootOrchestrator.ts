@@ -1,31 +1,25 @@
 /**
- * NOVA #003-C · M2 BootOrchestrator(第②笔 — 主进程接线层)
+ * NOVA #003-C · M2 BootOrchestrator — 真实启动日志驱动版
  *
- * 职责(命令 #003-C 第②笔):
+ * 职责:
  *   1. splash 窗先建(SplashWindow; 420×600 / frame:false / alwaysOnTop)
- *   2. 按序推进 BootDirector 阶段(config/ipc/llm-config/memory/skills/chats/channels),
- *      三"无信号"子系统经 stageFactories 调 .getInstance() 触发同步就绪
- *      (设计稿 F3: 禁造 onReady/warmup; factory 抛 → markAborted 降级)
- *   3. 每阶段推进后推一条 nova:boot-event 给 splash(SplashWindow.pushEvent)
- *   4. 桥接 IpcServer NovaBootBridge(nova:renderer-ready / nova:boot-skip)
- *   5. 主窗显示收口: 放行 = 关 splash + show 主窗(执行器由 main.ts 注入)
- *   6. 降级链(设计稿 F7):
- *      a. PIPICLAW_SKIP_SPLASH=1 / PIPICLAW_E2E=1 → 全阶段同步推进 + 立即放行(e2e 旁路)
- *      b. splash 文件缺失 / 构造失败 → 全阶段推进 + 立即放行
- *      c. factory 抛 → markAborted 立即放行
- *      d. renderer-ready 10s 未到 → BootDirector timeout 兜底(轮询 250ms)
+ *   2. 桥接 IpcServer NovaBootBridge(nova:renderer-ready → 真就绪握手)
+ *   3. 主进程真实初始化节点经 pushBootLog() 把真实日志行推给 splash 的终端日志流
+ *      (splash 只展示真实发生的事件, 不再有固定节拍/预设文案/假进度)
+ *   4. 放行判定收口: 关 splash + show 主窗(执行器由 main.ts 注入)
  *
- * 时序(设计稿 F5): 阶段事件先到 → 2.8s 下限内满格保持等"点亮"节拍;
- *   慢 → progress 显实际值, 点亮仍要 renderer-ready + 下限。
+ * 关键口径(本次改造):
+ *   - 删除旧的 STAGE_TICK_MS=180 固定节拍与 runStagesTicker(): 不再人为推进 7 阶段
+ *   - MIN_SHOW_MS=0: rendererReady 到达即 reveal, 无 2.8s 人为最短展示
+ *   - skip 入口已全部移除(splash 键盘/点击/preload/IpcServer handler);
+ *     BootDirector 仍保留 skipped 状态机语义与 markSkipped() 供降级路径内部使用
+ *   - 保留 10s renderer-ready 超时兜底
  *
- * 交叉引用(只读不改):
- *   - webcontainer:renderer-ready: electron/preload.ts:1228 / IpcServer.ts:2463
- *     本模块 nova:* 命名空间与其分属, 不冲突(设计稿 F4 §4.1)
- *   - 主窗创建点: electron/core/WindowManager.ts:49-75
- *
- * 测试约束: 本类 import electron 运行时(SplashWindow/IpcServer), 不进 node 单测;
- *   判定逻辑由 BootDirector 11 例单测覆盖(tests/unit/boot-director.test.ts);
- *   接线正确性由 e2e(PIPICLAW_E2E 旁路路径) + dev 冒烟覆盖。
+ * 降级链:
+ *   a. NW_SKIP_SPLASH=1 / NW_E2E=1 → 全阶段同步推进 + 立即放行(e2e 旁路)
+ *   b. splash 文件缺失 / 构造失败 → 全阶段推进 + 立即放行
+ *   c. factory 抛 → markAborted 立即放行
+ *   d. renderer-ready 10s 未到 → BootDirector timeout 兜底(轮询 250ms)
  */
 
 import { IpcServer } from './IpcServer';
@@ -40,8 +34,8 @@ export type M2Log = {
 
 const noopLog: M2Log = { info: () => {}, warn: () => {}, error: () => {} };
 
-// 阶段节拍: 让 splash 幕间有可感知进度(事件先到→满格保持仍受 2.8s 下限约束)
-const STAGE_TICK_MS = 180;
+/** boot 日志级别(终端日志流方括号标记) */
+export type BootLogLevel = 'INFO' | 'WARN' | 'ERROR';
 
 export class BootOrchestrator {
   private static instance: BootOrchestrator;
@@ -63,6 +57,20 @@ export class BootOrchestrator {
   setLog(log: M2Log): this { this.log = log; return this; }
 
   /**
+   * 主进程真实初始化节点调用: 把一行"此刻真实发生的事"推给 splash 日志流。
+   * 不写预设文案、不按顺序播放 —— 何时调用完全由 main.ts 的真实启动流程决定。
+   * splash 未创建/已销毁(旁路、e2e)时静默 no-op。
+   */
+  pushBootLog(level: BootLogLevel, message: string, stage?: string): void {
+    this.splash?.pushBootLog({
+      level,
+      message,
+      timestamp: Date.now(),
+      stage,
+    });
+  }
+
+  /**
    * 启动编排(须在 WindowManager.createMainWindow 之后立即调用)。
    * @param stageFactories 阶段 → 就绪触发器(无信号子系统 = .getInstance(); 有信号阶段可空)
    * @param revealMain     放行时执行器(关 splash 已由本类做, 执行器负责 show 主窗)
@@ -77,15 +85,15 @@ export class BootOrchestrator {
     this.director = new BootDirector({ stageFactories, log: this.log });
 
     const skipEnv =
-      process.env.PIPICLAW_SKIP_SPLASH === '1' ||
-      process.env.PIPICLAW_E2E === '1';
+      process.env.NW_SKIP_SPLASH === '1' ||
+      process.env.NW_E2E === '1';
 
     if (skipEnv) {
       // e2e 旁路(设计稿 F6): 全阶段同步推进 + 立即放行, 主窗不被 splash 拦截
       this.runAllStagesSync();
       this.director.markRendererReady();
       this.director.markSkipped('timeout');
-      this.reveal('skip-env(PIPICLAW_SKIP_SPLASH/PIPICLAW_E2E, 设计稿 F6)');
+      this.reveal('skip-env(NW_SKIP_SPLASH/NW_E2E, 设计稿 F6)');
       return;
     }
 
@@ -93,10 +101,6 @@ export class BootOrchestrator {
     try {
       this.splash = SplashWindow.getInstance();
       this.splash.setOptions({
-        onSkip: () => {
-          this.director.markSkipped('user-interaction');
-          this.tryReveal();
-        },
         onFailed: () => {
           // loadFile 失败/文件缺失 → 立即放行(设计稿 F7-b)
           this.director.markRendererReady();
@@ -104,10 +108,11 @@ export class BootOrchestrator {
           this.reveal('splash-loadFile-failed(设计稿 F7-b)');
         },
         onClose: () => {
-          // 用户点 X / destroy: 也走 skip 路径
+          // 窗口销毁(正常收口路径也会触发): 若尚未收口则走兜底放行
           if (!this.finished) {
-            this.director.markSkipped('user-interaction');
-            this.tryReveal();
+            this.director.markRendererReady();
+            this.director.markSkipped('timeout');
+            this.reveal('splash-closed-fallback');
           }
         },
       });
@@ -130,16 +135,12 @@ export class BootOrchestrator {
     try {
       IpcServer.getInstance().setNovaBootBootBridge({
         markRendererReady: () => { this.director.markRendererReady(); this.tryReveal(); },
-        markSkipped: () => { this.director.markSkipped('user-interaction'); this.tryReveal(); },
       });
     } catch (err) {
       this.log.warn('[M2-Boot] IPC bridge 挂载失败(非致命)', String(err));
     }
 
-    // 逐阶段推进 + 推事件(异步节拍; skip 后不再推进但允许收口)
-    this.runStagesTicker();
-
-    // 收口轮询(点亮/跳过/兜底统一走 tryReveal)
+    // 收口轮询(renderer-ready 握手到达即 reveal; 兜底统一走 tryReveal)
     const tick = setInterval(() => this.tryReveal(), 250);
     setTimeout(() => {
       clearInterval(tick);
@@ -162,51 +163,11 @@ export class BootOrchestrator {
     }
   }
 
-  /** 异步节拍推进(正常路径): 每阶段 STAGE_TICK_MS 一拍, 推 nova:boot-event */
-  private runStagesTicker(): void {
-    const stages = [...BOOT_STAGE_ORDER];
-    let i = 0;
-    const step = () => {
-      if (this.finished) return;
-      if (i >= stages.length) return;
-      const stage = stages[i];
-      if (!this.director.aborted) {
-        try {
-          this.director.markStage(stage);
-        } catch (err) {
-          this.log.warn('[M2-Boot] 阶段异常, 降级放行(F7-c)', { stage, err: String(err) });
-          this.director.markAborted(`stage:${stage}:${String(err)}`);
-          this.tryReveal();
-          return;
-        }
-      }
-      this.pushEvent();
-      i += 1;
-      if (i < stages.length) setTimeout(step, STAGE_TICK_MS);
-      else this.tryReveal();
-    };
-    setTimeout(step, STAGE_TICK_MS);
-  }
-
-  private pushEvent(): void {
-    const last = this.director.events[this.director.events.length - 1];
-    if (!last) return;
-    this.splash?.pushEvent({
-      stage: last.stage,
-      label: last.label,
-      progress: this.director.progress,
-      detail: last.detail,
-      timestamp: last.timestamp,
-    });
-  }
-
   /** 判定收口(IPC 回调 / 轮询 / 兜底共用) */
   private tryReveal(): void {
     if (this.finished) return;
     if (this.director.canCloseSplash()) {
       this.reveal(this.director.decide().reason);
-    } else {
-      this.pushEvent(); // 期间进度仍推(事件先到→满格保持, 设计稿 F5)
     }
   }
 

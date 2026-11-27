@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - 平台宿主聚合入口
+ * New World - 平台宿主聚合入口
  *
  * 主进程启动时调用 initHost() 一次,依据 detectPlatformId() 选择
  * ElectronHost(标准 Electron)或 HarmonyHost(鸿蒙 PC),并注入运行时容器。

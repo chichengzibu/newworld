@@ -2,6 +2,7 @@ import { defineConfig } from 'vite';
 import vue from '@vitejs/plugin-vue';
 import Components from 'unplugin-vue-components/vite';
 import { ElementPlusResolver } from 'unplugin-vue-components/resolvers';
+import { precompileI18nPlugin, vueI18nRuntimeAlias } from './build/precompile-i18n';
 import { resolve } from 'path';
 
 /**
@@ -21,6 +22,8 @@ export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify((process.env.npm_package_version || 'dev')),
     __BUILD_TIME__: JSON.stringify(new Date().toLocaleString('zh-CN')),
+    // 【CSP 加固】与 vite.config.mts 一致: 启用 vue-i18n JIT(AST 消息解释)
+    __INTLIFY_JIT_COMPILATION__: JSON.stringify(true),
   },
   server: {
     proxy: {
@@ -33,6 +36,7 @@ export default defineConfig({
   },
   plugins: [
     vue(),
+    precompileI18nPlugin(),
     Components({
       resolvers: [
         ElementPlusResolver({
@@ -48,6 +52,9 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': resolve(__dirname, 'src'),
+      // 【CSP 加固】与 vite.config.mts 一致: AST 消息 + runtime bundle 走 JIT,
+      // 避免 full bundle 收到 AST 抛错被吞、文案全坏
+      ...vueI18nRuntimeAlias,
     },
   },
   css: {

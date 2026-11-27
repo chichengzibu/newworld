@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - ModelRatingManager (P1-08)
+ * New World - ModelRatingManager (P1-08)
  *
  * 模型社区评分(1-5 星 + 短评),数据本地化
  * 用 userData/model-ratings.json 持久化

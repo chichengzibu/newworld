@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * PiPiClaw 图标生成脚本
+ * New World 图标生成脚本
  *
  * 从 SVG 源生成 3 平台图标:
  * - resources/icon.png (Linux, 512x512)
@@ -23,7 +23,7 @@ const require = createRequire(import.meta.url)
 
 if (!existsSync(RESOURCES)) mkdirSync(RESOURCES, { recursive: true })
 
-// 1) SVG 源 — PiPiClaw logo (claw 抽象图)
+// 1) SVG 源 — New World logo (claw 抽象图)
 const SVG_512 = `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
   <defs>
     <linearGradient id="g" x1="0%" y1="0%" x2="100%" y2="100%">
@@ -42,7 +42,7 @@ const SVG_512 = `<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512
     <circle cx="256" cy="256" r="40" fill="white" opacity="1"/>
   </g>
   <!-- 文字 -->
-  <text x="256" y="400" font-family="Arial,sans-serif" font-size="80" font-weight="bold" fill="white" text-anchor="middle" letter-spacing="-2">PiPiClaw</text>
+  <text x="256" y="400" font-family="Arial,sans-serif" font-size="80" font-weight="bold" fill="white" text-anchor="middle" letter-spacing="-2">New World</text>
 </svg>`
 
 writeFileSync(join(RESOURCES, 'icon-source.svg'), SVG_512)
@@ -102,7 +102,7 @@ function makeSolidPng(size, r, g, b) {
 }
 
 // 生成 4 个尺寸的纯色占位 PNG
-// 用 PiPiClaw 主题色 #6366f1 (indigo-500)
+// 用 New World 主题色 #6366f1 (indigo-500)
 const sizes = [16, 32, 48, 64, 128, 256, 512]
 for (const sz of sizes) {
   const png = makeSolidPng(sz, 0x63, 0x66, 0xf1)

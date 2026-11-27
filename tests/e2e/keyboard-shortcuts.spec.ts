@@ -102,13 +102,18 @@ test.describe('T+570 键盘 / 快捷键入口', () => {
     expect(visible).toBe(0)
   })
 
-  test('KS5: 主题按钮存在且可点', async ({ window }) => {
+  test('KS5: 主题开关存在且可点', async ({ window }) => {
     await window.waitForSelector('#app', { timeout: 10_000 })
     await window.waitForTimeout(800)
 
-    // TitleBar 主题按钮(class=theme-toggle)
-    const themeBtn = window.locator('button.theme-toggle').first()
-    await expect(themeBtn).toBeVisible({ timeout: 5_000 })
+    // 【v4.4 起】TitleBar 里**没有** theme-toggle 按钮了(侧栏/标题栏都成了 icon-only),
+    // 主题开关在「设置 → 基本设置 → 主题」的 radio 组(浅色/深色/跟随)。
+    await window.click('nav.sidenav a.nav-icon[href$="#/settings"]')
+    await window.waitForTimeout(1000)
+
+    const themeRadios = window.locator('.radio-group .radio').filter({ hasText: /浅色|深色|跟随|Light|Dark/ })
+    expect(await themeRadios.count()).toBeGreaterThanOrEqual(2)
+    await expect(themeRadios.first()).toBeVisible({ timeout: 5_000 })
   })
 
   test('KS6: Settings → 快捷键配置 get/set IPC 工作', async ({ window }) => {

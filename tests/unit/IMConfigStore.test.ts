@@ -3,8 +3,8 @@ import * as fs from 'node:fs'
 
 vi.mock('electron', () => ({
   app: {
-    getPath: vi.fn(() => '/tmp/pipiclaw-imconfig-test'),
-    getName: () => 'pipiclaw',
+    getPath: vi.fn(() => '/tmp/newworld-imconfig-test'),
+    getName: () => 'newworld',
     getVersion: () => '0.0.0',
   },
   safeStorage: {

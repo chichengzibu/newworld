@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - JupyterRunner (W13 真接)
+ * New World - JupyterRunner (W13 真接)
  *
  * 职责:
  * 1. isAvailable() 探测 jupyter 命令

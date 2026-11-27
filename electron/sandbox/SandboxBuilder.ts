@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - SandboxBuilder(W10.1)
+ * New World - SandboxBuilder(W10.1)
  *
  * 职责:
  * 1. 根据用户 prompt 选择模板(regex 匹配 / 显式指定 / 默认 vite-react-ts)

@@ -220,13 +220,8 @@ watch(() => props.defaultExpanded, (newVal) => {
 }
 .step-icon.is-success { color: var(--el-color-success); }
 .step-icon.is-failed  { color: var(--el-color-danger); }
-.step-icon.is-running { color: var(--el-color-primary); animation: step-spin 1.2s linear infinite; }
+.step-icon.is-running { color: var(--el-color-primary); animation: nw-spin 1.2s linear infinite; }
 .step-icon.is-pending { color: var(--el-text-color-placeholder); }
-
-@keyframes step-spin {
-  from { transform: rotate(0deg); }
-  to   { transform: rotate(360deg); }
-}
 
 .step-content {
   flex: 1;

@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - 命令咽喉点 (v3 #3 单点强制 + 四颗审计钉子 + 两段式审计)
+ * New World - 命令咽喉点 (v3 #3 单点强制 + 四颗审计钉子 + 两段式审计)
  *
  * 单点强制 (v3 #3):
  *   BashTool.execute() 与 OpenClawGateway.runCommand() 都调用 execCommand()。
@@ -26,8 +26,7 @@
  * 注意: 本文件 import electron (BrowserWindow/ipcMain 用于默认确认弹窗)。
  *   纯决策逻辑在 constants.ts, 可独立测试; 本文件的 exec/audit/confirm 由测试文件 mock。
  */
-import { execFile } from 'node:child_process'
-import { promisify } from 'node:util'
+import { runInSandbox } from '../../sandbox/ProcessSandbox'
 import * as path from 'node:path'
 import * as fs from 'node:fs'
 import { BrowserWindow, ipcMain } from 'electron'
@@ -38,8 +37,11 @@ import {
   type ContextKind,
 } from './constants'
 import { ConfigStore } from '../../core/ConfigStore'
+import { guardCommandNetwork, type NetworkVerdict } from './CommandNetworkGuard'
+import { ProcessLimiter } from '../../sandbox/ProcessLimiter'
+import { ApprovalGate } from '../../sandbox/ApprovalGate'
+import { LogManager } from '../../core/LogManager'
 
-const execFileAsync = promisify(execFile)
 const AUDIT_DIR = 'audit'
 const AUDIT_FILE = 'openclaw.audit.jsonl'
 const CONFIRM_TIMEOUT_MS = 30_000
@@ -106,7 +108,17 @@ export function mcpCallAudit(server: string, tool: string, argKeys: string[]): v
 }
 
 // ── 确认弹窗 (升级 a: 可注入测试 stub) ──
-export interface ConfirmRequest { opId: string; command: string; args: string[]; cwd?: string }
+export interface ConfirmRequest {
+  opId: string
+  command: string
+  args: string[]
+  cwd?: string
+  /**
+   * 【M4.9】网络越界提示 —— 命令本身在 AUTO 档，但它要访问白名单外的域名。
+   * 渲染层应把这条信息显著展示给用户（不是普通确认，是"数据可能外传"的提醒）。
+   */
+  networkWarning?: string
+}
 export type ConfirmTransport = (req: ConfirmRequest) => Promise<boolean>
 let _transport: ConfirmTransport | null = null
 /** 测试用: 注入自定义确认传输 (null = 恢复默认浏览器弹窗)。 */
@@ -138,20 +150,54 @@ function defaultBrowserConfirm(req: ConfirmRequest): Promise<boolean> {
 }
 
 // ── sandbox (v3 #9 保留; 原 BashTool/Gateway 共享逻辑) ──
+/**
+ * 判断 cwd 是否落在允许执行的目录内。
+ *
+ * 【M4.9 修两处真实缺陷】
+ *
+ * ① **目录不同源**：旧实现只认 `userData/sandbox` 与 `userData/workspace`（单数），
+ *    但 `WorkspaceManager` 实际把工作区建在 `userData/sandboxes`（**复数**）。
+ *    后果：D2-Prime 脚手架生成的项目、以及沙箱模板落盘的文件，
+ *    在它们自己的目录里**一条命令都执行不了** —— 前缀匹配不上，直接 deny。
+ *    修法：两个单复数目录都认。
+ *
+ * ② **realpath 失败即拒绝，过严**：旧实现整个函数包在 try/catch 里，
+ *    `realpathSync` 对不存在的目录会抛错 → 直接 false。
+ *    但调用方常在命令执行前才 mkdir，cwd 可能刚被创建还没同步到磁盘视图，
+ *    或落在网络盘/挂载点上。结果是**合法目录被误拒**。
+ *    修法：realpath 失败时降级为 path.resolve 的词法路径比较，
+ *    同时保留「父目录 realpath」的二级校验以防 symlink 逃逸。
+ */
 function isCwdInSandbox(resolvedCwd: string): boolean {
-  try {
-    const userDataReal = fs.realpathSync(getHost().getPath('userData'))
-    const sandboxRoot = path.join(userDataReal, 'sandbox')
-    const workspaceRoot = path.join(userDataReal, 'workspace')
-    const real = fs.realpathSync(resolvedCwd)
-    const norm = (p: string) => path.normalize(p).toLowerCase() + path.sep
-    return real.toLowerCase().startsWith(norm(sandboxRoot)) ||
-           real.toLowerCase().startsWith(norm(workspaceRoot)) ||
-           real.toLowerCase() === sandboxRoot.toLowerCase() ||
-           real.toLowerCase() === workspaceRoot.toLowerCase()
-  } catch {
-    return false
+  const userData = getHost().getPath('userData')
+  const roots = ['sandbox', 'sandboxes', 'workspace', 'workspaces'].map((d) => path.join(userData, d))
+
+  // 优先用 realpath 比较（防 symlink 逃逸）；realpath 不可用时降级词法比较
+  const resolveSafe = (p: string): string => {
+    try {
+      return fs.realpathSync(p)
+    } catch {
+      try {
+        // 目录还不存在：realpath 父目录再拼回尾段，仍能挡住 symlink 逃逸
+        const parent = path.dirname(p)
+        if (parent !== p) return path.join(fs.realpathSync(parent), path.basename(p))
+      } catch {
+        /* 父目录也取不到，走词法 */
+      }
+      return path.resolve(p)
+    }
   }
+
+  const real = resolveSafe(resolvedCwd)
+  const normReal = real.replace(/[\\/]+$/, '').toLowerCase()
+
+  for (const root of roots) {
+    const normRoot = resolveSafe(root).replace(/[\\/]+$/, '').toLowerCase()
+    if (normReal === normRoot) return true
+    if (normReal.startsWith(normRoot + path.sep.toLowerCase())) return true
+    if (normReal.startsWith(normRoot + '/')) return true
+  }
+  return false
 }
 
 // ── #005 D6 (可信目录联动, 触达面×授权级别解耦) ───────────────────────────
@@ -223,6 +269,8 @@ export interface CommandExecArgs {
   timeoutMs?: number
   /** contextKind (v3 #4 + 裁决 #4): 必填, 由入口派生, 绝不从 LLM args 读 */
   contextKind: ContextKind
+  /** 【M3-C】中止信号 —— 用户点「停止」时整棵进程树被杀 */
+  signal?: AbortSignal
 }
 
 export interface CommandExecResult {
@@ -265,6 +313,14 @@ export async function execCommand(args: CommandExecArgs): Promise<CommandExecRes
   const d = decideCommand(baseCmdRaw, cmdArgs)
   const norm = d.normalizedCmd
 
+  // 【M4.9 Codex 式第一道闸门：沙箱档位预判】
+  // read-only 档位下，写操作与命令执行直接拒绝（不需要问人，因为用户明确选了只读）
+  const tierVerdict = ApprovalGate.getInstance().precheckByTier(baseCmdRaw, cmdArgs)
+  if (tierVerdict?.kind === 'block') {
+    writeDenyRow(opId, norm, cmdArgs, args.cwd ?? '', tierVerdict.reason, ctx, 'not-required', 'sandbox-tier')
+    return { ok: false, opId, stdout: '', stderr: '', exitCode: null, denied: true, denialReason: tierVerdict.reason, humanConfirm: 'not-required' }
+  }
+
   // DENY
   if (d.kind === 'deny') {
     writeDenyRow(opId, norm, cmdArgs, args.cwd ?? '', d.reason ?? 'denied', ctx, 'not-required')
@@ -278,23 +334,102 @@ export async function execCommand(args: CommandExecArgs): Promise<CommandExecRes
       writeDenyRow(opId, norm, cmdArgs, args.cwd ?? '', reason, ctx, 'false', 'rejected-by-context')
       return { ok: false, opId, stdout: '', stderr: '', exitCode: null, denied: true, denialReason: reason, humanConfirm: 'false' }
     }
+
+    /**
+     * 【M4.9 Codex 式第二道闸门：自动审查子代理】
+     *
+     * 直接弹窗会带来「审批疲劳」—— 用户点几次同意后就无脑点，
+     * 审批反而变成走过场。这里先用轻量模型判一次：
+     *   · 低风险 → 自动放行，不打断
+     *   · 高风险 / 判断不了 → 照常弹窗
+     * 硬禁区（删库/格式化/提权/外传）在模型之前就被拦掉，永不自动放行。
+     */
+    const reviewed = await ApprovalGate.getInstance().autoReview(baseCmdRaw, cmdArgs, args.cwd)
+    if (reviewed.kind === 'block') {
+      writeDenyRow(opId, norm, cmdArgs, args.cwd ?? '', reviewed.reason, ctx, 'not-required', 'auto-review-deny')
+      return { ok: false, opId, stdout: '', stderr: '', exitCode: null, denied: true, denialReason: reviewed.reason, humanConfirm: 'not-required' }
+    }
+    if (reviewed.kind === 'auto-allow') {
+      // 注意：不在这里写审计行 —— doExecFile 内部会写 start 行，
+      // 这里再写会产生同一 opId 两条 start，违反「phase 配对」不变量。
+      // 自动放行的可回溯性由日志承载（用户可在应用日志里查到）。
+      LogManager.getInstance().info(
+        `[ApprovalGate] 自动放行 opId=${opId} cmd=${norm}: ${reviewed.reason}`,
+      )
+      return doExecFile(opId, baseCmdRaw, norm, cmdArgs, args.cwd, timeoutMs, ctx, 'not-required', args.signal)
+    }
+
     const approved = await (_transport ?? defaultBrowserConfirm)({ opId, command: baseCmdRaw, args: cmdArgs, cwd: args.cwd })
     if (!approved) {
       const reason = '用户拒绝或 30s 超时 (confirm 未通过)'
       writeDenyRow(opId, norm, cmdArgs, args.cwd ?? '', reason, ctx, 'false', 'ui-reject/timeout')
       return { ok: false, opId, stdout: '', stderr: '', exitCode: null, denied: true, denialReason: reason, humanConfirm: 'false' }
     }
-    return doExecFile(opId, baseCmdRaw, norm, cmdArgs, args.cwd, timeoutMs, ctx, 'true')
+    return doExecFile(opId, baseCmdRaw, norm, cmdArgs, args.cwd, timeoutMs, ctx, 'true', args.signal)
   }
 
   // AUTO
-  return doExecFile(opId, baseCmdRaw, norm, cmdArgs, args.cwd, timeoutMs, ctx, 'not-required')
+  // 【M4.9 第二层·网络出口管控】
+  // 即使命令本身被判为 AUTO，也要看它要访问哪些域名。
+  // 白名单外 → 不直接拒绝，而是**升级为需确认**（Codex 式「越界就问你」）：
+  // 用户点一下就能用，不点就拦。这样既挡住数据外传，又不把正常命令一刀切。
+  const netVerdict = guardCommandNetwork(baseCmdRaw, cmdArgs)
+  if (netVerdict.kind === 'blocked') {
+    const ok = await handleNetworkEscalation(opId, norm, cmdArgs, args.cwd, ctx, netVerdict, args.signal)
+    return ok
+  }
+
+  return doExecFile(opId, baseCmdRaw, norm, cmdArgs, args.cwd, timeoutMs, ctx, 'not-required', args.signal)
+}
+
+/**
+ * 网络白名单外的命令 → 升级为确认。
+ *
+ * 三种结局：
+ *   · ui 上下文 + 用户批准 → 照常执行
+ *   · ui 上下文 + 用户拒绝/超时 → 拒绝，审计写明「网络越界未批准」
+ *   · 非 ui 上下文（IM / 定时任务 / headless）→ 直接拒绝（无人在场，不能替用户拍板）
+ */
+async function handleNetworkEscalation(
+  opId: string,
+  norm: string,
+  cmdArgs: string[],
+  cwdIn: string | undefined,
+  ctx: ContextKind,
+  verdict: Extract<NetworkVerdict, { kind: 'blocked' }>,
+  signal?: AbortSignal,
+): Promise<CommandExecResult> {
+  const reason = verdict.reason
+  const targetList = verdict.targets.map((t) => t.host).join(', ') || '(未识别到具体域名)'
+
+  if (!contextAllowsConfirm(ctx)) {
+    const full = `网络访问被拦截（context=${ctx} 无人在场，不能批准）：${reason}`
+    writeDenyRow(opId, norm, cmdArgs, cwdIn ?? '', full, ctx, 'false', 'network-blocked-no-ui')
+    return { ok: false, opId, stdout: '', stderr: '', exitCode: null, denied: true, denialReason: full, humanConfirm: 'false' }
+  }
+
+  const approved = await (_transport ?? defaultBrowserConfirm)({
+    opId,
+    command: norm,
+    args: cmdArgs,
+    cwd: cwdIn,
+    networkWarning: `该命令将访问白名单外的网络目标：${targetList}`,
+  })
+
+  if (!approved) {
+    const full = `用户拒绝或超时（网络越界未获批准）：${reason}`
+    writeDenyRow(opId, norm, cmdArgs, cwdIn ?? '', full, ctx, 'false', 'network-escalation-rejected')
+    return { ok: false, opId, stdout: '', stderr: '', exitCode: null, denied: true, denialReason: full, humanConfirm: 'false' }
+  }
+
+  return doExecFile(opId, norm, norm, cmdArgs, cwdIn, 30000, ctx, 'true', signal)
 }
 
 /** exec 路径 (auto 通过 / confirm ui 批准): v3 #9 防护 → 两段式审计 (fail-closed) → execFile */
 async function doExecFile(
   opId: string, baseCmdRaw: string, norm: string, cmdArgs: string[],
   cwdIn: string | undefined, timeoutMs: number, ctx: ContextKind, humanConfirm: 'true' | 'false' | 'not-required',
+  signal?: AbortSignal,
 ): Promise<CommandExecResult> {
   const confirmChannel = humanConfirm === 'true' ? 'ui' : '-'
 
@@ -333,35 +468,66 @@ async function doExecFile(
     return { ok: false, opId, stdout: '', stderr: '', exitCode: null, denied: true, denialReason: `audit-unavailable: ${e?.message ?? e}`, humanConfirm }
   }
 
-  // execFile (v3 #9: 数组传参, 不走 shell)
+  /**
+   * 【M4.9 第三层·并发闸】
+   * 同时执行的命令数上限（默认 3）。超限直接拒绝而不是排队 ——
+   * 排队会让用户看到"点了没反应"，比明确拒绝更糟。
+   */
+  const limiter = ProcessLimiter.getInstance()
+  const lease = limiter.acquire()
+  if (!lease.ok) {
+    const reason = lease.reason
+    writeDenyRow(opId, norm, cmdArgs, resolvedCwd, reason, ctx, humanConfirm)
+    return { ok: false, opId, stdout: '', stderr: '', exitCode: null, denied: true, denialReason: reason, humanConfirm }
+  }
+
+  /**
+   * 【M3-C】执行走 ProcessSandbox(进程隔离),不再用 execFile。
+   *
+   * 【为什么换】execFile 超时/中止时只杀**直接子进程** —— 它起的孙进程
+   * 会变成孤儿继续跑(实测:父进程被杀后 `node -e setTimeout(...)` 仍在运行)。
+   * 对一个能在用户机器上跑命令的助手,这是实打实的资源泄漏。
+   * ProcessSandbox 按平台分支杀整棵树:
+   *   POSIX → 进程组(负 pid);Windows → taskkill /T /F
+   *
+   * 【口径不变】
+   *   - 数组传参、不走 shell(v3 #9)
+   *   - 最小环境,不继承 parent 敏感 env
+   *   - 两段式审计:start 行 exec 前同步写,写失败即拒(硬 fail-closed)
+   *   - finish 写失败**不改判命令结果**,只标孤儿 + 真 console.error
+   */
+  const result = await runInSandbox(baseCmdRaw, cmdArgs, {
+    cwd: resolvedCwd,
+    timeoutMs,
+    env: { PATH: process.env.PATH ?? '', SYSTEMROOT: process.env.SYSTEMROOT ?? '', USERPROFILE: process.env.USERPROFILE ?? '' },
+    maxBuffer: 1024 * 1024,
+    // 【M3-C】中止信号 —— 用户点「停止」时整棵进程树被杀
+    ...(signal ? { signal } : {}),
+  }).finally(() => {
+    // 【M4.9】无论成功失败都释放并发配额，否则配额会被泄漏吃光
+    lease.release()
+  })
+
+  // 钉子[phase 配对 + 分段失败② + 升级 b 真 warn]: finish 写失败不改判命令结果
   try {
-    const { stdout, stderr } = await execFileAsync(baseCmdRaw, cmdArgs, {
-      cwd: resolvedCwd,
-      timeout: timeoutMs,
-      windowsHide: true,
-      // 最小环境, 不继承 parent 敏感 env (原 BashTool 安全姿态保留)
-      env: { PATH: process.env.PATH ?? '', SYSTEMROOT: process.env.SYSTEMROOT ?? '', USERPROFILE: process.env.USERPROFILE ?? '' },
-      maxBuffer: 1024 * 1024,
+    auditAppendSync({
+      opId, baseCmd: norm,
+      exit: result.exitCode ?? (result.killed ? -1 : -1),
+      phase: 'finish', contextKind: ctx,
+      ...(result.killed ? { execError: `killed:${result.killReason}` } : {}),
     })
-    // 钉子[phase 配对 + 分段失败② + 升级 b 真 warn]: 真实 exit; finish 写失败不改判命令, 记真 console.error + 标孤儿
-    try {
-      auditAppendSync({ opId, baseCmd: norm, exit: 0, phase: 'finish', contextKind: ctx })
-    } catch (finErr: any) {
-      console.error(`[audit] finish-row write failed for opId=${opId} (baseCmd=${norm}): ${finErr?.message ?? finErr}. This opId is now ORPHAN (start has no finish). Command result NOT affected.`)
-    }
-    return { ok: true, opId, stdout: (stdout ?? '').toString(), stderr: (stderr ?? '').toString(), exitCode: 0, denied: false, humanConfirm }
-  } catch (e: any) {
-    const exitCode: number = typeof e.status === 'number' ? e.status : (e.killed ? -1 : -1)
-    try {
-      auditAppendSync({ opId, baseCmd: norm, exit: exitCode, phase: 'finish', contextKind: ctx, execError: e.message })
-    } catch (finErr: any) {
-      console.error(`[audit] finish-row write failed for opId=${opId} (baseCmd=${norm}): ${finErr?.message ?? finErr}. This opId is now ORPHAN (start has no finish). Command result NOT affected.`)
-    }
-    return {
-      ok: false, opId,
-      stdout: (e.stdout ?? '').toString(), stderr: (e.stderr ?? '').toString(),
-      exitCode, denied: false,
-      denialReason: `exit=${exitCode}`, humanConfirm,
-    }
+  } catch (finErr: any) {
+    console.error(`[audit] finish-row write failed for opId=${opId} (baseCmd=${norm}): ${finErr?.message ?? finErr}. This opId is now ORPHAN (start has no finish). Command result NOT affected.`)
+  }
+
+  if (result.ok) {
+    return { ok: true, opId, stdout: result.stdout, stderr: result.stderr, exitCode: 0, denied: false, humanConfirm }
+  }
+  return {
+    ok: false, opId,
+    stdout: result.stdout, stderr: result.stderr,
+    exitCode: result.exitCode ?? (result.killed ? -1 : -1), denied: false,
+    denialReason: result.killed ? `killed:${result.killReason}` : `exit=${result.exitCode}`,
+    humanConfirm,
   }
 }

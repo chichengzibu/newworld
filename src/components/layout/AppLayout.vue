@@ -18,6 +18,7 @@
     <!-- Floating command button (macOS Spotlight style) -->
     <button
       class="floating-cmd-btn"
+      :class="{ 'floating-cmd-btn--raised': isChatRoute }"
       title="命令面板 (Ctrl+K)"
       @click="openPalette"
     >
@@ -32,9 +33,23 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, onUnmounted } from 'vue';
+import { computed, onMounted, onUnmounted } from 'vue';
+import { useRoute } from 'vue-router';
 import { ElMessage } from "element-plus/es/components/message/index";
 import { useAppStore } from '@/stores/app';
+const route = useRoute();
+/**
+ * 【M4-L 修】Chat 页把悬浮命令按钮**抬到输入区之上**。
+ *
+ * 现象(实测,e2e 抓到的):悬浮命令按钮是 `position:fixed; bottom:24px; right:24px`,
+ * 而 Chat 的输入区(input-area)高 **125px**、其「发送」按钮位于 724~784px ——
+ * 两者**完全重叠** → 用户点「发送」,点到的是命令按钮(实测 elementFromPoint 命中
+ * 它的 `<kbd>⌘K</kbd>`)。发送是主操作,必须能点。
+ *
+ * 为什么不靠"输入区让位"(padding-right):那会在输入框右侧留一条 140px 的空档,
+ * 很难看。抬按钮更省事,且命令面板本来就有 Ctrl+K 快捷键。
+ */
+const isChatRoute = computed(() => route.path.startsWith('/chat'));
 import { useGatewayStore } from '@/stores/gateway';
 import TitleBar from './TitleBar.vue';
 import SideNav from './SideNav.vue';
@@ -138,6 +153,11 @@ function onGlobalKeydown(e: KeyboardEvent): void {
   bottom: 24px;
   right: 24px;
   z-index: 100;
+
+  /* Chat 页:抬到输入区(实测高 125px)之上,别压住「发送」按钮 */
+  &--raised {
+    bottom: 140px;
+  }
   display: flex;
   align-items: center;
   gap: 8px;
@@ -151,10 +171,11 @@ function onGlobalKeydown(e: KeyboardEvent): void {
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-medium);
   cursor: pointer;
-  box-shadow: var(--shadow-lg);
-  backdrop-filter: saturate(180%) blur(20px);
-  -webkit-backdrop-filter: saturate(180%) blur(20px);
-  border: 0.5px solid var(--border-base);
+  box-shadow: var(--shadow-md);
+  /* v4.9：收敛重度毛玻璃（saturate 180% blur 20px → 轻量 blur），减少「AI 概念图」观感 */
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--border-base);
   transition: transform var(--duration-fast) var(--ease-spring),
     box-shadow var(--duration-fast) var(--ease-standard),
     background-color var(--duration-fast) var(--ease-standard);

@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - Skill / D1ScreenshotQA (W5.3)
+ * New World - Skill / D1ScreenshotQA (W5.3)
  *
  * Screenshot-Q&A demo skill. Triggered by the Cmd/Ctrl+Shift+S global shortcut
  * registered in GlobalShortcut.ts. Captures the screen via Electron's

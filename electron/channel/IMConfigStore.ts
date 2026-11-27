@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - Channel / IMConfigStore (W7.1)
+ * New World - Channel / IMConfigStore (W7.1)
  *
  * 各 IM 通道鉴权信息存储:持久化到 userData/im-config.json.enc(safeStorage 加密)。
  */
@@ -13,7 +13,7 @@ import type { ChannelKind } from './ChannelTypes'
 
 export interface IMConfig {
   channelKind: ChannelKind
-  /** 各平台不同字段 */
+  /** 各平台通用字段（通道实际读取的字段） */
   appId?: string
   appSecret?: string
   botToken?: string
@@ -22,6 +22,31 @@ export interface IMConfig {
   apiBaseUrl?: string
   accessToken?: string
   accessTokenExpiresAt?: number
+  /**
+   * 平台特有字段（IM 真连通批次补）。
+   * ImManagement 的表单一直用 appKey / corpId / agentId / wxId 等原名保存，
+   * 但通道只读 appId / appSecret —— 配置存了却永远不生效。
+   * 这里把原名纳入 schema，通道侧按「特有字段 ?? 通用字段」读取，双向兼容：
+   * 老配置(appId/appSecret) 与新 UI 配置都能跑。
+   */
+  appKey?: string
+  corpId?: string
+  corpSecret?: string
+  agentId?: string
+  wxId?: string
+  signingSecret?: string
+  phoneNumberId?: string
+  /**
+   * 【M4.9 免公网入站字段】
+   *   · appToken   —— Slack Socket Mode 的 app-level token（xapp- 开头）。
+   *                   与 botToken(xoxb-) 是两个不同的东西，缺了连不上。
+   *   · userId     —— Rocket.Chat 的个人用户 id（`X-User-Id` header 用）。
+   *   · channelIds —— Rocket.Chat 要监听的房间/私聊 id 列表
+   *                   （Rocket.Chat 没有"我所有会话"的聚合接口，必须显式给）。
+   */
+  appToken?: string
+  userId?: string
+  channelIds?: string[]
   /** 元信息 */
   enabled: boolean
   updatedAt: number

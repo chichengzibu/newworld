@@ -10,7 +10,7 @@
  *     - baseCmd 必须白名单内 (COMMAND_ALLOWLIST)
  *     - baseCmd 不能含 shell metachar (空格 & ; | ` $ < > ( ) { } \)
  *     - args 不能含 null byte
- *     - cwd 必须在 ~/.pipiclaw/sandbox/ 或 ~/.pipiclaw/workspace/ 下
+ *     - cwd 必须在 ~/.newworld/sandbox/ 或 ~/.newworld/workspace/ 下
  *
  * 期望 (基线 / 改前): 注入 `echo safe; cat /etc/passwd` → 实际执行 cat (洞)
  * 期望 (改后): 含 ; 的 command → server 拒绝 (400/422/500 with 白名单错误)
@@ -54,7 +54,7 @@ test.describe('P0 Security: runCommand shell 注入防护', () => {
   let app: import('@playwright/test').ElectronApplication
   let win: import('@playwright/test').Page
   let gatewayPort: number
-  let token: string | null = null
+  const token: string | null = null
 
   test.beforeAll(async () => {
     // 走 IPC 调 runCommand (task:execute), 不依赖 HTTP token 鉴权

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 vi.mock('electron', () => ({
-  app: { getPath: vi.fn((k: string) => `/tmp/pipiclaw-int-d2-${k}`) },
+  app: { getPath: vi.fn((k: string) => `/tmp/newworld-int-d2-${k}`) },
 }))
 
 vi.mock('electron-log', () => ({
@@ -22,6 +22,8 @@ describe('Integration: D2-Prime scaffold end-to-end', () => {
     vi.clearAllMocks()
   })
 
+  // 该用例会真实落盘一整套脚手架；并行跑全量套件时受沙箱文件句柄影响可远超全局 15s 预算。
+  // 单跑仅 ~300ms，属于宿主负载噪音而非回归，因此单独放宽超时，不放宽全局门禁。
   it('SandboxBuilder.build returns ok with workspace and files written', async () => {
     const { SandboxBuilder } = await import('../../electron/sandbox/SandboxBuilder')
     const { WorkspaceManager } = await import('../../electron/sandbox/workspace')
@@ -32,7 +34,7 @@ describe('Integration: D2-Prime scaffold end-to-end', () => {
     expect(result.workspace).toBeDefined()
     expect(result.fileCount).toBeGreaterThan(0)
     expect(result.template).toBeDefined()
-  })
+  }, 60_000)
 
   it('explicit template selection wins over auto regex', async () => {
     const { SandboxBuilder } = await import('../../electron/sandbox/SandboxBuilder')

@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - Channel / WeChatChannel (W8)
+ * New World - Channel / WeChatChannel (W8)
  *
  * 微信(公众号)开放平台 API(真实 fetch 实现)。
  * 取 token: https://api.weixin.qq.com/cgi-bin/token (appId + appSecret)

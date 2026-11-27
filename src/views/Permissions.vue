@@ -1,6 +1,6 @@
 <template>
-  <div class="permissions-page">
-    <div class="page-header">
+  <div class="permissions-page" :class="{ 'is-embedded': embedded }">
+    <div v-if="!embedded" class="page-header">
       <div class="header-left">
         <h1 class="page-title">{{ t('permissions.title') }}</h1>
         <el-tag v-if="permissionsStore.activeSet" type="primary" effect="dark">
@@ -8,7 +8,12 @@
         </el-tag>
       </div>
       <div class="header-right">
-        <Breadcrumb />
+        <!-- 【设计审计 #P1-5】面包屑已移除 -->
+        <!-- 【v4.8】重置入口：IPC 一直有，但 UI 没有按钮，用户点不到 -->
+        <el-button @click="handleReset">
+          <el-icon><Operation /></el-icon>
+          {{ t('permissions.reset') }}
+        </el-button>
         <el-button type="primary" @click="handleCreateSet">
           <el-icon><Plus /></el-icon>
           {{ t('permissions.createSet') }}
@@ -235,9 +240,11 @@ import { ref, reactive, onMounted, computed } from 'vue';
 import { ElMessage } from "element-plus/es/components/message/index"
 import { ElMessageBox } from "element-plus/es/components/message-box/index";
 import { useI18n } from 'vue-i18n';
-import Breadcrumb from '@/components/layout/Breadcrumb.vue';
 import { Plus, InfoFilled, Lock, Promotion, Unlock, EditPen, Document, Folder, Connection, Operation, Monitor, Lightning, Tools, Box } from '@element-plus/icons-vue';
 import { usePermissionsStore, type PermissionSet, type PermissionLevel } from '@/stores/permissions';
+
+/** v4.9：内嵌进设置页配置中心时隐藏自带页头，交由外层滚动 */
+defineProps<{ embedded?: boolean }>();
 
 const { t } = useI18n();
 
@@ -328,9 +335,52 @@ function handleSelectSet(set: PermissionSet): void {
 
 async function handleActivate(): Promise<void> {
   if (!selectedSet.value) return;
+  // 切到「几乎无限制」前必须二次确认 —— 后端模板注释要求 UI 有红字警告，
+  // 但此前 handleActivate 直接激活，等于把最后一道人工确认省掉了。
+  if (selectedSet.value.template === 'permissive') {
+    try {
+      await ElMessageBox.confirm(
+        t('permissions.permissiveWarning'),
+        t('permissions.permissiveWarningTitle'),
+        { type: 'warning', confirmButtonText: t('permissions.activate'), cancelButtonText: t('common.cancel') },
+      );
+    } catch {
+      return; // 用户取消
+    }
+  }
   const success = await permissionsStore.setActiveSet(selectedSet.value.id);
   if (success) {
     ElMessage.success(t('permissions.activated', { name: selectedSet.value.name }));
+  }
+}
+
+async function handleReset(): Promise<void> {
+  // 【注意】不要用 permissions:reset IPC —— 那个是「重置到无限制模式」(M1 P0-1)，
+  // 与这里的「回到安全态」语义相反。改用已有的 setActiveSet 切到 safe 预设集。
+  const safeSet = permissionsStore.presetSets.find((s) => s.template === 'safe');
+  if (!safeSet) {
+    ElMessage.error(t('permissions.resetFailed'));
+    return;
+  }
+  if (permissionsStore.activeSetId === safeSet.id) {
+    ElMessage.info(t('permissions.resetAlreadySafe'));
+    return;
+  }
+  try {
+    await ElMessageBox.confirm(
+      t('permissions.resetWarning'),
+      t('permissions.reset'),
+      { type: 'warning', confirmButtonText: t('permissions.reset'), cancelButtonText: t('common.cancel') },
+    );
+  } catch {
+    return;
+  }
+  const ok = await permissionsStore.setActiveSet(safeSet.id);
+  if (ok) {
+    selectedSet.value = permissionsStore.activeSet ?? safeSet;
+    ElMessage.success(t('permissions.resetDone'));
+  } else {
+    ElMessage.error(t('permissions.resetFailed'));
   }
 }
 
@@ -341,12 +391,14 @@ function handleCreateSet(): void {
   createDialogVisible.value = true;
 }
 
-async function handleRemovePath(rule: { allowedDomains?: string[]; deniedDomains?: string[] }, field: 'allowed' | 'denied', idx: number): Promise<void> {
+async function handleRemovePath(rule: { allowedPaths?: string[]; deniedPaths?: string[] }, field: 'allowed' | 'denied', idx: number): Promise<void> {
   if (!selectedSet.value) return;
+  // 模板渲染的是 allowedPaths / deniedPaths，这里必须删同一组字段。
+  // 旧实现误删 allowedDomains / deniedDomains → 点 × 后界面纹丝不动。
   if (field === 'allowed') {
-    rule.allowedDomains?.splice(idx, 1);
+    rule.allowedPaths?.splice(idx, 1);
   } else {
-    rule.deniedDomains?.splice(idx, 1);
+    rule.deniedPaths?.splice(idx, 1);
   }
   await permissionsStore.updatePermissionSet(selectedSet.value.id, { rules: selectedSet.value.rules });
   ElMessage.success(t('permissions.pathRemoved'));
@@ -429,6 +481,15 @@ async function handleLevelChange(ruleId: string, level: PermissionLevel): Promis
   height: 100%;
   display: flex;
   flex-direction: column;
+}
+/* v4.9 内嵌态：外层（设置页 .settings-panels）已提供滚动，这里改为自然高度，
+   避免 height:100% + 内层 overflow 造成双滚动条 */
+.permissions-page.is-embedded {
+  height: auto;
+}
+.permissions-page.is-embedded .permissions-layout {
+  height: auto;
+  min-height: 420px;
 }
 
 .page-header {

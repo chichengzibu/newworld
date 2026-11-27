@@ -9,9 +9,31 @@ export default [
   {
     ignores: [
       'dist/**',
+      'dist.bak-*/**',
       'dist-electron/**',
-      'release/**',
-      'coverage/**',
+      // 【2026-11-24】打包产物与备份(含 release.bak-*/release-fresh-*, 里面是
+      // 整个 Electron 发行包的几万个 JS, 曾经把 lint 顶到 3 万+ errors)
+      'release*/**',
+      'coverage*/**',
+      // 构建备份目录(build.mjs moveAside / 环境备份脚本留下的, 内容是打包产物)
+      'dist.bak-*/**',
+      'dist-electron.bak-*/**',
+      '.nw-env-backup-*/**',
+      '.nw-lowercase-backup-*/**',
+      '.nw-backup-*/**',
+      '.nw-*-backup-*/**',
+      // 通用 .nw-* 临时目录(.nw-design-fix-* / .nw-theme-* 等, 覆盖上述未列全的命名)
+      '.nw-*/**',
+      // ohos HAP 构建产物(third_party 内嵌 electron dist + entry/assets/app/dist)
+      'ohos/**',
+      // MCP 服务端的打包产物目录(vendored bundle)
+      'electron/mcp/bin/**',
+      // 子进程探针 fixture(以 node 子进程方式运行, 不参与源码 lint)
+      'tests/fixtures/**',
+      // 临时产物(.tmp-*.png/.log/.mjs/.tmp-audit-shots 等)
+      '.tmp-*/**',
+      '.tmp-*',
+      'e2e-screenshots/**',
       'node_modules/**',
       'sandbox/runtime/**',
       'sandbox/base/.cache/**',

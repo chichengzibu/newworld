@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - 对话导出工具
+ * New World - 对话导出工具
  * 
  * 职责：
  * 1. 将会话内容导出为Markdown/PDF/Word格式
@@ -7,8 +7,10 @@
  */
 
 import * as fs from 'fs';
-import { getHost } from '../platform/runtime'
 import * as path from 'path';
+import { BrowserWindow } from 'electron';
+import { Document, Packer, Paragraph, HeadingLevel } from 'docx';
+import { getHost } from '../platform/runtime'
 
 import { LogManager } from '../core/LogManager';
 import { PermissionManager } from '../permissions/PermissionManager';
@@ -21,7 +23,12 @@ export interface ExportOptions {
 
 export interface ExportResult {
   success: boolean;
+  /** 真实写入的文件路径（降级时是 .html，不再是谎报的 .pdf/.docx） */
   filePath?: string;
+  /** 实际格式：raw markdown / 真 docx / 真 pdf / 降级 html */
+  actualFormat?: 'markdown' | 'docx' | 'pdf' | 'html';
+  /** true = 请求格式未能生成，已诚实降级 */
+  degraded?: boolean;
   error?: string;
   guidance?: string;
 }
@@ -51,12 +58,12 @@ export class ConversationExporter {
   ): Promise<ExportResult> {
     try {
       let outputPath = options.outputPath;
-      
+
       if (!outputPath) {
         const downloadsPath = getHost().getPath('downloads');
         const timestamp = new Date().getTime();
         const safeTitle = conversation.title.replace(/[^a-zA-Z0-9\u4e00-\u9fa5]/g, '_').substring(0, 20);
-        
+
         switch (options.format) {
           case 'markdown':
             outputPath = path.join(downloadsPath, `${safeTitle}_${timestamp}.md`);
@@ -69,6 +76,10 @@ export class ConversationExporter {
             break;
         }
       }
+
+      // 后缀必须与真实内容一致 —— 绝不出现"路径写 .docx、内容是 HTML"的假交付
+      if (options.format === 'word') outputPath = withExtension(outputPath, '.docx');
+      if (options.format === 'pdf') outputPath = withExtension(outputPath, '.pdf');
 
       const dir = path.dirname(outputPath);
       const permCheck = this.permissionManager.checkPermission({
@@ -86,24 +97,41 @@ export class ConversationExporter {
       }
 
       let content: string;
-      
+      let actualFormat: ExportResult['actualFormat'];
+      let degraded = false;
+      let guidance: string | undefined;
+
       switch (options.format) {
         case 'markdown':
           content = this.generateMarkdown(conversation);
           fs.writeFileSync(outputPath, content, 'utf-8');
-          break;
-        case 'pdf':
-          content = this.generateMarkdown(conversation);
-          await this.generatePdf(content, outputPath);
+          actualFormat = 'markdown';
           break;
         case 'word':
           content = this.generateMarkdown(conversation);
           await this.generateWord(content, outputPath);
+          actualFormat = 'docx';
           break;
+        case 'pdf': {
+          content = this.generateMarkdown(conversation);
+          const html = this.markdownToHtml(content);
+          if (await this.generatePdf(html, outputPath)) {
+            actualFormat = 'pdf';
+          } else {
+            // 真 PDF 不可用时不谎报 —— 写真实 .html 并回传实际路径与格式
+            const htmlPath = withExtension(outputPath, '.html');
+            fs.writeFileSync(htmlPath, html, 'utf-8');
+            outputPath = htmlPath;
+            actualFormat = 'html';
+            degraded = true;
+            guidance = 'PDF 渲染不可用，已保存为 HTML；可在浏览器中打开并打印为 PDF。';
+          }
+          break;
+        }
       }
 
-      this.log.info('[ConversationExporter] 导出成功:', outputPath);
-      return { success: true, filePath: outputPath };
+      this.log.info('[ConversationExporter] 导出成功:', outputPath, `(${actualFormat})`);
+      return { success: true, filePath: outputPath, actualFormat, degraded, guidance };
 
     } catch (error: any) {
       this.log.error('[ConversationExporter] 导出失败:', error);
@@ -158,22 +186,39 @@ export class ConversationExporter {
   }
 
   /**
-   * 生成PDF（简化版，实际项目可能需要用puppeteer或jspdf）
+   * 真 PDF：离屏窗口 printToPDF。失败由调用方降级为真实 .html，绝不把 HTML 报成 PDF。
    */
-  private async generatePdf(markdownContent: string, outputPath: string): Promise<void> {
-    const html = this.markdownToHtml(markdownContent);
-    fs.writeFileSync(outputPath.replace('.pdf', '.html'), html, 'utf-8');
-    this.log.warn('[ConversationExporter] PDF导出需要额外的PDF库，当前保存为HTML');
+  private async generatePdf(html: string, outputPath: string): Promise<boolean> {
+    let win: BrowserWindow | undefined;
+    try {
+      win = new BrowserWindow({
+        show: false,
+        webPreferences: { nodeIntegration: false, contextIsolation: true },
+      });
+      await win.loadURL(`data:text/html;charset=utf-8,${encodeURIComponent(html)}`);
+      const pdf = await win.webContents.printToPDF({ printBackground: true, pageSize: 'A4' });
+      await fs.promises.writeFile(outputPath, pdf);
+      return true;
+    } catch (e) {
+      this.log.warn('[ConversationExporter] PDF 渲染失败，将诚实降级为 HTML:', e);
+      return false;
+    } finally {
+      try { win?.destroy(); } catch { /* 窗口已销毁 */ }
+    }
   }
 
-  /**
-   * 生成Word（简化版，实际项目可能需要用docx库）
-   */
+  /** 真 docx：合法 OOXML（ZIP 魔数 PK\x03\x04），不再是套壳 HTML */
   private async generateWord(markdownContent: string, outputPath: string): Promise<void> {
-    const html = this.markdownToHtml(markdownContent);
-    const docContent = this.htmlToWord(html, outputPath.replace('.docx', '.html'));
-    fs.writeFileSync(outputPath.replace('.docx', '.html'), docContent, 'utf-8');
-    this.log.warn('[ConversationExporter] Word导出需要额外的库，当前保存为HTML');
+    const children = markdownContent.split(/\r?\n/).map((line) => {
+      const text = line.trim().replace(/\*\*/g, '');
+      if (!text) return new Paragraph({ text: '' });
+      if (text.startsWith('### ')) return new Paragraph({ text: text.slice(4), heading: HeadingLevel.HEADING_3 });
+      if (text.startsWith('## ')) return new Paragraph({ text: text.slice(3), heading: HeadingLevel.HEADING_2 });
+      if (text.startsWith('# ')) return new Paragraph({ text: text.slice(2), heading: HeadingLevel.HEADING_1 });
+      return new Paragraph({ text });
+    });
+    const doc = new Document({ sections: [{ children }] });
+    await fs.promises.writeFile(outputPath, await Packer.toBuffer(doc));
   }
 
   /**
@@ -210,26 +255,9 @@ export class ConversationExporter {
 </html>`;
   }
 
-  /**
-   * HTML转Word格式
-   */
-  private htmlToWord(html: string, title: string): string {
-    return `<!DOCTYPE html>
-<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40">
-<head>
-  <meta charset="utf-8">
-  <title>${title}</title>
-  <!--[if gte mso 9]>
-  <xml>
-    <w:WordDocument>
-      <w:View>Print</w:View>
-    </w:WordDocument>
-  </xml>
-  <![endif]-->
-</head>
-<body>
-  ${html}
-</body>
-</html>`;
-  }
+}
+
+/** 把路径后缀纠正为真实格式，避免"内容是 HTML、文件名是 .docx"的欺骗 */
+function withExtension(p: string, ext: string): string {
+  return /\.[a-zA-Z0-9]+$/.test(p) ? p.replace(/\.[a-zA-Z0-9]+$/, ext) : `${p}${ext}`;
 }

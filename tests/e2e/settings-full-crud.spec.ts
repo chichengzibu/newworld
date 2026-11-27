@@ -16,6 +16,32 @@ import { test, expect, shouldRunElectronE2E } from './helpers/electron-app'
 test.describe('T+540 Settings 模型管理完整 CRUD', () => {
   test.skip(!shouldRunElectronE2E, 'requires E2E_ELECTRON=1')
 
+
+/**
+ * 【M4-R】每个测试**自建** provider。
+ *
+ * 原来 CR2/CR3/CR4/CR6 都依赖 **CR1 建的** provider —— 那是**顺序依赖**:
+ * 单跑 CR2 必红(它要找的 provider 根本不存在),只是靠"跑全量时前面有 CR1"
+ * 才绿。M4-R 把 e2e 改成每个测试独立 profile 后,这类依赖全部暴露。
+ * 修:每个测试自己准备前提 → 用例之间彻底无关(也就能并行跑了)。
+ */
+async function ensureTestProvider(window: any, name = 'CR Test Provider'): Promise<boolean> {
+  return window.evaluate(async (providerName: string) => {
+    const api = (window as any).electronAPI
+    const list = await api.models.list()
+    if (list?.data?.some((p: any) => p.name === providerName)) return true
+    const r = await api.models.add({
+      name: providerName,
+      type: 'openai',
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      apiKey: 'no-key',
+      enabled: true,
+      models: [{ id: 'qwen3.5:9b', name: 'qwen3.5:9b', capabilities: ['chat'] }],
+    })
+    return !!r?.success
+  }, name)
+}
+
   test('CR1: 注入 provider → list 看到', async ({ window }) => {
     await window.waitForSelector('#app', { timeout: 10_000 })
     await window.waitForTimeout(800)
@@ -33,7 +59,7 @@ test.describe('T+540 Settings 模型管理完整 CRUD', () => {
       const r = await api.models.add({
         name: 'CR Test Provider',
         type: 'openai',
-        baseUrl: 'http://localhost:11434/v1',
+        baseUrl: 'http://127.0.0.1:11434/v1',
         apiKey: 'no-key',
         enabled: true,
         timeout: 30000,
@@ -55,6 +81,9 @@ test.describe('T+540 Settings 模型管理完整 CRUD', () => {
   test('CR2: toggle provider off → list 显示 disabled', async ({ window }) => {
     await window.waitForSelector('#app', { timeout: 10_000 })
     await window.waitForTimeout(800)
+
+    // 【M4-R】自建前提(不依赖别的测试)
+    expect(await ensureTestProvider(window), '创建测试 provider 失败').toBe(true)
 
     // toggle off
     const result = await window.evaluate(async () => {
@@ -90,6 +119,9 @@ test.describe('T+540 Settings 模型管理完整 CRUD', () => {
     await window.waitForSelector('#app', { timeout: 10_000 })
     await window.waitForTimeout(800)
 
+    // 【M4-R】自建前提(不依赖别的测试)
+    expect(await ensureTestProvider(window), '创建测试 provider 失败').toBe(true)
+
     const result = await window.evaluate(async () => {
       const api = (window as any).electronAPI
       const list = await api.models.list()
@@ -113,6 +145,10 @@ test.describe('T+540 Settings 模型管理完整 CRUD', () => {
   test('CR4: delete provider → list 不再看到', async ({ window }) => {
     await window.waitForSelector('#app', { timeout: 10_000 })
     await window.waitForTimeout(800)
+
+    // 【M4-R】自建前提(不依赖别的测试)—— 本用例删的是「改名后」那个名字,
+    // 原来靠 CR3 改名得到 → 同样是顺序依赖
+    expect(await ensureTestProvider(window, 'CR Test Provider (Renamed)'), '创建测试 provider 失败').toBe(true)
 
     const result = await window.evaluate(async () => {
       const api = (window as any).electronAPI
@@ -143,7 +179,7 @@ test.describe('T+540 Settings 模型管理完整 CRUD', () => {
       const r = await api.models.add({
         name: 'CR Test Provider',
         type: 'openai',
-        baseUrl: 'http://localhost:11434/v1',
+        baseUrl: 'http://127.0.0.1:11434/v1',
         apiKey: 'no-key',
         enabled: true,
         timeout: 30000,
@@ -166,6 +202,9 @@ test.describe('T+540 Settings 模型管理完整 CRUD', () => {
     await window.waitForSelector('#app', { timeout: 10_000 })
     await window.waitForTimeout(800)
 
+    // 【M4-R】自建前提(不依赖别的测试)
+    expect(await ensureTestProvider(window), '创建测试 provider 失败').toBe(true)
+
     const result = await window.evaluate(async () => {
       const api = (window as any).electronAPI
       const list = await api.models.list()
@@ -182,6 +221,9 @@ test.describe('T+540 Settings 模型管理完整 CRUD', () => {
   test('CR7: 删除所有 CR provider,清理', async ({ window }) => {
     await window.waitForSelector('#app', { timeout: 10_000 })
     await window.waitForTimeout(800)
+
+    // 【M4-R】先造一个再删(原来靠前面的测试留下的 → 顺序依赖)
+    expect(await ensureTestProvider(window), '创建测试 provider 失败').toBe(true)
 
     const result = await window.evaluate(async () => {
       const api = (window as any).electronAPI

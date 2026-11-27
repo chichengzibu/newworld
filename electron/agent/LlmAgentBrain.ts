@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - LlmAgentBrain v0.1 (M1)
+ * New World - LlmAgentBrain v0.1 (M1)
  *
  * 真 tool call loop, 跟 ClaudeCode 对齐:
  *   - LLM 收到 user prompt + 5 tools (Read/Edit/Bash/Glob/Grep) schema
@@ -14,8 +14,15 @@
 import { LogManager } from '../core/LogManager'
 import { LlmClient } from '../llm/LlmClient'
 import { BUILTIN_TOOLS, toolsToLlmSchema } from './tools'
-import type { PiPiTool, ToolExecResult } from './tools'
-import type { LlmMessage, LlmToolCall, LlmStreamChunk } from '../llm/types'
+import { planContext, DEFAULT_BUDGET, type ContextBudget, type ContextMessage } from './ContextEngine'
+import { ToolGate, type ToolGateDecision } from './ToolGate'
+import { createToolRbacCheck } from './ToolRbac'
+import { isWebSearchEnabled } from '../llm/webSearchSettings'
+import { listMcpTools, syncMcpTools, MCP_NAME_SEPARATOR } from './McpToolAdapter'
+import { RetryPolicy } from './RetryPolicy'
+import { SkillLoader } from '../skill/SkillLoader'
+import type { PiPiTool, ToolExecResult, ProducedArtifact } from './tools'
+import type { InlineLlmConfig, LlmMessage, LlmToolCall, LlmStreamChunk } from '../llm/types'
 import type { AgentBrain, AgentContext, Decision, ToolCall, ToolResult, SubTask, SubAgent } from '../contracts/types'
 
 const MAX_ITERATIONS = 10
@@ -23,32 +30,47 @@ const MAX_ITERATIONS = 10
 const MAX_SPAWN_DEPTH = 1
 const DEFAULT_MODEL = 'qwen3.5:9b' // M1 v0.1 default: 本地 ollama, tool-capable
 
-const SYSTEM_PROMPT = `你是 PiPiClaw 代码助手 (M1 v0.1), 跟 ClaudeCode 一样能用 5 个工具:
+const SYSTEM_PROMPT = `你是 New World 代码助手, 跟 ClaudeCode 一样能用 8 个工具:
 - Read: 读文件 (file_path, encoding?)
 - Edit: 精确编辑文件 (file_path, old_string, new_string, replace_all?)
 - Bash: 跑命令 (command, args?, cwd?, timeout_ms?)
 - Glob: 文件匹配 (pattern, cwd?)
 - Grep: 内容搜索 (pattern, cwd?, include?)
+- load_skill: 加载某个技能的完整操作说明 (skill_id)
+- parallel_subtasks: 多个【彼此独立】的子问题可同时处理时, 一次性派生子代理并行执行 (tasks: 指令数组, 最多5条); 结果汇总后返回
+- create_artifact: 用户要"整理成文档/表格/PPT、导出报告、生成可下载文件"时, 用它生成真实成品 (type=document/spreadsheet/presentation, filename, content); document 用 Markdown, spreadsheet 用 CSV, presentation 用空行分页。返回真实路径，用户可点击打开
 
 工作准则:
-1. 优先用工具拿真实数据, 不要靠记忆编
-2. Edit 工具要求 old_string 唯一, 不唯一就报错让你加上下文
-3. Bash 走白名单, 不在白名单的命令会拒绝
-4. 任务完成直接给最终答复, 不要无谓地继续调工具
-5. 答复简洁, 中文, 1-3 句能说清就不啰嗦
-6. 路径默认是 sandbox 内 (用户数据隔离), 不要试图读 ~/.ssh 或 C:\\Windows`
+1. 【M4-W】**先判断要不要用技能**:系统提示里的"可用技能"清单就是路由依据
+   (每条含名称、描述、适用场景、以及 load_skill 要用的 skill_id)。
+   有技能与用户需求相关 → **第一步**就调 load_skill 取它的完整步骤,再动手;
+   拿不准或没有相关技能 → 当没有技能,直接干活。
+   **不要**先用 Glob/Read 去"找"技能 —— 技能靠清单判断,不是靠搜目录。
+2. 优先用工具拿真实数据, 不要靠记忆编
+3. Edit 工具要求 old_string 唯一, 不唯一就报错让你加上下文
+4. Bash 走白名单, 不在白名单的命令会拒绝
+5. 任务完成直接给最终答复, 不要无谓地继续调工具
+6. 答复简洁, 中文, 1-3 句能说清就不啰嗦
+7. 路径默认是 sandbox 内 (用户数据隔离), 不要试图读 ~/.ssh 或 C:\\Windows`
 
 /** 单次 think run 的事件回调 (供 IPC / ChatManager 订阅) */
 export type LlmAgentEvent =
   | { type: 'run_start'; runId: string; prompt: string; tools: string[] }
   | { type: 'iteration'; runId: string; iter: number; message: string }
   | { type: 'tool_call'; runId: string; iter: number; name: string; args: Record<string, unknown> }
-  | { type: 'tool_result'; runId: string; iter: number; name: string; ok: boolean; result: string; error?: string; durationMs: number }
+  | { type: 'tool_result'; runId: string; iter: number; name: string; ok: boolean; result: string; error?: string; durationMs: number; artifacts?: ProducedArtifact[] }
   | { type: 'content_delta'; runId: string; iter: number; delta: string; accumulated: string }
   | { type: 'thinking_delta'; runId: string; iter: number; delta: string; accumulated: string }
   | { type: 'final_answer'; runId: string; content: string; iterations: number; totalDurationMs: number }
   | { type: 'run_error'; runId: string; error: string; iterations: number; totalDurationMs: number }
   | { type: 'run_aborted'; runId: string; iterations: number }
+  // ======== 【P3】多 agent 并行编排事件 ========
+  // 关键:runId 一律用【父 runId】,这样 AgentEventRelay 无需 bind 子 runId 就能归属到会话;
+  // 子任务自己的 runId 放在 childRunId 字段里,不参与归属判定。
+  | { type: 'subtask.started'; runId: string; parentRunId: string; subtaskId: string; childRunId: string; index: number; instruction: string }
+  | { type: 'subtask.done'; runId: string; parentRunId: string; subtaskId: string; childRunId: string; index: number; durationMs: number; tokens: number }
+  | { type: 'subtask.failed'; runId: string; parentRunId: string; subtaskId: string; childRunId: string; index: number; durationMs: number; error: string }
+  | { type: 'subtask.aggregated'; runId: string; parentRunId: string; count: number; okCount: number; failedCount: number; totalDurationMs: number; totalTokens: number }
 
 export type LlmAgentEventHandler = (e: LlmAgentEvent) => void
 
@@ -123,6 +145,12 @@ export class LlmAgentBrain implements AgentBrain {
   private log = LogManager.getInstance()
   private llm = LlmClient.getInstance()
   private tools: Map<string, PiPiTool> = new Map()
+  /**
+   * 【M3-B】LLM 调用重试策略(带熔断器)。
+   * 单例共享 —— 熔断器状态需跨 run 累积:某个 provider 持续不可用时,
+   * 应当对所有会话生效,而不是每个 run 各撞一次墙。
+   */
+  private retryPolicy = new RetryPolicy()
   /** runId → state */
   private runs: Map<string, RunState> = new Map()
   /** #005 spawn: 出生上下文 (仅子实例持有; 父/单例为 undefined)。只读 — run 时显式下传, 不入脑内可变态 */
@@ -133,6 +161,40 @@ export class LlmAgentBrain implements AgentBrain {
     for (const t of BUILTIN_TOOLS) this.tools.set(t.metadata.name, t)
     this.spawnCtx = spawnCtx
     this.log.info(`LlmAgentBrain v0.1 初始化: ${this.tools.size} tools${spawnCtx ? ` (子代理 parent=${spawnCtx.parentRunId}, depth=${spawnCtx.depth})` : ' (单例)'}`)
+  }
+
+  /**
+   * 【M3-A】把 MCP server 的工具同步进 agent 工具表。
+   *
+   * 此前 MCP 能力只在 IPC 层,LLM 完全看不到 —— 用户装了 MCP server 也白装。
+   * 同步后 MCP 工具与内置工具走同一套 function calling / 权限门 / 可视化。
+   *
+   * 时机:由调用方(main 启动后 / MCP server 启停后)显式触发,
+   * 不在构造器里做 —— 构造器不能 await,且 MCP server 此时可能还没起。
+   *
+   * 内置工具优先:同名时跳过 MCP 版本,避免第三方 server 意外覆盖核心能力。
+   */
+  public async syncMcpTools(): Promise<{ added: string[]; skipped: string[] }> {
+    const mcpTools = await listMcpTools()
+    const res = syncMcpTools(this.tools, mcpTools)
+    if (res.added.length > 0) {
+      this.log.info(`LlmAgentBrain: 已接入 ${res.added.length} 个 MCP 工具 (当前共 ${this.tools.size} 个)`)
+    }
+    return res
+  }
+
+  /** 移除某个 server 的全部 MCP 工具(server 停用时调用) */
+  public removeMcpToolsOfServer(server: string): number {
+    const prefix = `${server}${MCP_NAME_SEPARATOR}`
+    let removed = 0
+    for (const name of Array.from(this.tools.keys())) {
+      if (name.startsWith(prefix)) {
+        this.tools.delete(name)
+        removed++
+      }
+    }
+    if (removed > 0) this.log.info(`LlmAgentBrain: 已移除 server ${server} 的 ${removed} 个 MCP 工具`)
+    return removed
   }
 
   public static getInstance(): LlmAgentBrain {
@@ -187,6 +249,9 @@ export class LlmAgentBrain implements AgentBrain {
     runId?: string
     model?: string
     provider?: 'openai' | 'openai-compatible' | 'anthropic' | 'zhipu'
+    /** 【M4-L】按会话带下来的 provider 配置(用户自建 provider 走 ModelManager,
+     *  LlmConfigStore 里没有 → 以前 agent 路径必然报 "no LLM provider configured") */
+    config?: InlineLlmConfig
     tools?: string[]
     maxIterations?: number
     systemPrompt?: string
@@ -213,7 +278,34 @@ export class LlmAgentBrain implements AgentBrain {
      *  本类零 HermesAdapter import / 零 embedText 调用 — 不新增外部依赖, 不引入模块态)。
      *  不传 = 不注入 (休眠态, 与 history 参数同一模式)。 */
     memoryContext?: string
-  } = {}): Promise<{ runId: string; content: string; iterations: number; totalDurationMs: number; toolCalls: Array<{ name: string; ok: boolean; durationMs: number }> }> {
+    /**
+     * 【M2-A】上下文预算 —— 覆盖默认的 DEFAULT_BUDGET(128k)。
+     * 不同模型上下文窗口不同,小模型(如 8B 本地)必须给更小的预算,
+     * 否则降级阈值形同虚设。缺省 = DEFAULT_BUDGET。
+     */
+    contextBudget?: ContextBudget
+    /**
+     * 【M2-B】工具权限确认桥 —— 由会话层(TUI/渲染层)注入。
+     * 传入后,权限门在 contextKind==='ui' 时可弹窗向用户确认写操作。
+     * 不传 = 无确认能力 → 权限门对 confirm 级工具一律拒绝(fail-safe)。
+     * 绝不因为"没人确认"就默认放行 —— 那等于没装这道门。
+     */
+    requestToolConfirmation?: (toolName: string, prompt: string) => Promise<boolean>
+    /**
+     * 【M2-B】调用方声明写操作已预先授权 —— 用于无人值守但上层已授权的场景
+     * (如用户为某个定时任务单独授权过)。
+     *
+     * 这是显式注入而非全局开关:生产调用方不传就是拒绝。
+     * 曾考虑过 globalThis 形式的测试后门,因"任何人加一行赋值即可绕过
+     * fail-safe"而废弃 —— 安全边界不能建立在约定上。
+     */
+    preApprovedToolConfirm?: boolean
+    /**
+     * 【M4-E】本次运行禁用的技能 id(配对对照的「不带技能」变体用)。
+     * 由工具层(load_skill)自己拒绝 —— 模型自己调是禁不住的。
+     */
+    suppressedSkills?: string[]
+  } = {}): Promise<{ runId: string; content: string; iterations: number; totalDurationMs: number; totalTokens: number; promptTokens: number; completionTokens: number; reasoningTokens: number; model: string; toolCalls: Array<{ name: string; ok: boolean; durationMs: number; entity?: { kind: string; id: string } }>; appliedSkills: string[] }> {
     const runId = opts.runId ?? `run-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     const controller = new AbortController()
     const state: RunState = { runId, aborted: false, controller }
@@ -224,14 +316,39 @@ export class LlmAgentBrain implements AgentBrain {
     // #006.5 R-1 (休眠 brain 链, W5 接线后生效): memoryContext 显式参数注入位 —
     //   与 history/checkpoint 同模式 (brain 无状态, 参数透传不自存);
     //   拼接为系统提示词的固定追加段 (非覆盖, 不改变 SYSTEM_PROMPT 本体)
-    const systemPrompt = (opts.memoryContext && opts.memoryContext.trim())
-      ? `${opts.systemPrompt ?? SYSTEM_PROMPT}\n\n相关记忆 (管线召回, stub 口径):\n${opts.memoryContext.trim()}`
-      : (opts.systemPrompt ?? SYSTEM_PROMPT)
-    const selectedToolNames = opts.tools ?? Array.from(this.tools.keys())
+    const basePrompt = opts.systemPrompt ?? SYSTEM_PROMPT
+    // 【M4-A】L1 渐进披露:技能摘要常驻注入 system prompt。
+    // 依据 Anthropic Agent Skills 规范 —— description 本身就是路由规则,
+    // 模型看到摘要后自己决定是否调 load_skill 取正文(L2)。
+    // 旧实现是在代码里做匹配(技能>5 个时串行 N 次 LLM 调用),既慢又不准。
+    let systemPrompt = basePrompt
+    try {
+      const skillSummaries = SkillLoader.getInstance().getSkillSummaries()
+      if (skillSummaries) {
+        systemPrompt += `\n\n可用技能(相关时用 load_skill 加载完整说明):\n${skillSummaries}`
+      }
+    } catch (e) {
+      this.log.warn('LlmAgentBrain: 技能摘要注入失败(不阻断)')
+    }
+    if (opts.memoryContext && opts.memoryContext.trim()) {
+      systemPrompt += `\n\n相关记忆 (管线召回, stub 口径):\n${opts.memoryContext.trim()}`
+    }
+    let selectedToolNames = opts.tools ?? Array.from(this.tools.keys())
+    // 【v4.8】联网搜索开关：关闭时不把 web_search 放进本次 run 的白名单，
+    // 模型根本看不到这个工具（而非看到后被调用再拒绝）。开启才授权模型联网。
+    if (!isWebSearchEnabled()) {
+      selectedToolNames = selectedToolNames.filter((n) => n !== 'web_search')
+    }
     const selectedTools = selectedToolNames
       .map(n => this.tools.get(n))
       .filter((t): t is PiPiTool => !!t)
-    const toolCallsLog: Array<{ name: string; ok: boolean; durationMs: number }> = []
+    /**
+     * 【M4-D】工具调用日志条目 —— 加 entity 字段承载"这次动了什么实体"。
+     * 由工具自己声明(ToolExecResult.appliedEntity),编排层只记录,零特殊-case。
+     */
+    const toolCallsLog: Array<{ name: string; ok: boolean; durationMs: number; entity?: { kind: string; id: string } }> = []
+    /** 【M4-D】本次 run 实际应用过的技能 id(去重) —— 技能级效用信号的前提 */
+    const appliedSkills: string[] = []
 
     LlmAgentBrainEvents.emit({ type: 'run_start', runId, prompt, tools: selectedToolNames })
 
@@ -255,6 +372,11 @@ export class LlmAgentBrain implements AgentBrain {
     const convId = opts.conversationId ?? 'unknown'
     // #005 spawn (预算隔离): usage 聚合 + 刹车判定 (run 局部变量, 无状态红线)
     let totalTokens = 0
+    /** 【M3-E】分项 token 计数 —— 成本记账要能区分输入/输出 */
+    let promptTokens = 0
+    let completionTokens = 0
+    /** 【P2】思考 token —— provider 未回传时恒为 0, UI 据此不展示 */
+    let reasoningTokens = 0
     let budgetBraked = false
     const budgetCheck = (): boolean => {
       if (opts.maxTokens !== undefined && totalTokens >= opts.maxTokens && !budgetBraked) {
@@ -291,7 +413,7 @@ export class LlmAgentBrain implements AgentBrain {
           pushCkpt(takeCkpt('interrupted', 'aborted')) // #004 接缝②: 中止前 flush 当前态 (A2 append-only)
           LlmAgentBrainEvents.emit({ type: 'run_aborted', runId, iterations: iter - 1 })
           this.runs.delete(runId)
-          return { runId, content: finalContent, iterations: iter - 1, totalDurationMs: Date.now() - startMs, toolCalls: toolCallsLog }
+          return { runId, content: finalContent, iterations: iter - 1, totalDurationMs: Date.now() - startMs, totalTokens, promptTokens, completionTokens, reasoningTokens, model: opts.model ?? DEFAULT_MODEL, toolCalls: toolCallsLog, appliedSkills: [...appliedSkills] }
         }
         // #005 spawn (预算刹车): 每轮 LLM 调用前判定 — 超限即停 tool 循环,
         // 下方 maxIter 收尾块取【最后 assistant】为 final (降级到 final, 不 throw 不中断会话)
@@ -299,13 +421,64 @@ export class LlmAgentBrain implements AgentBrain {
         iterations = iter
         LlmAgentBrainEvents.emit({ type: 'iteration', runId, iter, message: `第 ${iter}/${maxIter} 轮` })
 
+        /**
+         * 【M2-A】上下文降级 —— 调 LLM 之前执行,而不是溢出之后补救。
+         * messages 在 run 内单调增长,10 轮 × Read 单文件 200KB 必然撑爆,
+         * 而部分 provider 遇到超限直接报错、整个 run 崩掉(且无可恢复路径)。
+         * 三级降级由 ContextEngine 决策:裁剪 → 摘要 → 中止。
+         */
+        const ctxPlan = planContext(
+          messages as unknown as ContextMessage[],
+          opts.contextBudget ?? DEFAULT_BUDGET,
+        );
+        if (ctxPlan.action === 'abort') {
+          this.log.warn(`LlmAgentBrain: run ${runId} 上下文超限无法降级 — ${ctxPlan.reason}`);
+          LlmAgentBrainEvents.emit({
+            type: 'run_error', runId, iterations,
+            totalDurationMs: Date.now() - startMs,
+            error: `上下文超出模型容量(${ctxPlan.reason})。请缩短单次输入,或分多步执行。`,
+          });
+          finalContent = finalContent
+            || '这次的内容太长,超出模型能一次读完的量了。建议拆成几步,或者只把关键部分发给我。';
+          pushCkpt(takeCkpt('finalized'));
+          this.runs.delete(runId);
+          return { runId, content: finalContent, iterations, totalDurationMs: Date.now() - startMs, totalTokens, promptTokens, completionTokens, reasoningTokens, model: opts.model ?? DEFAULT_MODEL, toolCalls: toolCallsLog, appliedSkills: [...appliedSkills] };
+        }
+        if (ctxPlan.action !== 'none') {
+          this.log.info(`LlmAgentBrain: run ${runId} 上下文降级 — ${ctxPlan.reason}`);
+          // 用裁剪后的副本喂 LLM,但【不回写 messages】:
+          // messages 保持完整,checkpoint 快照与恢复逻辑仍能拿到全量上下文。
+          // 每轮独立降级,不会累积丢失。
+        }
+
         // 调 LLM (流式), 聚合 tool_calls + final content
-        const result = await this.callLlmOnce(messages, llmSchema, iter, runId, controller.signal, {
-          provider: opts.provider,
-          model: opts.model ?? DEFAULT_MODEL,
-        })
+        /**
+         * 【M3-B】重试 + 退避 + 熔断。
+         * 修复前: 单次 LLM 调用失败(429/5xx/网络抖动)整个多轮 run 直接崩,
+         *   用户看到"执行失败",此前的工作全废。
+         * 现在: 可重试错误走 full-jitter 退避重试(调研:3 次可捕获 97.3%
+         *   瞬时故障);熔断器在持续失败时开闸,避免更快烧完配额。
+         * 不可重试错误(400/401/403/404/422)直接失败,不浪费退避时间。
+         */
+        const result = await this.retryPolicy.execute(
+          () => this.callLlmOnce(
+            ctxPlan.messages as unknown as LlmMessage[],
+            llmSchema, iter, runId, controller.signal, {
+              provider: opts.provider,
+              model: opts.model ?? DEFAULT_MODEL,
+              // 【M4-L】把会话的 provider 配置一并带下去
+              ...(opts.config ? { config: opts.config } : {}),
+            },
+          ),
+          `llm-call iter=${iter}`,
+        )
         // #005 spawn 预算: 聚合本轮 usage → run 级 totalTokens (budgetCheck 下轮前判定)
         if (typeof result.totalTokens === 'number') totalTokens += result.totalTokens
+        // 【M3-E】分项累加 —— 适配器本来就回传 promptTokens/completionTokens,
+        // 此前只取 total → 成本记账只能记总额,无法区分"输入贵"还是"输出贵"。
+        if (typeof result.promptTokens === 'number') promptTokens += result.promptTokens
+        if (typeof result.completionTokens === 'number') completionTokens += result.completionTokens
+        if (typeof result.reasoningTokens === 'number') reasoningTokens += result.reasoningTokens
 
         // 把 assistant message 回写
         const assistantMsg: LlmMessage = { role: 'assistant', content: result.content }
@@ -341,17 +514,99 @@ export class LlmAgentBrain implements AgentBrain {
           LlmAgentBrainEvents.emit({ type: 'tool_call', runId, iter, name: tc.function.name, args })
           const tStart = Date.now()
           let exec: ToolExecResult
+          // #005 Step 0 (DEV-014 切除): contextKind 显式贯穿 — 禁脑读模块态 (全局态已删),
+          // 本 run 的 ctx 由入口派生后经 think→run 携带; 子实例 (spawnCtx) 继承出生 ctx; 均无 → 'headless' (fail-safe)
+          // 【M3-C】带上 run 的中止信号 —— 用户点「停止」时,
+          // 正在跑的命令能自己订阅并把整棵进程树杀掉(此前只停 LLM 流,命令照跑)。
+          const toolCtx = {
+            contextKind: opts.contextKind ?? this.spawnCtx?.contextKind ?? 'headless',
+            signal: state.controller.signal,
+            // 【M4-E】配对对照用:本次运行禁用哪些技能(随 run 传,不做全局态)
+            ...(opts.suppressedSkills?.length ? { suppressedSkills: opts.suppressedSkills } : {}),
+            // 【P3】并行编排闭包 —— 捕获本轮 model/provider/contextKind/AbortSignal 显式下传,
+            // 工具自身不持有 brain(模块级单例), 父子工具同源却不会串到别的 run。
+            delegate: async (instructions: string[]) => {
+              // 先取值再判空：判空后 TS 会把 this.spawnCtx 收窄成 never
+              const inheritedContextKind = this.spawnCtx?.contextKind
+              if (this.spawnCtx) {
+                return { ok: false, result: '', error: '子代理不可再派生并行任务（深度上限 1）' }
+              }
+              const { orchestrateSubtasks } = await import('./SubtaskOrchestrator')
+              return orchestrateSubtasks({
+                parent: this,
+                parentRunId: runId,
+                instructions,
+                contextKind: opts.contextKind ?? inheritedContextKind,
+                model: opts.model,
+                provider: opts.provider,
+                config: opts.config,
+                signal: state.controller.signal,
+                checkpoint: opts.checkpoint,
+                conversationId: opts.conversationId,
+                onChildUsage: (u) => {
+                  // 子 run 不经过 ChatManager，这里补记成本；与父 run 同源 CostTracker。
+                  if (u.promptTokens <= 0 && u.completionTokens <= 0) return
+                  void import('../insight/CostTracker').then(({ CostTracker }) => {
+                    CostTracker.getInstance().recordUsage({
+                      model: u.model || opts.model || 'agent-loop',
+                      inputTokens: u.promptTokens,
+                      outputTokens: u.completionTokens,
+                      conversationId: u.conversationId,
+                    })
+                  }).catch(() => { /* 记账失败不影响编排结果 */ })
+                },
+                ...(opts.suppressedSkills?.length ? { suppressedSkills: opts.suppressedSkills } : {}),
+                emit: (e) => LlmAgentBrainEvents.emit(e),
+              })
+            },
+          }
+          /**
+           * 【M2-B】工具权限门 —— 修安全洞: EditTool 标注 requiresPermission:true
+           * 但此前 run loop 从不读取该字段,写文件零确认。本门作为兜底层,
+           * 确保任何新工具都不会"忘记检查"。
+           * BashTool 自己的 commandDecide 更细(命令级白名单),这里只做前置兜底。
+           */
+          let gate: ToolGateDecision
           try {
-            // #005 Step 0 (DEV-014 切除): contextKind 显式贯穿 — 禁脑读模块态 (全局态已删),
-            // 本 run 的 ctx 由入口派生后经 think→run 携带; 子实例 (spawnCtx) 继承出生 ctx; 均无 → 'headless' (fail-safe)
-            const toolCtx = { contextKind: opts.contextKind ?? this.spawnCtx?.contextKind ?? 'headless' }
+            gate = await ToolGate.check(tool, args, toolCtx, {
+              // 【v4.8】注入 RBAC：用户在「设置 → 权限管理」的配置真正拦住工具执行
+              rbacCheck: createToolRbacCheck(),
+              requestConfirmation: opts.requestToolConfirmation,
+              ...(opts.preApprovedToolConfirm ? { preApproved: true } : {}),
+            })
+          } catch (e) {
+            // 判定器本身异常 → 按拒绝处理(fail-safe)
+            this.log.warn(`LlmAgentBrain: ToolGate 异常(${(e as Error).message}),按拒绝处理`)
+            gate = { allowed: false, permission: 'deny', reason: '权限判定异常' }
+          }
+          if (!gate.allowed) {
+            exec = { ok: false, result: '', error: `权限拒绝:${gate.reason}` }
+            const gms = Date.now() - tStart
+            toolCallsLog.push({ name: tc.function.name, ok: false, durationMs: gms })
+            LlmAgentBrainEvents.emit({ type: 'tool_result', runId, iter, name: tc.function.name, ok: false, result: '', error: exec.error, durationMs: gms })
+            messages.push({ role: 'tool', content: `Error: ${exec.error}`, toolCallId: tc.id })
+            continue
+          }
+          try {
             exec = await tool.execute(args, toolCtx)
           } catch (e) {
             exec = { ok: false, result: '', error: `tool execution threw: ${(e as Error).message}` }
           }
           const durationMs = Date.now() - tStart
-          toolCallsLog.push({ name: tc.function.name, ok: exec.ok, durationMs })
-          LlmAgentBrainEvents.emit({ type: 'tool_result', runId, iter, name: tc.function.name, ok: exec.ok, result: exec.result, error: exec.error, durationMs })
+          // 【M4-D】记录工具作用的实体(如有) —— 供上层判定"哪些技能被应用了"
+          if (exec.appliedEntity) {
+            toolCallsLog.push({ name: tc.function.name, ok: exec.ok, durationMs, entity: exec.appliedEntity })
+            if (exec.appliedEntity.kind === 'skill' && !appliedSkills.includes(exec.appliedEntity.id)) {
+              appliedSkills.push(exec.appliedEntity.id)
+            }
+          } else {
+            toolCallsLog.push({ name: tc.function.name, ok: exec.ok, durationMs })
+          }
+          LlmAgentBrainEvents.emit({
+            type: 'tool_result', runId, iter, name: tc.function.name,
+            ok: exec.ok, result: exec.result, error: exec.error, durationMs,
+            ...(exec.artifacts?.length ? { artifacts: exec.artifacts } : {}),
+          })
           // tool 消息: OpenAI 格式用 content 字段, 部分 provider 也会读 name
           const toolContent = exec.ok ? exec.result : `Error: ${exec.error ?? 'unknown'}`
           messages.push({ role: 'tool', content: toolContent, toolCallId: tc.id })
@@ -373,7 +628,7 @@ export class LlmAgentBrain implements AgentBrain {
       LlmAgentBrainEvents.emit({ type: 'final_answer', runId, content: finalContent, iterations, totalDurationMs })
       pushCkpt(takeCkpt('finalized')) // #004 接缝④: 终态标记 (run 完整, 恢复时无需续跑)
       this.runs.delete(runId)
-      return { runId, content: finalContent, iterations, totalDurationMs, toolCalls: toolCallsLog }
+      return { runId, content: finalContent, iterations, totalDurationMs, totalTokens, promptTokens, completionTokens, reasoningTokens, model: opts.model ?? DEFAULT_MODEL, toolCalls: toolCallsLog, appliedSkills: [...appliedSkills] }
     } catch (e) {
       const totalDurationMs = Date.now() - startMs
       const errMsg = e instanceof Error ? e.message : String(e)
@@ -391,18 +646,24 @@ export class LlmAgentBrain implements AgentBrain {
     iter: number,
     runId: string,
     signal: AbortSignal,
-    opts: { provider?: 'openai' | 'openai-compatible' | 'anthropic' | 'zhipu'; model: string }
-  ): Promise<{ content: string; reasoning: string; toolCalls: LlmToolCall[]; error?: string; totalTokens?: number }> {
+    opts: { provider?: 'openai' | 'openai-compatible' | 'anthropic' | 'zhipu'; model: string; config?: InlineLlmConfig }
+  ): Promise<{ content: string; reasoning: string; toolCalls: LlmToolCall[]; error?: string; totalTokens?: number; promptTokens?: number; completionTokens?: number; reasoningTokens?: number }> {
     const req = {
       model: opts.model,
       messages,
       tools: llmSchema,
       toolChoice: 'auto' as const,
       provider: opts.provider,
+      // 【M4-L】显式配置优先于 provider 查表
+      ...(opts.config ? { config: opts.config } : {}),
     }
     let content = ''
     let reasoning = ''
     let totalTokens = 0 // #005 spawn 预算刹车: usage chunk 聚合 (LlmClient:99-100 既有流面)
+    /** 【M3-E】分项 token(输入/输出) —— 成本记账要能区分 */
+    let promptTokens = 0
+    let completionTokens = 0
+    let reasoningTokens = 0
     const toolAcc: Map<number, LlmToolCall> = new Map()
     try {
       for await (const chunk of this.llm.streamChat(req, signal)) {
@@ -417,6 +678,12 @@ export class LlmAgentBrain implements AgentBrain {
           toolAcc.set(toolAcc.size, ch.toolCall)
         } else if (ch.type === 'usage' && ch.usage) {
           totalTokens = Math.max(totalTokens, ch.usage.totalTokens ?? 0)
+          // 【M3-E】分项也留 —— 适配器本来就回传 promptTokens/completionTokens,
+          // 此前只取 total → 成本记账只能记总额,分不出"输入贵"还是"输出贵"。
+          promptTokens = Math.max(promptTokens, ch.usage.promptTokens ?? 0)
+          completionTokens = Math.max(completionTokens, ch.usage.completionTokens ?? 0)
+          // 【P2】思考 token 只在 provider 真回传时有值, 不参与 total 估算
+          reasoningTokens = Math.max(reasoningTokens, ch.usage.reasoningTokens ?? 0)
         } else if (ch.type === 'error') {
           throw new Error(ch.error ?? 'unknown stream error')
         }
@@ -437,6 +704,9 @@ export class LlmAgentBrain implements AgentBrain {
       reasoning,
       toolCalls: Array.from(toolAcc.values()),
       totalTokens,
+      promptTokens,
+      completionTokens,
+      reasoningTokens,
     }
   }
 
@@ -454,16 +724,59 @@ export class LlmAgentBrain implements AgentBrain {
       const ckpt = (ctx as { checkpoint?: (ev: RunCheckpointEvent) => void }).checkpoint
       const runOpts: Parameters<typeof this.run>[1] = {}
       if (history) runOpts.history = history
+      // 【M4-L】会话层把「用户选中的 provider」透传下来:
+      // 用户自建的 provider 只在 ModelManager 里,agent 路径走 LlmClient
+      // (只认 LlmConfigStore)→ 以前这里永远拿不到 provider。
+      const ctxProvider = (ctx as { provider?: 'openai' | 'openai-compatible' | 'anthropic' | 'zhipu' }).provider
+      const ctxModel = (ctx as { model?: string }).model
+      const ctxConfig = (ctx as { config?: InlineLlmConfig }).config
+      if (ctxProvider) runOpts.provider = ctxProvider
+      if (ctxModel) runOpts.model = ctxModel
+      if (ctxConfig) runOpts.config = ctxConfig
       if (ckpt) runOpts.checkpoint = ckpt
       if (ctx.conversationId) runOpts.conversationId = String(ctx.conversationId)
+      // 【W5 接线 · M1-C】会话层预分配的 runId:必须在 run() 生成默认 runId 之前透传,
+      // 否则事件中继无法把 tool_call 关联回会话(brain 无状态,不持有 conversationId)。
+      const callerRunId = (ctx as { runId?: string }).runId
+      if (typeof callerRunId === 'string' && callerRunId.length > 0) runOpts.runId = callerRunId
       // #005 Step 0 (DEV-014 切除): contextKind 入口派生值透传 think→run→tool.execute(ctx)
       //   —— brain 不自存 (无状态红线); 会话层 (ChatManager) 是唯一派生源
       if (ctx.contextKind) runOpts.contextKind = ctx.contextKind as 'ui' | 'im_inbound' | 'scheduler' | 'headless'
       // #006.5 R-1: 会话层派生的相关记忆上下文 (已渲染字符串) 透传 think→run→systemPrompt 追加段。
       //   brain 不自存 / 零 HermesAdapter import (无状态红线 + 零新增依赖); 派生源归会话层 (与 contextKind 同模式)
       if (typeof ctx.memoryContext === 'string' && ctx.memoryContext.trim()) runOpts.memoryContext = ctx.memoryContext
+      // 【M2-B】权限确认桥透传:缺省 = 权限门对写操作一律拒绝(fail-safe)
+      const confirmBridge = (ctx as { requestToolConfirmation?: (tool: string, prompt: string) => Promise<boolean> }).requestToolConfirmation
+      if (typeof confirmBridge === 'function') runOpts.requestToolConfirmation = confirmBridge
+      // 【M4-E】配对对照:本次运行禁用哪些技能(透传到 run 的 toolCtx)
+      const suppressed = (ctx as { suppressedSkills?: string[] }).suppressedSkills;
+      if (Array.isArray(suppressed) && suppressed.length > 0) {
+        runOpts.suppressedSkills = suppressed;
+      }
+      // 【M2-B】预授权标记透传(与确认桥同模式,显式注入)
+      if ((ctx as { preApprovedToolConfirm?: boolean }).preApprovedToolConfirm === true) {
+        runOpts.preApprovedToolConfirm = true
+      }
       const r = await this.run(content, runOpts)
-      return { action: 'reply', payload: { text: r.content, model: 'agent-v0.1', durationMs: r.totalDurationMs, iterations: r.iterations, toolCalls: r.toolCalls } }
+      // 【M4-D】appliedSkills 随载荷上抛 —— 上层据此记录
+      // 「技能 S 被应用 + 这次运行成功没」的技能级效用信号。
+      // 【M3-E】载荷带**真实模型名**与**分项 token** ——
+      // 此前 model 恒为 'agent-v0.1'(脑的版本标签),调用方无法知道是哪个模型花的 token。
+      return { action: 'reply', payload: {
+        text: r.content,
+        model: 'agent-v0.1',
+        /** 【M3-E】真实使用的 LLM 模型名(成本按它归集) */
+        llmModel: r.model,
+        durationMs: r.totalDurationMs,
+        iterations: r.iterations,
+        totalTokens: r.totalTokens,
+        promptTokens: r.promptTokens,
+        completionTokens: r.completionTokens,
+        reasoningTokens: r.reasoningTokens,
+        runId: r.runId,
+        toolCalls: r.toolCalls,
+        appliedSkills: r.appliedSkills,
+      } }
     } catch (e) {
       this.log.warn('LlmAgentBrain.think: fallback stub', e)
       return { action: 'reply', payload: { text: `[LlmAgentBrain error] ${(e as Error).message}`, model: 'agent-v0.1-stub', durationMs: 0 } }
@@ -484,6 +797,9 @@ export class LlmAgentBrain implements AgentBrain {
   async spawn(subtask: SubTask, parentCtx?: { contextKind?: SpawnContext['contextKind']; parentRunId: string; checkpoint?: (ev: RunCheckpointEvent) => void }): Promise<SubAgent> {
     // #005 spawn R2 钉: 深度上限 MAX_SPAWN_DEPTH=1 — 子实例(带 spawnCtx)再 spawn 即超限, 立即 throw (非静默降级, 非静默降级到脑内递归)。
     // 用「是否已带出生上下文」判定, 不依赖 depth 计数字段 — 单例(undefined)=父允许, 子实例(有)=已达上限。
+    // 【M3-F】深度要在 throw 判断**之前**取出:
+    // throw 之后 TS 把 this.spawnCtx 窄化成 undefined,再读 `?.depth` 就成了 never。
+    const parentDepth = this.spawnCtx?.depth ?? 0;
     if (this.spawnCtx !== undefined) {
       throw new Error(`LlmAgentBrain.spawn: 深度超限 (MAX_SPAWN_DEPTH=${MAX_SPAWN_DEPTH}) — 子代理禁止再 spawn [${subtask.instruction.slice(0, 30)}]`)
     }
@@ -493,7 +809,7 @@ export class LlmAgentBrain implements AgentBrain {
     }
     // #005 spawn ① 独立性: 新实例 (独立 tools Map / runs Map, 同 BUILTIN_TOOLS 源零提权), 禁 brain:this 自引用 (旧 stub 债已删)。
     const child = LlmAgentBrain.create({
-      depth: (this.spawnCtx?.depth ?? 0) + 1, // 父=0 → 子=1 (= MAX_SPAWN_DEPTH)
+      depth: parentDepth + 1, // 父=0 → 子=1 (= MAX_SPAWN_DEPTH)
       parentRunId: parentCtx.parentRunId,
       contextKind: parentCtx.contextKind,
       checkpointHook: parentCtx.checkpoint,

@@ -182,4 +182,36 @@ describe('#006 记忆持久化 V1-V7', () => {
     }
     expect(fetchCalls).toBe(0)
   })
+
+  /**
+   * 【M3-A 新增 V8】NaN 向量拒收 —— 纵深防御。
+   *
+   * 【为什么这条必须钉死】
+   * 一条 NaN 向量进库 → 余弦算出 NaN → `score >= minScore` 恒为 false
+   * → 整个索引**一条都召不回**,而且不报任何错。
+   * 用户看到的只是"记忆功能好像坏了",排查起来毫无线索。
+   *
+   * 上一条(V7)钉的是"stub 路径不该产生 NaN",
+   * 这条钉的是"就算别处传进来 NaN,也不能让它进库"。
+   */
+  it('V8 【M3-A】NaN/Infinity 向量拒收(一条坏向量不能毒死整个索引)', async () => {
+    await store0.upsert(
+      { id: 'good', content: '好的', score: 1, createdAt: 0 } as Memory,
+      [0.1, 0.2, 0.3], 'stub-deterministic',
+    )
+    await store0.upsert(
+      { id: 'nan', content: '坏的', score: 1, createdAt: 0 } as Memory,
+      [0.1, NaN, 0.3], 'stub-deterministic',
+    )
+    await store0.upsert(
+      { id: 'inf', content: '也坏的', score: 1, createdAt: 0 } as Memory,
+      [0.1, Infinity, 0.3], 'stub-deterministic',
+    )
+
+    expect(store0.size()).toBe(1)                 // 只有好的那条进了库
+    const hits = await store0.search([0.1, 0.2, 0.3], 5, -1)
+    expect(hits.length).toBe(1)
+    expect(hits[0].entry.id).toBe('good')
+    expect(Number.isFinite(hits[0].score)).toBe(true)
+  })
 })

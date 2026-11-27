@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - Workspace 抽象(W9.3)
+ * New World - Workspace 抽象(W9.3)
  *
  * host path = userData/sandboxes/{id}/mnt
  * container path = /mnt/data(固定,便于 docker -v 挂载)
@@ -87,7 +87,16 @@ export class WorkspaceManager {
 
   /** 列出所有 workspace(按 createdAt desc) */
   listWorkspaces(): Workspace[] {
-    return [...this.workspaces.values()].sort((a, b) => b.createdAt - a.createdAt)
+    // 【M4-N 修 flaky】`createdAt` 是 `Date.now()`(**毫秒精度**)——
+    // 同一毫秒内建的两个 workspace 排序键相同,而 `Array.sort` 是**稳定**的
+    // (ES2019 起规范保证)→ 同键时保留插入顺序 → 列表变成"**旧的在前**",
+    // 与本函数承诺的「按 createdAt desc(新的在前)」不符。
+    // 实测:vitest 连跑 8 轮有 1 轮红(Workspace.test.ts 的排序断言)。
+    //
+    // 修法:先 `reverse()`(把插入顺序倒过来 = 新的在后)再**稳定**排序 →
+    // 同 createdAt 时,后建的排前面 → 「新的在前」在任何情况下都成立。
+    // 不用 id 做次级键:id 是 randomUUID 截断,随机、无序,带不出时间语义。
+    return [...this.workspaces.values()].reverse().sort((a, b) => b.createdAt - a.createdAt)
   }
 
   /** 查单个 */

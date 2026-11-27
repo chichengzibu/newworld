@@ -22,9 +22,9 @@ describe('W1.3 工具链自检', () => {
     expect(homedir()).toBeTruthy()
   })
 
-  it('~/.pipiclaw/.bootstrap-state.json 已存在（postinstall 跑过）', async () => {
+  it('~/.newworld/.bootstrap-state.json 已存在（postinstall 跑过）', async () => {
     const fs = await import('node:fs/promises')
-    const stateFile = join(homedir(), '.pipiclaw', '.bootstrap-state.json')
+    const stateFile = join(homedir(), '.newworld', '.bootstrap-state.json')
     const exists = await fs.access(stateFile).then(() => true).catch(() => false)
     // 注：本测试只验证 vitest 能跑 fs API；state 文件是否存在不强制（postinstall 跑过但可能被清理）
     expect(typeof exists).toBe('boolean')

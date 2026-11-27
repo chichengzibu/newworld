@@ -73,7 +73,7 @@ describe('AutoUpdater', () => {
     windowIsDestroyed.mockClear()
     windowIsDestroyed.mockReturnValue(false)
     // ensure skip flag is set so we don't get background timers in tests
-    process.env.PIPICLAW_SKIP_UPDATE_CHECK = '1'
+    process.env.NW_SKIP_UPDATE_CHECK = '1'
   })
 
   it('initialize registers listeners and 4 IPC handlers', () => {

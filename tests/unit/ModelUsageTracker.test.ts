@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import * as fs from 'node:fs'
 
 vi.mock('electron', () => ({
-  app: { getPath: vi.fn(() => '/tmp/pipiclaw-modelusage-test') },
+  app: { getPath: vi.fn(() => '/tmp/newworld-modelusage-test') },
 }))
 
 vi.mock('electron-log', () => ({
@@ -137,8 +137,8 @@ describe('P2-02: ModelUsageTracker', () => {
 describe('P3-03: getMonthlyPrediction 月度费用预测', () => {
   beforeEach(() => {
     ;(ModelUsageTracker as unknown as { instance: ModelUsageTracker | null }).instance = null
-    if (fs.existsSync('/tmp/pipiclaw-modelusage-test')) {
-      fs.rmSync('/tmp/pipiclaw-modelusage-test', { recursive: true, force: true })
+    if (fs.existsSync('/tmp/newworld-modelusage-test')) {
+      fs.rmSync('/tmp/newworld-modelusage-test', { recursive: true, force: true })
     }
   })
 

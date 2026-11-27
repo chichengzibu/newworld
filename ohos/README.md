@@ -80,7 +80,7 @@ initHost();
 
 | 信号 | 来源 | 壳工程需要做什么 |
 |------|------|-----------------|
-| `process.env.PIPICLAW_PLATFORM === 'ohos'` | 打包/运行时注入 | ★ **首选**，由 runtime 启动主进程时注入 |
+| `process.env.NW_PLATFORM === 'ohos'` | 打包/运行时注入 | ★ **首选**，由 runtime 启动主进程时注入 |
 | `process.platform === 'ohos'` | Node 未来可能支持 | 无需处理 |
 | `/etc/os-release` 含 HarmonyOS/OpenHarmony/OHOS | 系统文件 | 真机上天然成立（兜底） |
 
@@ -88,9 +88,9 @@ initHost();
 
 | 环境变量 | 对应 | 建议值 |
 |---------|------|--------|
-| `PIPICLAW_APP_PATH` | `HarmonyHost.getAppPath()` | `${context.filesDir}/app` |
-| `PIPICLAW_USER_DATA` | `getPath('userData'/'logs'/'cache')` 的基准目录 | `context.filesDir` |
-| `PIPICLAW_VERSION` | `getVersion()` | `AppScope/app.json5` 的 `versionName` |
+| `NW_APP_PATH` | `HarmonyHost.getAppPath()` | `${context.filesDir}/app` |
+| `NW_USER_DATA` | `getPath('userData'/'logs'/'cache')` 的基准目录 | `context.filesDir` |
+| `NW_VERSION` | `getVersion()` | `AppScope/app.json5` 的 `versionName` |
 
 一旦 `HarmonyHost` 生效，以下能力**自动降级为 no-op**（阶段 3 已落地，无需壳工程干预）：
 
@@ -125,7 +125,7 @@ npm run ohos:sync
 
 - **第 1 步** 产出 `dist/`（渲染进程）与 `dist-electron/`（主进程 + preload，由 vite-plugin-electron 产出）
 - **第 2 步** 复制到 `ohos/entry/assets/app/`，并生成 Electron 应用清单 `package.json`（`main: dist-electron/main.js`）
-  - 输出目录可覆盖：`PIPICLAW_OHOS_ASSET_DIR=ohos/entry/src/main/resources/rawfile/app npm run ohos:build`
+  - 输出目录可覆盖：`NW_OHOS_ASSET_DIR=ohos/entry/src/main/resources/rawfile/app npm run ohos:build`
   - 注：任务描述里只提 `preload.js`，实际同步的是**整个 `dist-electron/`** —— `main.js` 才是主进程入口，只拷 preload 无法启动
 - **第 3 步** 探测 DevEco/SDK/hvigor/oh_modules，**未就绪则打印指引并以退出码 1 明确失败**，绝不伪造成功
   （与仓库既有原则一致，见跨平台方案 §7 的沙箱假阳性教训）
@@ -147,7 +147,7 @@ npm run ohos:sync
 
 | # | 集成点 | 文件 | 阻塞原因 |
 |---|--------|------|---------|
-| 1 | **启动 Electron 主进程的 runtime API** | `entry/src/main/ets/AppAbilityStage.ets` | 官方 runtime 初始化 API 未知。需完成：解出 app 资源 → 注入 `PIPICLAW_*` 环境变量 → 以 `dist-electron/main.js` 为入口启动 |
+| 1 | **启动 Electron 主进程的 runtime API** | `entry/src/main/ets/AppAbilityStage.ets` | 官方 runtime 初始化 API 未知。需完成：解出 app 资源 → 注入 `NW_*` 环境变量 → 以 `dist-electron/main.js` 为入口启动 |
 | 2 | **WindowStage 移交给 Electron** | `entry/src/main/ets/entryability/EntryAbility.ets` | runtime 如何接管窗口（ArkWeb 承载 BrowserWindow）未知；接管后需跳过 `loadContent('pages/Index')`，否则占位页遮挡 |
 | 3 | **Electron runtime 依赖坐标** | `ohos/oh-package.json5`、`entry/oh-package.json5` | v34.6.3-20260105.1 的包名/来源（ohpm 公共仓 / 华为私有仓 / 本地 `.har`）未验证，故写为注释占位，避免 `ohpm install` 失败 |
 | 4 | **app 资源注入 HAP 的方式** | `entry/hvigorfile.ts`、`scripts/sync-assets.mjs`、`entry/src/main/resources/rawfile/.gitkeep` | 三选一未定：rawfile 解压 / 官方 hvigor 插件声明 / runtime 直读文件路径。当前默认暂存到 `entry/assets/app` |

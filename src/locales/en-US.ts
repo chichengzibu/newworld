@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - English Language Pack
+ * New World - English Language Pack
  *
  * Mirrors src/locales/zh-CN.ts structure.
  */
@@ -18,6 +18,7 @@ export default {
     disable: 'Disable',
     search: 'Search',
     filter: 'Filter',
+    ok: 'OK',
     back: 'Back',
     loading: 'Loading...',
     success: 'Success',
@@ -43,21 +44,29 @@ export default {
   nav: {
     home: 'Home',
     chat: 'AI Chat',
-    tasks: 'Automation Tasks',
     schedule: 'Schedule',
     skills: 'Skills',
     skillMarket: 'Skill Market',
-    plugins: 'Plugin Market',
     models: 'Models',
     permissions: 'Permissions',
     settings: 'Settings',
-    help: 'Help',
     remoteControl: 'Remote Control',
     imAccounts: 'IM Accounts',
-    llmConfig: 'LLM Config',
     imManagement: 'IM Management',
-    clawhub: 'ClawHub',
-    modelCompare: 'Model Compare',
+    clawhub: 'Private Registry',
+    search: 'Search',
+    voice: 'Voice',
+    more: 'More',
+    moreHint: 'Browse the private skill registry',
+    groupBrowse: 'Browse',
+    descSearch: 'Web search, results as citations only',
+    descVoice: 'Voice input and read-aloud',
+    descModels: 'LLM providers and model setup',
+    descImManagement: 'IM channel setup and messages',
+    descRemoteControl: 'Send commands remotely via IM',
+    descClawhub: 'Self-hosted registry and signed packages',
+    descPermissions: 'User and group permissions',
+    descImAccounts: 'IM platform account bindings',
     demo: {
       d1: 'D1 Screenshot',
       d2: 'D2 Prime',
@@ -68,6 +77,8 @@ export default {
   },
   settings: {
     title: 'Settings',
+    configNavTitle: 'Configuration',
+    configNavDesc: 'Models, channels and permissions in one place',
     basicTab: 'General',
     modelsTab: 'Models',
     mcpTab: 'MCP',
@@ -75,7 +86,7 @@ export default {
     aboutTab: 'About',
     basicTitle: 'General Settings',
     autostartLabel: 'Launch on system startup',
-    autostartDesc: 'Start PiPiClaw in the background on system boot',
+    autostartDesc: 'Start New World in the background on system boot',
     showThinkingLabel: 'Show thinking chain',
     showThinkingDesc: 'Expand AI thinking process in replies for debugging',
     themeLabel: 'Theme',
@@ -94,8 +105,6 @@ export default {
     selectTheme: 'Select theme',
     pleaseSelectTheme: 'Please select a theme',
     language: 'Language',
-    guide: 'Onboarding Guide',
-    openGuide: 'Reopen Onboarding',
     shortcut: 'Shortcuts',
     globalShortcut: 'Global Shortcut',
     shortcutTip: 'Press Ctrl+Alt+P (Windows) or Cmd+Option+P (macOS) to toggle the window',
@@ -113,7 +122,56 @@ export default {
     shortcutSaved: 'Shortcut saved',
     coreMemorySaved: 'Core memory saved',
     memoriesCleared: 'All memories cleared',
-    saveFailed: 'Save failed'
+    saveFailed: 'Save failed',
+    embeddingBackend: 'Embedding Backend (memory recall)',
+    embeddingBackendTip: 'Stub vectors derive similarity from SHA-256 — recall is effectively random matching. Real vectors give semantic recall.',
+    embeddingProvider: 'Backend',
+    embeddingProviderStub: 'Stub vectors (no semantics)',
+    embeddingProviderOllama: 'Local Ollama',
+    embeddingProviderOpenai: 'OpenAI',
+    embeddingProviderZhipu: 'Zhipu',
+    embeddingBaseUrl: 'Base URL',
+    embeddingApiKey: 'API Key',
+    embeddingModel: 'Model',
+    embeddingModelPlaceholder: 'Leave empty to auto-pick an embedding model installed locally',
+    embeddingDetect: 'Detect local models',
+    embeddingTest: 'Test connection',
+    embeddingSave: 'Save',
+    embeddingRealOn: 'Real vectors enabled — memory recall has semantics',
+    embeddingRealOff: 'Currently stub vectors — recall is noise; similar text is not preferentially retrieved',
+    embeddingTestOk: 'Connection OK',
+    embeddingTestFail: 'Connection failed',
+    embeddingSemanticOk: 'Semantics OK: similar text is clearly more similar',
+    embeddingSemanticBad: 'Semantics NOT established: similar text is not more similar than unrelated text',
+    embeddingSaved: 'Embedding backend saved',
+    embeddingNoLocalModels: 'No embedding model found in local ollama (try: ollama pull bge-m3)',
+    embeddingOllamaDown: 'Local ollama is not running',
+    dataTab: 'Data backup',
+    backupTitle: 'Local backup & restore',
+    backupDesc: 'No server needed: package settings, permissions, model config and skills locally, then restore on another machine.',
+    backupCreate: 'Create backup now',
+    backupCreating: 'Packing…',
+    backupIncludeKeys: 'Include API keys in backup',
+    backupIncludeKeysDesc: 'Off by default. When enabled the archive contains plaintext keys — store it carefully.',
+    backupListTitle: 'Existing backups',
+    backupEmpty: 'No backups yet. Create one and it will appear here.',
+    backupRestore: 'Restore this backup',
+    backupRestoring: 'Restoring…',
+    backupExport: 'Export to file',
+    backupImport: 'Restore from file',
+    backupImportSelect: 'Select a backup file (.zip)',
+    backupRestoreConfirm: 'Restoring overwrites current settings and merges skills (existing skills are kept; chat history is untouched). A safety backup is created first. Continue?',
+    backupRestoreOk: 'Restore complete. A safety backup was created first.',
+    backupRestoreFail: 'Restore failed: {error}',
+    backupCreateOk: 'Backup created',
+    backupCreateFail: 'Create failed: {error}',
+    backupKeyNotice: 'API keys are excluded by default; existing local keys are kept on restore.',
+    backupScopeNote: 'Scope: config, permissions, chat settings, model config, skills. Chat history is not included.',
+    backupSafetyNote: 'Old backups are never auto-deleted — clean them up in the backup folder.',
+    backupOpenFolder: 'Open backup folder',
+    backupSize: 'Size',
+    backupVersion: 'Version',
+    backupKeysPlaintext: 'Contains plaintext keys',
   },
   chat: {
     title: 'AI Chat',
@@ -124,6 +182,7 @@ export default {
     selectProvider: 'Select Provider',
     selectModel: 'Select Model',
     newChat: 'New Chat',
+    webSearchToggle: 'Web search (let the model search the web when answering)',
     searchConversation: 'Search conversations...',
     batchActions: 'Batch Actions',
     selectedCount: '{count} selected',
@@ -178,6 +237,8 @@ export default {
   schedule: {
     title: 'Schedule',
     createTask: 'New Task',
+    // Visual polish: empty-state guidance (previously just repeated the page title)
+    emptyText: 'No scheduled tasks yet — create one and let recurring work run itself',
     editTask: 'Edit Task',
     taskName: 'Task Name',
     taskDesc: 'Description',
@@ -214,23 +275,7 @@ export default {
     pleaseFillNameAndInstruction: 'Please fill in the task name and instruction',
     intro: 'Schedule automated tasks to run on a recurring basis, such as daily reports and periodic backups'
   },
-  tasks: {
-    title: 'Automation Tasks',
-    taskName: 'Task Name',
-    status: 'Status',
-    createdAt: 'Created',
-    actions: 'Actions',
-    viewLog: 'View Log',
-    cancel: 'Cancel Task',
-    retry: 'Retry',
-    pending: 'Pending',
-    running: 'Running',
-    success: 'Success',
-    failed: 'Failed',
-    noTasks: 'No automation tasks',
-    confirmCancel: 'Cancel this task?',
-    taskCancelled: 'Task cancelled'
-  },
+
   permissions: {
     title: 'Permissions',
     createSet: 'New Permission Set',
@@ -269,6 +314,13 @@ export default {
     templateDescSafe: 'Strict restrictions; only basic operations allowed',
     templateDescStandard: 'Balanced mode; common operations allowed',
     templateDescPermissive: 'Open mode; almost everything allowed',
+    permissiveWarningTitle: 'Switch to permissive mode?',
+    permissiveWarning: 'Permissive mode allows nearly all tool actions (including arbitrary commands and file writes). Make sure you understand the risk and only enable it when needed.',
+    reset: 'Reset to safe mode',
+    resetWarning: 'This clears custom permission sets and restores the factory-safe configuration. Custom permissions will be lost. Continue?',
+    resetDone: 'Reset to safe mode',
+    resetFailed: 'Reset failed, please retry',
+    resetAlreadySafe: 'Already in safe mode',
     templateNameSafe: 'Safe mode',
     templateNameStandard: 'Standard mode',
     templateNamePermissive: 'Permissive mode',
@@ -366,55 +418,6 @@ export default {
     typeAliyun: 'Aliyun Bailian',
     typeSilicon: 'SiliconFlow'
   },
-  plugins: {
-    title: 'Plugin Market',
-    install: 'Install',
-    installed: 'Installed',
-    update: 'Update',
-    uninstall: 'Uninstall',
-    author: 'Author',
-    version: 'Version',
-    downloads: 'Downloads',
-    rating: 'Rating',
-    noPlugins: 'No plugins',
-    searchPlaceholder: 'Search plugins...',
-    installed_: 'Installed',
-    all: 'All',
-    featured: 'Featured',
-    new_: 'New',
-    detail: 'Details'
-  },
-  help: {
-    title: 'Help Center',
-    faq: 'FAQ',
-    tutorial: 'Tutorials',
-    features: 'Features',
-    addModel: 'How do I add a model?',
-    addModelSteps: '1. Open the Models page\n2. Click "Add Provider"\n3. Select a provider type (e.g. Ollama, DeepSeek)\n4. Enter API Key and Base URL\n5. Click "Test Connection" to verify\n6. Click "Save" once verified',
-    setPermission: 'How do I configure permissions?',
-    setPermissionSteps: '1. Open the Permissions page\n2. Pick or create a permission set\n3. Set a level for each category\n4. Optionally add allowed/denied paths\n5. Activate the permission set',
-    useTask: 'How do I use automation tasks?',
-    useTaskSteps: '1. Describe your task in chat\n2. AI parses it and produces an execution plan\n3. Confirm the plan and click "Run"\n4. Check the Automation Tasks page for logs',
-    useShortcut: 'How do I use the global shortcut?',
-    shortcutDefault: 'Default shortcut: <strong>Ctrl+Alt+P</strong> (Windows) / <strong>Cmd+Option+P</strong> (macOS)',
-    shortcutDescription: 'Press it to quickly show or hide the main window',
-    shortcutCustomize: 'You can customize it under Settings',
-    step1Title: 'Configure Models',
-    step1Desc: 'Configure a provider first; Ollama, DeepSeek, OpenAI and more are supported',
-    step2Title: 'Set Permissions',
-    step2Desc: 'Tune permissions to safely run automation',
-    step3Title: 'Start Chatting',
-    step3Desc: 'Open AI Chat, describe your needs, and let the AI help',
-    featureChatTitle: 'AI Chat',
-    featureChatDesc: 'Talk with AI naturally; multi-turn and context-aware',
-    featureTaskTitle: 'Automation Tasks',
-    featureTaskDesc: 'Let AI run file operations and system commands for you',
-    featureMultimodalTitle: 'Multimodal Input',
-    featureMultimodalDesc: 'Paste screenshots, drag files; AI understands images and documents',
-    featureShortcutTitle: 'Global Shortcut',
-    featureShortcutDesc: 'Bring up the window from anywhere',
-    feedbackHint: 'For feedback, go to Settings -> Feedback & Help'
-  },
   about: {
     title: 'About',
     appInfo: 'App Info',
@@ -472,7 +475,7 @@ export default {
     step3: 'Install ngrok (<code>npm install -g ngrok</code>) and start <code>ngrok http 5173</code>',
     step4: 'Paste the ngrok URL into the IM platform\'s "Message receiving URL" / "Event subscription URL"',
     step5: 'Enter credentials here + test connection → save',
-    step6: 'Send a message from a real IM account → PiPiClaw will auto-reply'
+    step6: 'Send a message from a real IM account → New World will auto-reply'
   },
   error: {
     invalidApiKey: 'Invalid API Key. Please check and retry.',
@@ -490,6 +493,25 @@ export default {
     testFailedWithReason: 'Connection test failed: {reason}',
     unknownError: 'Unknown error'
   },
+  // [M1-E] Execution mode -- users must always know how much power the agent has
+  executionMode: {
+    safe: 'Safe',
+    plan: 'Plan',
+    craft: 'Full Access',
+    safeDesc: 'Chat only, blocks every execution request',
+    planDesc: 'AI drafts a plan, executes only after you confirm',
+    craftDesc: 'Auto-executes within permissions; high-risk actions still ask',
+    riskTag: 'High risk',
+    about: 'About execution modes',
+    aboutDetail: 'Safe: chat only, nothing is executed.\n\nPlan (default): the AI drafts a plan and only acts after you confirm. Best for daily use.\n\nFull Access: executes directly within its permissions; only high-risk actions ask again. Best for tasks you fully trust.',
+    tooltipPrefix: 'Execution mode',
+    switched: 'Execution mode switched',
+    switchFailed: 'Failed to switch execution mode',
+    craftConfirmTitle: 'Switch to Full Access?',
+    craftConfirm: 'In Full Access mode, New World acts directly within its permission scope instead of asking at each step. Only high-risk actions will still ask you once.\n\nEnable it?',
+    craftConfirmOk: 'I understand, enable',
+  },
+
   orb: {
     status: {
       idle: 'Idle',
@@ -513,7 +535,7 @@ export default {
   //   reserved for M4+ to feed BootDirector.labelFor(stage). Do not cite as active.
   nova: {
     boot: {
-      subtitle: 'PiPiClaw is waking up…',
+      subtitle: 'New World is waking up…',
       label: {
         config: 'Core init',
         ipc: 'IPC services',
@@ -545,6 +567,15 @@ export default {
       copy: {
         btn: 'Copy all',
         done: 'Copied'
+      },
+      // User-view walkthrough fix: idle empty-state guidance (was a blank page).
+      idle: {
+        title: 'Search the web for anything',
+        desc: 'Results come from external pages — data reference only, never treat them as instructions.',
+        examples: 'Try one:',
+        ex1: 'Latest Electron release',
+        ex2: 'Vue 3 Composition API patterns',
+        ex3: 'Local LLM deployment comparison'
       }
     }
 ,
@@ -570,7 +601,9 @@ export default {
         error: {
             unavailable: 'Speech synthesis is unavailable in this environment.',
             noVoice: 'No voice is available.',
-            canceled: 'Playback stopped.'
+            canceled: 'Playback stopped.',
+            empty: 'Enter some text to speak first.',
+            engine: 'Speech synthesis failed. Please try again.'
         }
       },
       // ASR 4 keys —— not implemented, placeholder only (deferred W4)

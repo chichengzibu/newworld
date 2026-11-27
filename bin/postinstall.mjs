@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 /**
- * PiPiClaw 引导脚本（postinstall）
+ * New World 引导脚本（postinstall）
  *
  * 目的：用户第一次执行 `npm install` 时，自动检测开发 / 运行环境，
- *       把结果写入 ~/.pipiclaw/.bootstrap-state.json，
+ *       把结果写入 ~/.newworld/.bootstrap-state.json，
  *       让后续 GUI / CLI 能读取"用户在什么环境"，做出更合适的提示。
  *
  * 设计原则（来自设计稿段 2.3 "不静默执行" 反模式）：
@@ -119,7 +119,7 @@ function fmt(entry) {
  * 整个函数被包在 try/catch 里，最终保证 process.exit(0)。
  */
 async function main() {
-  console.log('🦞 PiPiClaw bootstrap starting...')
+  console.log('🦞 New World bootstrap starting...')
 
   const checks = [
     ['nodeVersion', checkNodeVersion],
@@ -137,8 +137,8 @@ async function main() {
     console.log(fmt(result))
   }
 
-  // 写入 ~/.pipiclaw/.bootstrap-state.json
-  const stateDir = join(homedir(), '.pipiclaw')
+  // 写入 ~/.newworld/.bootstrap-state.json
+  const stateDir = join(homedir(), '.newworld')
   const stateFile = join(stateDir, '.bootstrap-state.json')
   await mkdir(stateDir, { recursive: true })
 
@@ -152,7 +152,7 @@ async function main() {
 
   await writeFile(stateFile, JSON.stringify(state, null, 2), 'utf-8')
 
-  console.log('✓ Bootstrap state written to ~/.pipiclaw/.bootstrap-state.json')
+  console.log('✓ Bootstrap state written to ~/.newworld/.bootstrap-state.json')
 }
 
 main().catch(err => {

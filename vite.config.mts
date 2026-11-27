@@ -4,6 +4,7 @@ import electron from 'vite-plugin-electron';
 import renderer from 'vite-plugin-electron-renderer';
 import Components from 'unplugin-vue-components/vite';
 import { ElementPlusResolver } from 'unplugin-vue-components/resolvers';
+import { precompileI18nPlugin, vueI18nRuntimeAlias } from './build/precompile-i18n';
 import { resolve } from 'path';
 import { copyFileSync, mkdirSync, existsSync, readdirSync, statSync } from 'node:fs';
 
@@ -15,7 +16,7 @@ import { copyFileSync, mkdirSync, existsSync, readdirSync, statSync } from 'node
  */
 function copyMcpBinPlugin() {
   return {
-    name: 'pipiclaw-copy-mcp-bin',
+    name: 'newworld-copy-mcp-bin',
     apply: 'build' as const,
     closeBundle() {
       const srcDir = resolve(__dirname, 'electron/mcp/bin');
@@ -34,10 +35,10 @@ function copyMcpBinPlugin() {
         const dst = resolve(outDir, f);
         try {
           copyFileSync(src, dst);
-          // eslint-disable-next-line no-console
+           
           console.log(`[copyMcpBin] ${src} → ${dst}`);
         } catch (e) {
-          // eslint-disable-next-line no-console
+           
           console.warn(`[copyMcpBin] failed: ${(e as Error).message}`);
         }
       }
@@ -53,6 +54,10 @@ export default defineConfig({
   define: {
     __APP_VERSION__: JSON.stringify((process.env as Record<string, string>).npm_package_version || 'dev'),
     __BUILD_TIME__: JSON.stringify(new Date().toLocaleString('zh-CN')),
+    // 【CSP 加固】vue-i18n JIT 特性标志: runtime bundle 由此门控
+    // registerMessageCompiler(compile) —— 不注入则 messageCompiler 为 null,
+    // AST 消息不被解释, t() 返回原始 AST 对象 → UNEXPECTED_RETURN_TYPE
+    __INTLIFY_JIT_COMPILATION__: JSON.stringify(true),
   },
   // E2E-Bugfix: 让浏览器 fetch /ollama/* 代理到 localhost:11434, 绕过 CORS
   server: {
@@ -66,6 +71,7 @@ export default defineConfig({
   },
   plugins: [
     vue(),
+    precompileI18nPlugin(),
     copyMcpBinPlugin(),
     // P1-6: Element Plus 组件按需自动导入 — 替代全量 app.use(ElementPlus)
     // 期望效果: vendor-element-plus chunk 915KB → < 300KB
@@ -135,7 +141,11 @@ export default defineConfig({
   ],
   resolve: {
     alias: {
-      '@': resolve(__dirname, 'src')
+      '@': resolve(__dirname, 'src'),
+      // 【CSP 加固】runtime-only bundle: 不注册 compileToFunction(new Function),
+      // 配合预编译 AST 消息走 JIT 解释路径 —— full bundle 对 AST 消息会抛
+      // NOT_SUPPORT_NON_STRING_MESSAGE 且被 onError 吞掉, 界面文案全坏
+      ...vueI18nRuntimeAlias,
     }
   },
   optimizeDeps: {

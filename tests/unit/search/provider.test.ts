@@ -4,7 +4,7 @@
  * 设计稿 F7 口径:
  *   — parseLiteHtml 纯函数直测(fixture HTML → 断言解析结果)
  *   — search(q, fetchImpl?) DI 注入 mock fetch(零 vi.stubGlobal)
- *   — 429 熔断 / 单飞行 / 两端点降级 / PIPICLAW_E2E stub 零网络
+ *   — 429 熔断 / 单飞行 / 两端点降级 / NW_E2E stub 零网络
  */
 import { describe, it, expect, afterEach, vi } from 'vitest'
 import {
@@ -212,8 +212,8 @@ describe('search(DI fetchImpl + 失败/频控行为)', () => {
     expect(a).toHaveLength(2)
   })
 
-  it('PIPICLAW_E2E=1 → 固定 stub 2 条, 零网络', async () => {
-    vi.stubEnv('PIPICLAW_E2E', '1')
+  it('NW_E2E=1 → 固定 stub 2 条, 零网络', async () => {
+    vi.stubEnv('NW_E2E', '1')
     try {
       const provider = new DuckDuckGoHtmlProvider()
       const spy = vi.fn(mockFetch([{ status: 200, body: LITE_FIXTURE }]))

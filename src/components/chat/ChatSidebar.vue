@@ -131,7 +131,8 @@
           </el-dropdown>
         </div>
         <div v-if="displayedConversations.length === 0" class="empty-hint">
-          暂无会话
+          <span class="empty-hint-title">暂无会话</span>
+          <span class="empty-hint-guide">发送第一条消息,会话会出现在这里</span>
         </div>
       </div>
 
@@ -325,11 +326,30 @@ const displayedConversations = computed(() => {
   &:hover .more-icon { opacity: 1; }
 }
 
+/* 【P0 迭代】空态也是设计: 收紧留白 + 主标题/引导文案两级层次 */
 .empty-hint {
-  padding: var(--space-4);
+  padding: var(--space-3) var(--space-4);
   text-align: center;
   color: var(--fg-tertiary);
   font-size: var(--font-size-caption-1);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+
+  .empty-hint-title {
+    color: var(--fg-secondary);
+  }
+  .empty-hint-guide {
+    font-size: 11px;
+    color: var(--fg-quaternary, var(--fg-tertiary));
+    line-height: 1.5;
+  }
+}
+
+/* 用户视角走查修复: 浅色主题下 --fg-quaternary 过淡,
+   空态引导文案「发送第一条消息…」几乎看不见 → 提一级到 tertiary */
+:root[data-theme='light'] .empty-hint .empty-hint-guide {
+  color: var(--fg-tertiary);
 }
 
 .chat-sidebar-resize-handle {

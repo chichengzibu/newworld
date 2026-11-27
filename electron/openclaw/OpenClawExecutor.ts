@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - OpenClaw 执行器
+ * New World - OpenClaw 执行器
  * 
  * 职责：
  * 1. 接收执行计划，拆解为单步操作

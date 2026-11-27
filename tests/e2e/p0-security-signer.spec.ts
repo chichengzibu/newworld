@@ -3,7 +3,7 @@
  *
  * 漏洞背景 (后端审计 C4):
  *   electron/skill/SkillSigner.ts
- *     改前: private readonly LOCAL_KEY = 'pipiclaw-local-stub-key-W6-do-not-use-in-prod'
+ *     改前: private readonly LOCAL_KEY = 'newworld-local-stub-key-W6-do-not-use-in-prod'
  *     含义: 任何拿到源码/包的人都能伪造任意 skill 签名
  *   改后: HMAC key 从 userData/skill-signer-key.json 加载,
  *         safeStorage 加密 (Win Credential Manager / macOS Keychain / Linux libsecret)

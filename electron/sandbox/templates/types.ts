@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - 模板配置类型(W10.1)
+ * New World - 模板配置类型(W10.1)
  *
  * 4 个内置模板(vite-react-ts / nextjs-app / fastapi / go-http)共用此类型
  */

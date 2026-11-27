@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - PortForwarder (W11.2)
+ * New World - PortForwarder (W11.2)
  *
  * 把容器内端口映射到 host 端口 + URL,
  * 供 renderer iframe 预览。

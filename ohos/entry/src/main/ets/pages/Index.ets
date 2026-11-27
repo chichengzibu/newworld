@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - 启动占位页
+ * New World - 启动占位页
  *
  * 仅在官方 OHOS Electron runtime 接管窗口之前短暂显示。
  * 真正的 UI 是 dist/index.html(Vue3 渲染进程,由 ArkWeb 承载)。
@@ -8,7 +8,7 @@
 @Entry
 @Component
 struct Index {
-  @State message: string = 'PiPiClaw';
+  @State message: string = 'New World';
   @State hint: string = '正在启动 Electron 运行时…';
 
   build() {

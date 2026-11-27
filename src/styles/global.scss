@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - 全局样式
+ * New World - 全局样式
  *
  * 设计原则:
  * 1. 所有颜色走 var(--xxx),不要在 .vue / .scss 写硬编码颜色
@@ -93,7 +93,7 @@ body {
   }
 
   &.is-loading {
-    animation: rotating 2s linear infinite;
+    animation: nw-spin 2s linear infinite;
   }
 }
 
@@ -102,14 +102,18 @@ body {
 // 渲染时 + 号巨大化。原因: el-button 默认内联图标需 ~16-18px,但 unplugin
 // 没按场景注入 .el-button .el-icon 规则,图标只继承到 `width:1em` 无 font-size
 // 兜底就撑爆。补这条等价 element-plus/theme-chalk/el-button.css 的规则。
+//
+// 【全局修复】icon 与文字的间距改为「兄弟 span 的 margin-left」而不是「icon 的 margin-right」:
+// 旧写法(icon margin-right:4px)会误伤 icon-only 圆钮 —— 无文字时 4px 把图标推离圆心
+// (附件+/发送键实测偏 4px)。兄弟选择器天然不命中 icon-only 按钮, 一次根治全站。
 .el-button .el-icon {
   font-size: 16px;
-  margin-right: 4px;
   vertical-align: middle;
 
   + span,
   ~ span {
     vertical-align: middle;
+    margin-left: 4px;
   }
 }
 
@@ -121,7 +125,8 @@ body {
   font-size: 14px;
 }
 
-@keyframes rotating {
+/* 全站唯一加载旋转动画 — 各组件统一引用, 不再各自定义 */
+@keyframes nw-spin {
   0% { transform: rotate(0); }
   100% { transform: rotate(360deg); }
 }
@@ -330,4 +335,67 @@ img {
     border-top: 1px solid var(--border-base);
     margin: var(--space-lg) 0;
   }
+}
+
+
+/* ==================== 空态插画品牌化 (视觉打磨) ====================
+   Element Plus 的 dark 主题把 --el-empty-fill-color-0..9 全设成近黑灰
+   (#4b4b52 → #18181a), 默认「开箱」插画在深底上几乎融进背景, 用户只看到
+   一片空白。这里统一重定义色阶为中性灰阶, 浅色主题同步给一层柔和青灰,
+   让 8 处 el-empty 空态在双主题下都有清晰轮廓且不刺眼。
+   变量定义在 .el-empty 自身 → 优先于从 :root.dark 继承来的同名变量。 */
+:root[data-theme='dark'] .el-empty {
+  --el-empty-fill-color-0: #1a1a1a;
+  --el-empty-fill-color-1: #212121;
+  --el-empty-fill-color-2: #2b2b2b;
+  --el-empty-fill-color-3: #363636;
+  --el-empty-fill-color-4: #424242;
+  --el-empty-fill-color-5: #4e4e4e;
+  --el-empty-fill-color-6: #5a5a5a;
+  --el-empty-fill-color-7: #676767;
+  --el-empty-fill-color-8: #747474;
+  --el-empty-fill-color-9: #828282;
+}
+:root[data-theme='dark'] .el-empty__description p {
+  color: rgba(255, 255, 255, 0.7);
+}
+:root[data-theme='light'] .el-empty {
+  --el-empty-fill-color-0: #ffffff;
+  --el-empty-fill-color-1: #f7f7f7;
+  --el-empty-fill-color-2: #ededed;
+  --el-empty-fill-color-3: #e0e0e0;
+  --el-empty-fill-color-4: #d2d2d2;
+  --el-empty-fill-color-5: #c4c4c4;
+  --el-empty-fill-color-6: #b4b4b4;
+  --el-empty-fill-color-7: #a3a3a3;
+  --el-empty-fill-color-8: #909090;
+  --el-empty-fill-color-9: #7c7c7c;
+}
+:root[data-theme='light'] .el-empty__description p {
+  color: #475569;
+}
+
+/* ==================== v4.9 主按钮中性化 ====================
+   大厂生产力工具（Linear / Cursor / WorkBuddy）的主操作按钮多为
+   中性高对比（浅底深字 / 白底黑字），而不是品牌彩色实心。
+   这里把深色主题下的 primary 按钮改为「浅灰底 + 深字」，去掉彩色面积；
+   浅色主题维持深色实心（黑白对比），保证两套主题都是中性克制风。 */
+:root[data-theme='dark'] .el-button--primary {
+  --el-button-bg-color: #e6e6e6;
+  --el-button-border-color: #e6e6e6;
+  --el-button-text-color: #171717;
+  --el-button-hover-bg-color: #f5f5f5;
+  --el-button-hover-border-color: #f5f5f5;
+  --el-button-hover-text-color: #171717;
+  --el-button-active-bg-color: #d4d4d4;
+  --el-button-active-border-color: #d4d4d4;
+}
+:root[data-theme='light'] .el-button--primary {
+  --el-button-bg-color: #1d1d1f;
+  --el-button-border-color: #1d1d1f;
+  --el-button-text-color: #ffffff;
+  --el-button-hover-bg-color: #333336;
+  --el-button-hover-border-color: #333336;
+  --el-button-active-bg-color: #000000;
+  --el-button-active-border-color: #000000;
 }

@@ -22,7 +22,7 @@ test.describe('Settings P7', () => {
   test.skip(!shouldRunElectronE2E, 'requires E2E_ELECTRON=1 to launch Electron renderer')
 
   test('settings page mounts with expected tabs', async ({ window }) => {
-    await window.click('a.nav-item[href$="#/settings"]')
+    await window.click('nav.sidenav a.nav-icon[href$="#/settings"]')
     await window.waitForURL(/#\/settings/)
 
     // 标题(中英文都覆盖)
@@ -39,7 +39,7 @@ test.describe('Settings P7', () => {
   })
 
   test('basic settings panel exposes theme selector and shortcut recorder', async ({ window }) => {
-    await window.click('a.nav-item[href$="#/settings"]')
+    await window.click('nav.sidenav a.nav-icon[href$="#/settings"]')
     await window.waitForURL(/#\/settings/)
 
     // 基础设置 / Basic tab 默认激活
@@ -61,7 +61,7 @@ test.describe('Settings P7', () => {
   })
 
   test('can switch to models tab and see provider count', async ({ window }) => {
-    await window.click('a.nav-item[href$="#/settings"]')
+    await window.click('nav.sidenav a.nav-icon[href$="#/settings"]')
     await window.waitForURL(/#\/settings/)
     const modelsTab = window.locator('.settings-nav__btn:has-text("模型管理"), .settings-nav__btn:has-text("Models")').first()
     await modelsTab.click()
@@ -81,7 +81,7 @@ test.describe('Settings P7', () => {
   })
 
   test('mcp tab is reachable even when empty', async ({ window }) => {
-    await window.click('a.nav-item[href$="#/settings"]')
+    await window.click('nav.sidenav a.nav-icon[href$="#/settings"]')
     await window.waitForURL(/#\/settings/)
     const mcpTab = window.locator('.settings-nav__btn:has-text("MCP")').first()
     await mcpTab.click()

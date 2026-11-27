@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - Channel / QQChannel (W8)
+ * New World - Channel / QQChannel (W8)
  *
  * QQ 机器人开放平台 API(真实 fetch 实现)。
  * 取 token: https://bots.qq.com/app/getAppAccessToken (appId + appSecret)

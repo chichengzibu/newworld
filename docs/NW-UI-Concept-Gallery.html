@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>New World · UI Concept Gallery</title>
+<style>
+/* ============================================================
+   New World (NW) — UI Concept Gallery
+   4 个设计方向,全部为真实可动画的 CSS mockup。
+   ============================================================ */
+:root{
+  --gal-bg:#07080d;
+  --gal-panel:#0e1018;
+  --gal-line:rgba(255,255,255,.08);
+  --gal-txt:#e8ecf5;
+  --gal-dim:#8b93a7;
+  --cyan:#3ee6ff;
+  --violet:#9a7bff;
+  --breath:4.2s;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{background:var(--gal-bg);color:var(--gal-txt);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+  -webkit-font-smoothing:antialiased;line-height:1.5}
+body{
+  background:
+    radial-gradient(1200px 600px at 15% -10%,rgba(62,230,255,.07),transparent 60%),
+    radial-gradient(1000px 600px at 90% 0%,rgba(154,123,255,.08),transparent 55%),
+    var(--gal-bg);
+  min-height:100vh;padding:56px 40px 100px;
+}
+
+/* ---------- Gallery header ---------- */
+.gal-head{max-width:1180px;margin:0 auto 54px;position:relative}
+.nw-mark{display:flex;align-items:center;gap:16px;margin-bottom:22px}
+.nw-logo{width:52px;height:52px;filter:drop-shadow(0 0 14px rgba(62,230,255,.45));animation:floatLogo 6s ease-in-out infinite}
+@keyframes floatLogo{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
+.nw-word{font-size:15px;letter-spacing:.42em;font-weight:600;color:var(--gal-dim);text-transform:uppercase}
+.nw-word b{color:var(--gal-txt)}
+.gal-title{font-size:44px;font-weight:700;letter-spacing:-.02em;line-height:1.15;margin-bottom:14px}
+.gal-title span{background:linear-gradient(100deg,var(--cyan),var(--violet));
+  -webkit-background-clip:text;background-clip:text;color:transparent}
+.gal-sub{max-width:660px;color:var(--gal-dim);font-size:15px;line-height:1.8}
+.gal-sub em{color:var(--cyan);font-style:normal}
+.gal-meta{display:flex;gap:10px;margin-top:22px;flex-wrap:wrap}
+.chip{font-size:12px;color:var(--gal-dim);border:1px solid var(--gal-line);
+  padding:6px 13px;border-radius:99px;background:rgba(255,255,255,.02)}
+.chip i{display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--cyan);
+  margin-right:7px;box-shadow:0 0 8px var(--cyan);animation:blink 2.4s infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.3}}
+
+/* ---------- Concept cards ---------- */
+.grid{max-width:1180px;margin:0 auto;display:grid;grid-template-columns:repeat(2,1fr);gap:34px}
+.concept{position:relative}
+.concept-head{display:flex;align-items:flex-end;justify-content:space-between;margin-bottom:15px;padding:0 2px}
+.c-num{font-family:"SF Mono",Consolas,monospace;font-size:12px;color:var(--cyan);letter-spacing:.2em;opacity:.8}
+.c-name{font-size:21px;font-weight:650;margin-top:3px;letter-spacing:-.01em}
+.c-name small{font-size:12px;font-weight:500;color:var(--gal-dim);margin-left:9px;letter-spacing:.02em}
+.c-tag{font-size:11px;color:var(--gal-dim);border:1px solid var(--gal-line);border-radius:6px;
+  padding:5px 9px;white-space:nowrap}
+.c-desc{font-size:13px;color:var(--gal-dim);margin-top:10px;line-height:1.7;max-width:540px;padding:0 2px}
+.c-desc b{color:#cdd5e6;font-weight:600}
+
+/* mockup frame */
+.frame{position:relative;border-radius:14px;overflow:hidden;aspect-ratio:16/10;
+  border:1px solid rgba(255,255,255,.1);
+  box-shadow:0 30px 70px rgba(0,0,0,.55),0 0 0 1px rgba(0,0,0,.4) inset;
+  transition:transform .5s cubic-bezier(.2,.8,.2,1),box-shadow .5s}
+.concept:hover .frame{transform:translateY(-5px);box-shadow:0 40px 90px rgba(0,0,0,.65),0 0 40px rgba(62,230,255,.08)}
+.frame-label{position:absolute;bottom:10px;right:12px;z-index:20;font-size:10px;letter-spacing:.15em;
+  color:rgba(255,255,255,.35);font-family:monospace}
+
+/* ======================================================================
+   SHARED APP CHROME (复刻真实项目结构)
+   ====================================================================== */
+.app{position:absolute;inset:0;display:flex;flex-direction:column;font-size:11px;overflow:hidden}
+.titlebar{height:34px;flex:0 0 34px;display:flex;align-items:center;padding:0 12px;gap:10px;
+  border-bottom:1px solid rgba(255,255,255,.07);position:relative;z-index:5}
+.tb-brand{display:flex;align-items:center;gap:8px;font-weight:600;letter-spacing:.16em;font-size:11px}
+.tb-brand svg{width:17px;height:17px}
+.tb-center{position:absolute;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:7px;
+  font-size:10px;color:var(--dim);letter-spacing:.05em}
+.stat-dot{width:6px;height:6px;border-radius:50%;background:#3ddc97;box-shadow:0 0 8px #3ddc97;animation:blink 2.8s infinite}
+.win-btns{margin-left:auto;display:flex;gap:14px;color:var(--dim)}
+.win-btns span{width:9px;height:9px;border-radius:50%;border:1px solid currentColor;opacity:.55}
+
+.bodyrow{flex:1;display:flex;min-height:0}
+.rail{width:46px;flex:0 0 46px;display:flex;flex-direction:column;align-items:center;gap:5px;
+  padding:11px 0;border-right:1px solid rgba(255,255,255,.06)}
+.rail-i{width:29px;height:29px;border-radius:8px;display:flex;align-items:center;justify-content:center;
+  color:var(--dim);position:relative;transition:.3s}
+.rail-i svg{width:15px;height:15px}
+.rail-i.on{color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent)}
+.rail-i.on::before{content:"";position:absolute;left:-9px;width:3px;height:16px;border-radius:0 3px 3px 0;
+  background:var(--accent);box-shadow:0 0 10px var(--accent)}
+.rail-sp{flex:1}
+
+.convlist{width:132px;flex:0 0 132px;border-right:1px solid rgba(255,255,255,.06);padding:11px 8px;overflow:hidden}
+.conv-h{font-size:9px;letter-spacing:.18em;color:var(--dim);opacity:.6;margin:2px 4px 10px;text-transform:uppercase}
+.conv{display:flex;gap:7px;align-items:flex-start;padding:8px 7px;border-radius:8px;margin-bottom:3px}
+.conv.on{background:rgba(255,255,255,.06)}
+.conv-av{width:20px;height:20px;border-radius:6px;flex:0 0 20px;background:linear-gradient(135deg,var(--accent),var(--accent2));
+  opacity:.8;position:relative}
+.conv.on .conv-av{box-shadow:0 0 10px color-mix(in srgb,var(--accent) 60%,transparent)}
+.conv-lines{flex:1;min-width:0}
+.conv-l1{height:5px;border-radius:3px;background:rgba(255,255,255,.28);margin-bottom:5px}
+.conv.on .conv-l1{background:color-mix(in srgb,var(--accent) 65%,#fff)}
+.conv-l2{height:4px;border-radius:3px;background:rgba(255,255,255,.1);width:70%}
+
+.chat{flex:1;min-width:0;display:flex;flex-direction:column;position:relative}
+.chat-top{height:40px;flex:0 0 40px;display:flex;align-items:center;padding:0 15px;gap:9px;
+  border-bottom:1px solid rgba(255,255,255,.05)}
+.chat-title{font-weight:600;font-size:11px}
+.model-tag{font-size:9px;color:var(--accent);border:1px solid color-mix(in srgb,var(--accent) 35%,transparent);
+  padding:2px 7px;border-radius:99px;background:color-mix(in srgb,var(--accent) 8%,transparent)}
+.orb-status{margin-left:auto;display:flex;align-items:center;gap:7px;font-size:9px;color:var(--dim)}
+.mini-orb{width:17px;height:17px;border-radius:50%;position:relative}
+.mini-orb::before,.mini-orb::after{content:"";position:absolute;inset:0;border-radius:50%;
+  background:radial-gradient(circle at 40% 38%,var(--accent),var(--accent2) 60%,transparent 72%)}
+.mini-orb::after{animation:breath 3s ease-in-out infinite}
+@keyframes breath{0%,100%{transform:scale(.85);opacity:.75}50%{transform:scale(1.12);opacity:1}}
+
+.messages{flex:1;padding:16px 18px;display:flex;flex-direction:column;gap:13px;overflow:hidden;position:relative}
+.msg{display:flex;gap:9px;max-width:88%;animation:msgIn .6s both}
+@keyframes msgIn{from{opacity:0;transform:translateY(7px)}to{opacity:1;transform:none}}
+.msg.user{align-self:flex-end;flex-direction:row-reverse}
+.msg-av{width:22px;height:22px;border-radius:7px;flex:0 0 22px;
+  background:linear-gradient(135deg,var(--accent),var(--accent2));opacity:.85}
+.msg.user .msg-av{background:rgba(255,255,255,.16)}
+.bubble{padding:9px 12px;border-radius:11px;font-size:10.5px;line-height:1.55;color:var(--txt)}
+.msg.ai .bubble{background:rgba(255,255,255,.05);border:1px solid rgba(255,255,255,.07);border-top-left-radius:3px}
+.msg.user .bubble{background:color-mix(in srgb,var(--accent) 16%,transparent);
+  border:1px solid color-mix(in srgb,var(--accent) 22%,transparent);border-top-right-radius:3px}
+.bubble b{color:var(--accent);font-weight:600}
+
+.composer{margin:0 15px 14px;height:42px;flex:0 0 42px;border-radius:11px;
+  display:flex;align-items:center;padding:0 6px 0 14px;gap:9px;font-size:10px;color:var(--dim)}
+.composer .ph{flex:1}
+.send{width:28px;height:28px;border-radius:8px;display:flex;align-items:center;justify-content:center;
+  background:linear-gradient(135deg,var(--accent),var(--accent2));color:#06121a;box-shadow:0 0 14px color-mix(in srgb,var(--accent) 45%,transparent)}
+.send svg{width:14px;height:14px}
+
+/* ======================================================================
+   DIRECTION 1 — NEURAL CORE (深色 · 青紫神经核心)
+   ====================================================================== */
+.d1{--accent:#3ee6ff;--accent2:#9a7bff;--dim:#7f8aa3;--txt:#e9f4ff;
+  background:radial-gradient(700px 400px at 70% 30%,rgba(62,230,255,.07),transparent 65%),#070a12}
+.d1 .titlebar,.d1 .rail,.d1 .convlist,.d1 .chat-top{background:rgba(10,14,24,.6)}
+.d1 .composer{background:rgba(255,255,255,.04);border:1px solid rgba(62,230,255,.16)}
+.d1 .grid-bg{position:absolute;inset:0;pointer-events:none;opacity:.5;
+  background-image:linear-gradient(rgba(62,230,255,.05) 1px,transparent 1px),linear-gradient(90deg,rgba(62,230,255,.05) 1px,transparent 1px);
+  background-size:30px 30px;mask-image:radial-gradient(circle at 62% 45%,#000,transparent 72%)}
+.d1 .scan{position:absolute;left:0;right:0;height:1px;top:0;pointer-events:none;z-index:4;
+  background:linear-gradient(90deg,transparent,rgba(62,230,255,.5),transparent);animation:scan 5.5s linear infinite}
+@keyframes scan{0%{top:0;opacity:0}10%{opacity:.7}90%{opacity:.7}100%{top:100%;opacity:0}}
+/* hero orb in chat */
+.core-hero{position:absolute;left:50%;top:47%;transform:translate(-50%,-50%);width:150px;height:150px;z-index:1;opacity:.95}
+.core-hero .ring{position:absolute;inset:0;border-radius:50%;border:1px solid rgba(62,230,255,.25)}
+.core-hero .ring.a{animation:spin 14s linear infinite;border-style:dashed}
+.core-hero .ring.b{inset:16px;border-color:rgba(154,123,255,.3);animation:spin 9s linear infinite reverse}
+.core-hero .ring.c{inset:34px;border-color:rgba(62,230,255,.45);box-shadow:0 0 22px rgba(62,230,255,.25) inset}
+@keyframes spin{to{transform:rotate(360deg)}}
+.core-hero .core{position:absolute;inset:52px;border-radius:50%;
+  background:radial-gradient(circle at 42% 38%,#bff6ff,var(--accent) 35%,var(--accent2) 70%,transparent 74%);
+  box-shadow:0 0 40px rgba(62,230,255,.55),0 0 80px rgba(154,123,255,.3);animation:coreBeat var(--breath) ease-in-out infinite}
+@keyframes coreBeat{0%,100%{transform:scale(.94);filter:brightness(.95)}50%{transform:scale(1.06);filter:brightness(1.15)}}
+.core-hero .node{position:absolute;width:6px;height:6px;border-radius:50%;background:var(--accent);box-shadow:0 0 10px var(--accent)}
+.core-hero .n1{top:4px;left:50%}.core-hero .n2{bottom:14px;left:20%}.core-hero .n3{bottom:18px;right:18%}
+.d1 .messages .msg{opacity:.35}
+
+/* ======================================================================
+   DIRECTION 2 — LIVING GLASS (深色 · 流动极光玻璃)
+   ====================================================================== */
+.d2{--accent:#5eead4;--accent2:#818cf8;--dim:#8a93ac;--txt:#eef3fb;
+  background:linear-gradient(140deg,#0b1020,#0a0b16 60%,#100a1a)}
+.d2 .aurora{position:absolute;inset:-30%;pointer-events:none;filter:blur(38px);opacity:.7;z-index:0}
+.d2 .aurora i{position:absolute;border-radius:50%;display:block;mix-blend-mode:screen}
+.d2 .aurora .a1{width:55%;height:70%;left:-5%;top:-15%;background:radial-gradient(circle,#1de9b6,transparent 68%);animation:drift1 13s ease-in-out infinite}
+.d2 .aurora .a2{width:60%;height:75%;right:-10%;top:5%;background:radial-gradient(circle,#7c6cff,transparent 68%);animation:drift2 16s ease-in-out infinite}
+.d2 .aurora .a3{width:50%;height:60%;left:30%;bottom:-20%;background:radial-gradient(circle,#22d3ee,transparent 68%);animation:drift3 18s ease-in-out infinite}
+@keyframes drift1{0%,100%{transform:translate(0,0)}50%{transform:translate(28%,16%)}}
+@keyframes drift2{0%,100%{transform:translate(0,0)}50%{transform:translate(-22%,20%)}}
+@keyframes drift3{0%,100%{transform:translate(0,0)}50%{transform:translate(14%,-22%)}}
+.d2 .glass{position:absolute;inset:0;z-index:2;pointer-events:none;
+  background:linear-gradient(160deg,rgba(255,255,255,.05),transparent 40%)}
+.d2 .titlebar{background:rgba(255,255,255,.04);backdrop-filter:blur(18px)}
+.d2 .convlist{background:rgba(255,255,255,.025);border-right:1px solid rgba(255,255,255,.08)}
+.d2 .rail{background:rgba(255,255,255,.03)}
+.d2 .chat-top{background:rgba(255,255,255,.02)}
+.d2 .conv.on{background:rgba(255,255,255,.09);border:1px solid rgba(255,255,255,.1)}
+.d2 .composer{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.16);backdrop-filter:blur(14px)}
+.d2 .bubble{backdrop-filter:blur(10px)}
+.d2 .breath-ring{position:absolute;left:50%;top:44%;transform:translate(-50%,-50%);width:120px;height:120px;z-index:1}
+.d2 .breath-ring i{position:absolute;inset:0;border-radius:50%;border:1px solid rgba(94,234,212,.4);
+  animation:ripple 4s ease-out infinite}
+.d2 .breath-ring i:nth-child(2){animation-delay:1.3s}
+.d2 .breath-ring i:nth-child(3){animation-delay:2.6s}
+@keyframes ripple{0%{transform:scale(.55);opacity:.85}100%{transform:scale(1.5);opacity:0}}
+.d2 .breath-ring .g{position:absolute;inset:44px;border-radius:50%;
+  background:radial-gradient(circle at 40% 40%,#d9fff6,var(--accent),var(--accent2));
+  box-shadow:0 0 36px rgba(94,234,212,.5);animation:coreBeat var(--breath) ease-in-out infinite}
+.d2 .messages .msg{opacity:.4}
+
+/* ======================================================================
+   DIRECTION 3 — AURORA DECK (深色 · HUD 驾驶舱仪表)
+   ====================================================================== */
+.d3{--accent:#4dd8ff;--accent2:#ffb454;--dim:#808b9f;--txt:#e8f6ff;
+  background:radial-gradient(600px 380px at 50% 115%,rgba(77,216,255,.1),transparent 60%),#05080e}
+.d3 .titlebar{background:rgba(8,14,22,.85);border-bottom:1px solid rgba(77,216,255,.18)}
+.d3 .rail{background:rgba(8,14,22,.7);border-right:1px solid rgba(77,216,255,.14)}
+.d3 .convlist{background:rgba(8,14,22,.55);border-right:1px solid rgba(77,216,255,.12)}
+.d3 .chat-top{background:rgba(8,14,22,.4);border-bottom:1px solid rgba(77,216,255,.12)}
+.d3 .hud-grid{position:absolute;inset:0;z-index:0;pointer-events:none;opacity:.45;
+  background-image:linear-gradient(rgba(77,216,255,.08) 1px,transparent 1px),linear-gradient(90deg,rgba(77,216,255,.08) 1px,transparent 1px);
+  background-size:22px 22px;transform:perspective(400px) rotateX(55deg) scale(1.6);transform-origin:bottom;top:40%}
+.d3 .corner{position:absolute;width:16px;height:16px;border-color:var(--accent);opacity:.6;z-index:6}
+.d3 .c-tl{top:40px;left:48px;border-top:1px solid;border-left:1px solid}
+.d3 .c-tr{top:40px;right:8px;border-top:1px solid;border-right:1px solid}
+.d3 .c-bl{bottom:8px;left:48px;border-bottom:1px solid;border-left:1px solid}
+.d3 .c-br{bottom:8px;right:8px;border-bottom:1px solid;border-right:1px solid}
+.d3 .dashboard{position:absolute;left:50%;top:46%;transform:translate(-50%,-50%);width:200px;height:120px;z-index:1}
+.d3 .radar{position:absolute;left:0;top:0;width:112px;height:112px;border-radius:50%;
+  border:1px solid rgba(77,216,255,.35);background:repeating-radial-gradient(circle,transparent 0 17px,rgba(77,216,255,.12) 17px 18px)}
+.d3 .radar::after{content:"";position:absolute;inset:0;border-radius:50%;
+  background:conic-gradient(from 0deg,rgba(77,216,255,.35),transparent 25%);animation:spin 3.2s linear infinite}
+.d3 .radar .dot{position:absolute;width:5px;height:5px;border-radius:50%;background:#ffb454;box-shadow:0 0 8px #ffb454;left:70%;top:34%;animation:blink 2s infinite}
+.d3 .bars{position:absolute;right:0;top:8px;width:74px;display:flex;flex-direction:column;gap:6px}
+.d3 .bar{height:5px;border-radius:2px;background:rgba(255,255,255,.08);position:relative;overflow:hidden}
+.d3 .bar i{position:absolute;left:0;top:0;bottom:0;background:linear-gradient(90deg,var(--accent),var(--accent2));border-radius:2px;animation:barGrow 3.4s ease-in-out infinite alternate}
+@keyframes barGrow{from{width:20%}to{width:92%}}
+.d3 .bar:nth-child(2) i{animation-delay:.6s}.d3 .bar:nth-child(3) i{animation-delay:1.2s}
+.d3 .bar:nth-child(4) i{animation-delay:.9s}.d3 .bar:nth-child(5) i{animation-delay:1.8s}
+.d3 .metrics{position:absolute;right:0;bottom:0;display:flex;gap:10px;font-family:monospace;font-size:9px;color:var(--accent)}
+.d3 .metrics b{color:var(--txt)}
+.d3 .composer{background:rgba(8,14,22,.7);border:1px solid rgba(77,216,255,.25)}
+.d3 .messages .msg{opacity:.3}
+
+/* ======================================================================
+   DIRECTION 4 — BIOTIC LIGHT (浅色 · 有机的呼吸光)
+   ====================================================================== */
+.d4{--accent:#2f9b8e;--accent2:#5b7fe8;--dim:#7b8794;--txt:#1f2b3a;
+  background:radial-gradient(500px 360px at 68% 40%,rgba(47,155,142,.12),transparent 65%),
+    radial-gradient(400px 300px at 20% 80%,rgba(91,127,232,.1),transparent 65%),#f4f7f9}
+.d4 .titlebar{background:rgba(255,255,255,.75);border-bottom:1px solid rgba(20,40,60,.08);color:#33424f}
+.d4 .tb-center{color:#8794a1}
+.d4 .win-btns{color:#8a97a4}
+.d4 .rail{background:rgba(255,255,255,.55);border-right:1px solid rgba(20,40,60,.07)}
+.d4 .rail-i{color:#8b98a5}
+.d4 .rail-i.on{background:rgba(47,155,142,.12)}
+.d4 .convlist{background:rgba(255,255,255,.4);border-right:1px solid rgba(20,40,60,.07)}
+.d4 .conv-h{color:#98a4b0}
+.d4 .conv-l1{background:rgba(30,50,70,.2)}
+.d4 .conv.on{background:rgba(255,255,255,.85);box-shadow:0 4px 16px rgba(30,60,80,.07)}
+.d4 .conv.on .conv-l1{background:var(--accent)}
+.d4 .conv-l2{background:rgba(30,50,70,.1)}
+.d4 .chat-top{background:rgba(255,255,255,.45);border-bottom:1px solid rgba(20,40,60,.06)}
+.d4 .chat-title{color:#263544}
+.d4 .model-tag{border-color:rgba(47,155,142,.3)}
+.d4 .orb-status{color:#8a97a4}
+.d4 .msg.ai .bubble{background:rgba(255,255,255,.8);border-color:rgba(20,40,60,.07);
+  box-shadow:0 6px 20px rgba(30,60,80,.05)}
+.d4 .msg.user .bubble{background:linear-gradient(135deg,rgba(47,155,142,.14),rgba(91,127,232,.12));
+  border-color:rgba(47,155,142,.18);color:#263544}
+.d4 .composer{background:rgba(255,255,255,.8);border:1px solid rgba(20,40,60,.09);box-shadow:0 8px 24px rgba(30,60,80,.06)}
+.d4 .send{color:#fff}
+.d4 .bio-orb{position:absolute;left:50%;top:45%;transform:translate(-50%,-50%);width:130px;height:130px;z-index:1}
+.d4 .bio-orb .blob{position:absolute;inset:18px;border-radius:46% 54% 58% 42% / 52% 44% 56% 48%;
+  background:linear-gradient(135deg,rgba(47,155,142,.55),rgba(91,127,232,.55));
+  filter:blur(2px);animation:blobMorph 7s ease-in-out infinite,coreBeat var(--breath) ease-in-out infinite;
+  box-shadow:0 0 40px rgba(47,155,142,.25)}
+@keyframes blobMorph{0%,100%{border-radius:46% 54% 58% 42% / 52% 44% 56% 48%;transform:rotate(0)}
+  50%{border-radius:58% 42% 44% 56% / 44% 58% 42% 56%;transform:rotate(18deg)}}
+.d4 .bio-orb .halo{position:absolute;inset:0;border-radius:50%;border:1px solid rgba(47,155,142,.25);animation:ripple 4.6s ease-out infinite}
+.d4 .messages .msg{opacity:.4}
+
+/* ---------- footer note ---------- */
+.foot{max-width:1180px;margin:62px auto 0;border-top:1px solid var(--gal-line);padding-top:24px;
+  display:flex;justify-content:space-between;align-items:center;gap:20px;flex-wrap:wrap}
+.foot p{color:var(--gal-dim);font-size:12px;max-width:620px;line-height:1.8}
+.foot .hint{font-size:12px;color:var(--cyan)}
+.foot .hint b{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--cyan);
+  box-shadow:0 0 8px var(--cyan);margin-right:8px;animation:blink 2s infinite}
+
+@media(max-width:900px){.grid{grid-template-columns:1fr}.gal-title{font-size:34px}body{padding:36px 20px 70px}}
+@media(prefers-reduced-motion:reduce){*{animation:none!important}}
+</style>
+</head>
+<body>
+
+<!-- ===== Header ===== -->
+<header class="gal-head">
+  <div class="nw-mark">
+    <!-- NW logo -->
+    <svg class="nw-logo" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="lg" x1="0" y1="0" x2="64" y2="64" gradientUnits="userSpaceOnUse">
+          <stop stop-color="#3ee6ff"/><stop offset="1" stop-color="#9a7bff"/>
+        </linearGradient>
+      </defs>
+      <path d="M32 3 58 18v28L32 61 6 46V18L32 3Z" stroke="url(#lg)" stroke-width="2" opacity=".55"/>
+      <path d="M32 11 51 22v20L32 53 13 42V22L32 11Z" fill="url(#lg)" opacity=".08"/>
+      <path d="M20 41V23l12 13V23" stroke="url(#lg)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>
+      <path d="M43 23 37 41l-6-18" stroke="url(#lg)" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>
+      <circle cx="32" cy="32" r="2.6" fill="#3ee6ff"/>
+    </svg>
+    <div class="nw-word">NEW <b>WORLD</b> &nbsp;/&nbsp; NW</div>
+  </div>
+  <h1 class="gal-title">让界面 <span>呼吸</span>，让产品活过来。</h1>
+  <p class="gal-sub">New World → <em>New World (NW)</em>。以下 4 个方向基于现有真实结构（标题栏 · 图标导航 · 会话列表 · 聊天区 · 生命体 Orb）重新设计，<em>每个画面都是活的</em>——移动鼠标停留观察呼吸辉光、流光与扫描的节奏。选一个方向，我就能落地成代码。</p>
+  <div class="gal-meta">
+    <span class="chip"><i></i>4 个设计方向</span>
+    <span class="chip">桌面端 Electron · 复刻真实布局</span>
+    <span class="chip">动态预览 · 非静态截图</span>
+    <span class="chip">品牌重命名 NW</span>
+  </div>
+</header>
+
+<main class="grid">
+
+  <!-- ============ DIRECTION 1 ============ -->
+  <section class="concept">
+    <div class="concept-head">
+      <div><div class="c-num">01 / NEURAL CORE</div><div class="c-name">神经核心 <small>Neural Core</small></div></div>
+      <span class="c-tag">深空 · 青紫辉光</span>
+    </div>
+    <div class="frame d1">
+      <div class="grid-bg"></div><div class="scan"></div>
+      <div class="app">
+        <div class="titlebar">
+          <div class="tb-brand">
+            <svg viewBox="0 0 64 64" fill="none"><path d="M32 3 58 18v28L32 61 6 46V18L32 3Z" stroke="#3ee6ff" stroke-width="3" opacity=".6"/><path d="M20 41V23l12 13V23M43 23 37 41l-6-18" stroke="#9a7bff" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            NEW WORLD
+          </div>
+          <div class="tb-center"><span class="stat-dot"></span> 核心在线 · :18789</div>
+          <div class="win-btns"><span></span><span></span><span></span></div>
+        </div>
+        <div class="bodyrow">
+          <nav class="rail">
+            <div class="rail-i on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-9-9 9 9 0 0 1 9 9Z"/><path d="M8 13h8M8 9h8"/></svg></div>
+            <div class="rail-i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="12" cy="12" r="3"/></svg></div>
+            <div class="rail-i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 12 9 5 9-5"/></svg></div>
+            <div class="rail-i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg></div>
+            <div class="rail-i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="4" width="18" height="17" rx="3"/><path d="M8 2v4M16 2v4M3 10h18"/></svg></div>
+            <div class="rail-sp"></div>
+            <div class="rail-i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.6-2-3.4-2.4 1a7 7 0 0 0-1.7-1L14.5 3h-4l-.4 2.6a7 7 0 0 0-1.7 1l-2.4-1-2 3.4L6 10.9a7 7 0 0 0 0 2.2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 1.7 1l.4 2.9h4l.4-2.9a7 7 0 0 0 1.7-1l2.4 1 2-3.4-2-1.6a7 7 0 0 0 .1-1Z"/></svg></div>
+          </nav>
+          <aside class="convlist">
+            <div class="conv-h">会话</div>
+            <div class="conv on"><div class="conv-av"></div><div class="conv-lines"><div class="conv-l1"></div><div class="conv-l2"></div></div></div>
+            <div class="conv"><div class="conv-av"></div><div class="conv-lines"><div class="conv-l1"></div><div class="conv-l2"></div></div></div>
+            <div class="conv"><div class="conv-av"></div><div class="conv-lines"><div class="conv-l1"></div><div class="conv-l2"></div></div></div>
+            <div class="conv"><div class="conv-av"></div><div class="conv-lines"><div class="conv-l1"></div><div class="conv-l2"></div></div></div>
+            <div class="conv"><div class="conv-av"></div><div class="conv-lines"><div class="conv-l1"></div><div class="conv-l2"></div></div></div>
+          </aside>
+          <div class="chat">
+            <div class="chat-top"><span class="chat-title">新世界 · 任务编排</span><span class="model-tag">NW-Prime</span>
+              <div class="orb-status"><span class="mini-orb"></span>核心思考中</div></div>
+            <div class="messages">
+              <div class="msg user"><div class="msg-av"></div><div class="bubble">梳理一下新版本的交互方向</div></div>
+              <div class="msg ai"><div class="msg-av"></div><div class="bubble">已接入 <b>神经核心</b>，正在并行调度 4 个能力节点…</div></div>
+              <div class="core-hero">
+                <div class="ring a"></div><div class="ring b"></div><div class="ring c"></div>
+                <div class="core"></div><div class="node n1"></div><div class="node n2"></div><div class="node n3"></div>
+              </div>
+            </div>
+            <div class="composer"><span class="ph">向 NW 提问…</span><span class="send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m5 12 14-7-5 14-3-6-6-1Z"/></svg></span></div>
+          </div>
+        </div>
+      </div>
+      <span class="frame-label">CONCEPT 01</span>
+    </div>
+    <p class="c-desc"><b>关键词：算力可见。</b>把 AI 当成一个正在运转的"神经核心"——中央呼吸的青紫球体会随状态膨胀收缩，虚线环反向旋转表示并行思考，扫描线持续扫过界面。最贴近项目现有的 NOVA 皮肤，落地成本最低。</p>
+  </section>
+
+  <!-- ============ DIRECTION 2 ============ -->
+  <section class="concept">
+    <div class="concept-head">
+      <div><div class="c-num">02 / LIVING GLASS</div><div class="c-name">活性玻璃 <small>Living Glass</small></div></div>
+      <span class="c-tag">流动极光 · 玻璃拟态</span>
+    </div>
+    <div class="frame d2">
+      <div class="aurora"><i class="a1"></i><i class="a2"></i><i class="a3"></i></div>
+      <div class="glass"></div>
+      <div class="app">
+        <div class="titlebar">
+          <div class="tb-brand">
+            <svg viewBox="0 0 64 64" fill="none"><path d="M32 3 58 18v28L32 61 6 46V18L32 3Z" stroke="#5eead4" stroke-width="3" opacity=".6"/><path d="M20 41V23l12 13V23M43 23 37 41l-6-18" stroke="#818cf8" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            NEW WORLD
+          </div>
+          <div class="tb-center"><span class="stat-dot"></span> 已连接 · :18789</div>
+          <div class="win-btns"><span></span><span></span><span></span></div>
+        </div>
+        <div class="bodyrow">
+          <nav class="rail">
+            <div class="rail-i on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-9-9 9 9 0 0 1 9 9Z"/><path d="M8 13h8M8 9h8"/></svg></div>
+            <div class="rail-i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="12" cy="12" r="3"/></svg></div>
+            <div class="rail-i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 12 9 5 9-5"/></svg></div>
+            <div class="rail-i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg></div>
+            <div class="rail-sp"></div>
+            <div class="rail-i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.6-2-3.4-2.4 1a7 7 0 0 0-1.7-1L14.5 3h-4l-.4 2.6a7 7 0 0 0-1.7 1l-2.4-1-2 3.4L6 10.9a7 7 0 0 0 0 2.2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 1.7 1l.4 2.9h4l.4-2.9a7 7 0 0 0 1.7-1l2.4 1 2-3.4-2-1.6a7 7 0 0 0 .1-1Z"/></svg></div>
+          </nav>
+          <aside class="convlist">
+            <div class="conv-h">会话</div>
+            <div class="conv on"><div class="conv-av"></div><div class="conv-lines"><div class="conv-l1"></div><div class="conv-l2"></div></div></div>
+            <div class="conv"><div class="conv-av"></div><div class="conv-lines"><div class="conv-l1"></div><div class="conv-l2"></div></div></div>
+            <div class="conv"><div class="conv-av"></div><div class="conv-lines"><div class="conv-l1"></div><div class="conv-l2"></div></div></div>
+            <div class="conv"><div class="conv-av"></div><div class="conv-lines"><div class="conv-l1"></div><div class="conv-l2"></div></div></div>
+            <div class="conv"><div class="conv-av"></div><div class="conv-lines"><div class="conv-l1"></div><div class="conv-l2"></div></div></div>
+          </aside>
+          <div class="chat">
+            <div class="chat-top"><span class="chat-title">季度规划 · 协作</span><span class="model-tag">NW-Flow</span>
+              <div class="orb-status"><span class="mini-orb"></span>正在聆听</div></div>
+            <div class="messages">
+              <div class="msg user"><div class="msg-av"></div><div class="bubble">帮我把想法整理成可执行的方案</div></div>
+              <div class="msg ai"><div class="msg-av"></div><div class="bubble">好的，我<em>感受到</em>你的节奏了，正在组织思路…</div></div>
+              <div class="breath-ring"><i></i><i></i><i></i><div class="g"></div></div>
+            </div>
+            <div class="composer"><span class="ph">与 NW 对话…</span><span class="send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m5 12 14-7-5 14-3-6-6-1Z"/></svg></span></div>
+          </div>
+        </div>
+      </div>
+      <span class="frame-label">CONCEPT 02</span>
+    </div>
+    <p class="c-desc"><b>关键词：温柔地活着。</b>背景里三团极光持续缓慢游走、互相交融，面板用半透明玻璃承接光色；中央核心以同心涟漪一圈圈呼吸扩散。整体更柔和、更"有机"，弱化机械感，强调陪伴感。</p>
+  </section>
+
+  <!-- ============ DIRECTION 3 ============ -->
+  <section class="concept">
+    <div class="concept-head">
+      <div><div class="c-num">03 / AURORA DECK</div><div class="c-name">极光甲板 <small>Aurora Deck</small></div></div>
+      <span class="c-tag">驾驶舱 · HUD 数据</span>
+    </div>
+    <div class="frame d3">
+      <div class="hud-grid"></div>
+      <div class="corner c-tl"></div><div class="corner c-tr"></div><div class="corner c-bl"></div><div class="corner c-br"></div>
+      <div class="app">
+        <div class="titlebar">
+          <div class="tb-brand">
+            <svg viewBox="0 0 64 64" fill="none"><path d="M32 3 58 18v28L32 61 6 46V18L32 3Z" stroke="#4dd8ff" stroke-width="3" opacity=".6"/><path d="M20 41V23l12 13V23M43 23 37 41l-6-18" stroke="#ffb454" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            NEW WORLD
+          </div>
+          <div class="tb-center"><span class="stat-dot"></span> 系统就绪 · DECK-01</div>
+          <div class="win-btns"><span></span><span></span><span></span></div>
+        </div>
+        <div class="bodyrow">
+          <nav class="rail">
+            <div class="rail-i on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-9-9 9 9 0 0 1 9 9Z"/><path d="M8 13h8M8 9h8"/></svg></div>
+            <div class="rail-i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="12" cy="12" r="3"/></svg></div>
+            <div class="rail-i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 12 9 5 9-5"/></svg></div>
+            <div class="rail-i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg></div>
+            <div class="rail-sp"></div>
+            <div class="rail-i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.6-2-3.4-2.4 1a7 7 0 0 0-1.7-1L14.5 3h-4l-.4 2.6a7 7 0 0 0-1.7 1l-2.4-1-2 3.4L6 10.9a7 7 0 0 0 0 2.2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 1.7 1l.4 2.9h4l.4-2.9a7 7 0 0 0 1.7-1l2.4 1 2-3.4-2-1.6a7 7 0 0 0 .1-1Z"/></svg></div>
+          </nav>
+          <aside class="convlist">
+            <div class="conv-h">任务队列</div>
+            <div class="conv on"><div class="conv-av"></div><div class="conv-lines"><div class="conv-l1"></div><div class="conv-l2"></div></div></div>
+            <div class="conv"><div class="conv-av"></div><div class="conv-lines"><div class="conv-l1"></div><div class="conv-l2"></div></div></div>
+            <div class="conv"><div class="conv-av"></div><div class="conv-lines"><div class="conv-l1"></div><div class="conv-l2"></div></div></div>
+            <div class="conv"><div class="conv-av"></div><div class="conv-lines"><div class="conv-l1"></div><div class="conv-l2"></div></div></div>
+          </aside>
+          <div class="chat">
+            <div class="chat-top"><span class="chat-title">控制台 · 总览</span><span class="model-tag">NW-OS</span>
+              <div class="orb-status"><span class="mini-orb"></span>全系统在线</div></div>
+            <div class="messages">
+              <div class="msg user"><div class="msg-av"></div><div class="bubble">启动日常自动化流程</div></div>
+              <div class="msg ai"><div class="msg-av"></div><div class="bubble">已接入控制台，实时遥测如下 ▸</div></div>
+              <div class="dashboard">
+                <div class="radar"><div class="dot"></div></div>
+                <div class="bars"><div class="bar"><i></i></div><div class="bar"><i></i></div><div class="bar"><i></i></div><div class="bar"><i></i></div><div class="bar"><i></i></div></div>
+                <div class="metrics"><span>LAT <b>24ms</b></span><span>LOAD <b>0.62</b></span></div>
+              </div>
+            </div>
+            <div class="composer"><span class="ph">输入指令…</span><span class="send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m5 12 14-7-5 14-3-6-6-1Z"/></svg></span></div>
+          </div>
+        </div>
+      </div>
+      <span class="frame-label">CONCEPT 03</span>
+    </div>
+    <p class="c-desc"><b>关键词：一切尽在掌控。</b>HUD 雷达扫描、实时负载条、透视网格地面与四角校准框，把牢骚变成一台"驾驶舱"。适合强调 NW 的自动化与任务编排能力，让每条数据在动，最有极客范儿。</p>
+  </section>
+
+  <!-- ============ DIRECTION 4 ============ -->
+  <section class="concept">
+    <div class="concept-head">
+      <div><div class="c-num">04 / BIOTIC LIGHT</div><div class="c-name">共生之光 <small>Biotic Light</small></div></div>
+      <span class="c-tag">明亮 · 有机呼吸</span>
+    </div>
+    <div class="frame d4">
+      <div class="app">
+        <div class="titlebar">
+          <div class="tb-brand">
+            <svg viewBox="0 0 64 64" fill="none"><path d="M32 3 58 18v28L32 61 6 46V18L32 3Z" stroke="#2f9b8e" stroke-width="3" opacity=".55"/><path d="M20 41V23l12 13V23M43 23 37 41l-6-18" stroke="#5b7fe8" stroke-width="4.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            NEW WORLD
+          </div>
+          <div class="tb-center"><span class="stat-dot"></span> NW 已就绪</div>
+          <div class="win-btns"><span></span><span></span><span></span></div>
+        </div>
+        <div class="bodyrow">
+          <nav class="rail">
+            <div class="rail-i on"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-9-9 9 9 0 0 1 9 9Z"/><path d="M8 13h8M8 9h8"/></svg></div>
+            <div class="rail-i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="3"/><circle cx="12" cy="12" r="3"/></svg></div>
+            <div class="rail-i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 12 9 5 9-5"/></svg></div>
+            <div class="rail-i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg></div>
+            <div class="rail-sp"></div>
+            <div class="rail-i"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.6-2-3.4-2.4 1a7 7 0 0 0-1.7-1L14.5 3h-4l-.4 2.6a7 7 0 0 0-1.7 1l-2.4-1-2 3.4L6 10.9a7 7 0 0 0 0 2.2l-2 1.6 2 3.4 2.4-1a7 7 0 0 0 1.7 1l.4 2.9h4l.4-2.9a7 7 0 0 0 1.7-1l2.4 1 2-3.4-2-1.6a7 7 0 0 0 .1-1Z"/></svg></div>
+          </nav>
+          <aside class="convlist">
+            <div class="conv-h">对话</div>
+            <div class="conv on"><div class="conv-av"></div><div class="conv-lines"><div class="conv-l1"></div><div class="conv-l2"></div></div></div>
+            <div class="conv"><div class="conv-av"></div><div class="conv-lines"><div class="conv-l1"></div><div class="conv-l2"></div></div></div>
+            <div class="conv"><div class="conv-av"></div><div class="conv-lines"><div class="conv-l1"></div><div class="conv-l2"></div></div></div>
+            <div class="conv"><div class="conv-av"></div><div class="conv-lines"><div class="conv-l1"></div><div class="conv-l2"></div></div></div>
+            <div class="conv"><div class="conv-av"></div><div class="conv-lines"><div class="conv-l1"></div><div class="conv-l2"></div></div></div>
+          </aside>
+          <div class="chat">
+            <div class="chat-top"><span class="chat-title">新的一天 · 早安</span><span class="model-tag">NW-Light</span>
+              <div class="orb-status"><span class="mini-orb"></span>心情愉悦</div></div>
+            <div class="messages">
+              <div class="msg user"><div class="msg-av"></div><div class="bubble">今天有什么可以帮我的？</div></div>
+              <div class="msg ai"><div class="msg-av"></div><div class="bubble">早上好，我一直在等你。<b>一起开始吧</b> ☀</div></div>
+              <div class="bio-orb"><div class="halo"></div><div class="blob"></div></div>
+            </div>
+            <div class="composer"><span class="ph">和 NW 聊聊…</span><span class="send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="m5 12 14-7-5 14-3-6-6-1Z"/></svg></span></div>
+          </div>
+        </div>
+      </div>
+      <span class="frame-label">CONCEPT 04</span>
+    </div>
+    <p class="c-desc"><b>关键词：白天的伙伴。</b>明亮的浅色主题作为对比选项——有机变形的柔和光斑缓慢呼吸、旋转，像有生命的小生物。保留科技感但更亲近、无压迫感，适合长时间陪伴型使用，也是唯一适配浅色偏好的方向。</p>
+  </section>
+
+</main>
+
+<footer class="foot">
+  <p>以上 4 版均以现有 <b>New World</b> 的真实页面骨架为基础，仅替换视觉语言与品牌（New World / NW）。所有动效遵循 <b>prefers-reduced-motion</b> 无障碍规范。告诉我偏好哪一版（或组合），我即可输出完整设计规范并落地到 src 代码。</p>
+  <div class="hint"><b></b>提示：这是动态预览，画面元素在持续呼吸/流动</div>
+</footer>
+
+</body>
+</html>

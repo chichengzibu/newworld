@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - OpenClaw 核心类型定义
+ * New World - OpenClaw 核心类型定义
  */
 
 // ========== 操作类型 ==========

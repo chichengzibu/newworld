@@ -61,7 +61,7 @@ describe('P1-01: DiscordChannel.send', () => {
       id: 'm1',
       text: 'hello',
       channel: 'discord',
-      from: 'piPiClaw',
+      from: 'nwWorld',
       to: 'ch-123456',
       ts: Date.now(),
     } as any)

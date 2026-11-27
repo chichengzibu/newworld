@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - Insight / TaskKanban (W5.1)
+ * New World - Insight / TaskKanban (W5.1)
  *
  * Lightweight in-memory 5-column task board used by AgentBrain to expose
  * progress to the Insights view (backlog / todo / doing / review / done).

@@ -90,15 +90,67 @@ user-journey-ollama/
 dist.bak-*/
 dist-electron.bak-*/
 *-release.zip
+# 【M3-F 补】release.bak-* —— build.mjs 的 moveAside() 会把旧产物 rename 成
+# <dir>.bak-<timestamp> 再重建。这些是**构建产物**(单个 ~465MB,含 Electron 二进制),
+# 此前 .gitignore 只覆盖了 dist/dist-electron 的 bak,漏了 release 的 →
+# 一次 build 就把近 1GB 的构建产物提交进了仓库。
+release.bak-*/
 
 # ── P0:本地构建输出/工具工作区 ──
 registry-out/
+# 开发期截图(应用跑起来时人工截的)—— 不是产品资产,不入库
+.tmp-nova-shots/
 
-# ── P0:ClawHub 私钥(已移出工作区 → C:\Users\Administrator\.pipiclaw-secrets\)──
-# 通过环境变量 PIPICLAW_CLAWHUB_KEY 指向,禁止入库
+# ── P0:ClawHub 私钥(已移出工作区 → C:\Users\Administrator\.newworld-secrets\)──
+# 通过环境变量 NW_CLAWHUB_KEY 指向,禁止入库
 scripts/clawhub-dev-ed25519.key
 *.ed25519.key
 
 # ── 本地开发杂物(保留在磁盘,不入仓;见 2026-10-08 用户指示)──
 dev/
 .workbuddy/
+
+# 【M4-L 补】scripts/ 下的临时分析脚本 ——
+# DEV-122 立过规矩「临时脚本误入仓」,但 .gitignore 只覆盖了根目录的 .tmp-*。
+# scripts/ 下的同类文件(如 .tmp-ipc-sweep.py:preload 与调用方的对扫脚本)照样会冒出来。
+scripts/.tmp-*
+
+# 【M4-J 补】裁判校准工作区 ——
+# 标注集(panel 3MB + mt_bench parquet 700KB)与裁决记录都是**下载产物/中间产物**:
+#   · panel 是 CC-BY-NC-4.0(非商用)—— 明确不入仓
+#   · 裁决记录含大段模型输出,体积随校准次数增长,不入仓
+# 仓里只保留 tests/fixtures/judge-calibration/ 下的 MT-Bench 派生样本(CC-BY-4.0,许可干净)
+.tmp-calibration/
+
+# 【M4-X】技能包存放目录(应用自身结构目录下的 skills/)
+# 不集成:仓库里不存技能包 —— 目录本身占位,其余是用户下载/手动添加的
+skills/*
+!skills/.gitkeep
+
+# 【M4-Z】构建各步骤的完整日志(门禁红时的证据;不入仓)
+.tmp-build-logs/
+src/locales/generated/
+
+# ── 开发过程中的临时备份/调试产物（不入仓）──
+.nw-backup-*/
+.nw-breath-backup-*/
+.nw-dark-backup-*/
+.nw-design-fix-*/
+.nw-env-backup-*/
+.nw-lowercase-backup-*/
+.nw-ohos-backup-*/
+.nw-theme-backup-*/
+.nw-usage-backup-*/
+.tmp-*.png
+.tmp-*.mjs
+.tmp-audit-*/
+.tmp-error-ledger-test-*/
+.tmp-e2e-*.log
+test-results*/
+e2e-screenshots/
+coverage.bak-*/
+release-fresh-*/
+release-new/
+release.bak-*/
+PiPiClaw-*-Setup.exe
+*.asar

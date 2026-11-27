@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - 执行模式状态管理 (Pinia Store)
+ * New World - 执行模式状态管理 (Pinia Store)
  * 
  * 职责：
  * 1. 管理执行模式状态（安全/计划/全量）
@@ -92,6 +92,9 @@ export interface ConfirmDialogState {
 const electronAPI = window.electronAPI as any;
 
 export const useExecutionModeStore = defineStore('executionMode', () => {
+  // 【M1-E】默认值保持 'craft'。UI 已改为常驻可见的模式切换器,
+  // 用户随时能看到自己处于什么模式 —— 可见性解决了"不知情"的问题,
+  // 因此不再强制改变默认行为(用户已明确选择保留 craft 默认)。
   const currentMode = ref<ExecutionMode>('craft');
   const loading = ref(false);
 

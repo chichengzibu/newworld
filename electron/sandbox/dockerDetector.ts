@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - Docker 探测器(W9.1)
+ * New World - Docker 探测器(W9.1)
  *
  * 职责:
  * 1. 探测本机 docker 状态(6 种状态)

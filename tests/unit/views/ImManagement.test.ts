@@ -39,14 +39,19 @@ const mockChannelConfigs = [
     get: vi.fn().mockResolvedValue({ success: true, data: mockChannelConfigs }),
     save: vi.fn().mockResolvedValue({ success: true }),
     test: vi.fn().mockResolvedValue({ success: true, data: { message: 'ok' } }),
+    delete: vi.fn().mockResolvedValue({ success: true, data: { removed: true } }),
   },
   channel: {
+    list: vi.fn().mockResolvedValue({ success: true, data: [] }),
+    pollerStatus: vi.fn().mockResolvedValue({ success: true, data: { running: false, offset: 0, polls: 0 } }),
     messageStats: vi.fn().mockResolvedValue({ success: true, data: { total: 0, byChannel: {}, sinceMs: 0 } }),
     messageHistory: vi.fn().mockResolvedValue({ success: true, data: [] }),
     routingList: vi.fn().mockResolvedValue({ success: true, data: [] }),
     routingAdd: vi.fn().mockResolvedValue({ success: true }),
     routingRemove: vi.fn().mockResolvedValue({ success: true, data: { removed: true } }),
     permissionList: vi.fn().mockResolvedValue({ success: true, data: [] }),
+    permissionGrant: vi.fn().mockResolvedValue({ success: true }),
+    permissionRevoke: vi.fn().mockResolvedValue({ success: true, data: { revoked: true } }),
   },
 }
 
@@ -175,16 +180,26 @@ describe('P0-05: ImManagement 权限', () => {
     expect(ElMessage.warning).toHaveBeenCalled()
   })
 
-  it('handleSavePermission: 完整字段 → 权限加入', async () => {
+  it('handleSavePermission: 完整字段 → 真授权 IPC + 从后端刷新列表', async () => {
     const wrapper = mount(ImManagement, { global: { plugins: [i18n], stubs: elementPlusStubs } })
     await flushPromises()
+    const { ElMessage } = await import('element-plus')
     const vm = wrapper.vm as any
+    // 真链路：grant 写 IMPermissionManager，permission:list 回读刷新 UI
+    ;(window as any).electronAPI.channel.permissionList = vi.fn().mockResolvedValue({
+      success: true,
+      data: [{ id: 'im-feishu:张三', subject: '张三', level: 'member', scope: 'im-feishu' }],
+    })
     vm.permissionForm.subject = '张三'
     vm.permissionForm.level = 'admin'
     vm.permissionForm.scope = ['im-feishu']
-    vm.handleSavePermission()
+    await vm.handleSavePermission()
+    expect((window as any).electronAPI.channel.permissionGrant).toHaveBeenCalledWith({
+      channelKind: 'im-feishu', userId: '张三',
+    })
     expect(vm.permissions.length).toBe(1)
     expect(vm.permissions[0].subject).toBe('张三')
+    expect(ElMessage.success).toHaveBeenCalled()
   })
 })
 

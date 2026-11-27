@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - 模板注册表(W10.1)
+ * New World - 模板注册表(W10.1)
  *
  * 4 个内置模板:vite-react-ts / nextjs-app / fastapi / go-http
  * 全部以 .ts 形式导出(避免引入 yaml 解析新依赖)

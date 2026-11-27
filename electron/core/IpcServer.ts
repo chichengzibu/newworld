@@ -1,11 +1,15 @@
 /**
- * PiPiClaw - IPC服务器
+ * New World - IPC服务器
  */
 
-import { ipcMain, app, dialog } from 'electron';
+import { ipcMain, app, dialog, shell, BrowserWindow } from 'electron';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { getHost } from '../platform/runtime';
 import { LogManager } from './LogManager';
 import { WindowManager } from './WindowManager';
 import { ConfigStore } from './ConfigStore';
+import { BackupManager } from './BackupManager';
 import { LlmConfigStore } from '../llm/LlmConfigStore';
 
 import { ModelManager } from '../models/ModelManager';
@@ -22,6 +26,7 @@ import { ConversationExporter } from '../utils/ConversationExporter';
 import { OpenClawGateway } from '../openclaw/OpenClawGateway';
 import { OpenClawExecutor } from '../openclaw/OpenClawExecutor';
 import { McpManager } from '../mcp/McpManager';
+import { LlmAgentBrain } from '../agent/LlmAgentBrain';
 import type {
   McpServerConfig,
   McpServerStatus,
@@ -31,8 +36,10 @@ import type {
 // M1 P0-4: 静态 import runD5 (修复 d5:run 内部 require 在 bundled main.js 路径错位, qa report line 184)
 import { runD5 } from '../skill/builtin/D5RecordingToSkill';
 import { HermesMemory } from '../hermes/HermesMemory';
+import { EmbeddingService, type EmbeddingConfig, type EmbeddingModel } from '../hermes/EmbeddingService';
 import { SkillLoader } from '../skill/SkillLoader';
 import { SelfLearner } from '../learning/SelfLearner';
+import { SkillEffectivenessTracker } from '../learning/SkillEffectivenessTracker';
 import { CrashReportCollector } from '../insight/CrashReport';
 import { IMMessageStore } from '../channel/IMMessageStore';
 import { FileTransferManager } from '../channel/FileTransferManager';
@@ -44,11 +51,9 @@ import { IMPermissionManager } from '../channel/IMPermissionManager';
 export interface NovaBootBridge {
   /** nova:renderer-ready → BootDirector.markRendererReady() */
   markRendererReady(): void;
-  /** nova:boot-skip → BootDirector.markSkipped() + SplashWindow.close() */
-  markSkipped(): void;
 }
 import { ChannelRouter } from '../channel/ChannelRouter';
-import { ClawHubManager } from '../skill/ClawHubManager';
+import { refreshChannels, getTelegramPollerStatus } from '../channel/bootstrap';
 import { ClawHubRegistry } from '../skill/ClawHubRegistry';
 import { ModelRatingManager } from '../models/ModelRatingManager';
 import { ModelUsageTracker } from '../models/ModelUsageTracker';
@@ -68,7 +73,7 @@ export class IpcServer {
   private constructor() {}
 
   // ========== NOVA #003-C · M2 — BootDirector bridge(第②笔) ==========
-  // 见 nova:renderer-ready / nova:boot-skip handler(本类 registerHandlers 内)
+  // 见 nova:renderer-ready handler(本类 registerHandlers 内)
   private novaBoot: NovaBootBridge | null = null;
   public setNovaBootBootBridge(bridge: NovaBootBridge | null): void { this.novaBoot = bridge; }
   get novaBootBridge(): NovaBootBridge | null { return this.novaBoot; }
@@ -110,6 +115,103 @@ export class IpcServer {
       } catch (error) {
         this.log.error('dialog:openFile 失败', error);
         return { canceled: true, filePaths: [] };
+      }
+    });
+
+    ipcMain.handle('dialog:saveFile', async (_, options: any) => {
+      try {
+        const result = await dialog.showSaveDialog({
+          title: options?.title || '保存文件',
+          defaultPath: options?.defaultPath,
+          filters: options?.filters || [{ name: '本地备份', extensions: ['zip'] }],
+          properties: ['createDirectory', 'showOverwriteConfirmation'],
+        });
+        return { canceled: result.canceled, filePath: result.filePath };
+      } catch (error) {
+        this.log.error('dialog:saveFile 失败', error);
+        return { canceled: true, filePath: undefined };
+      }
+    });
+
+    // ========== 本地备份：配置/技能导出导入（无服务器） ==========
+    ipcMain.handle('backup:create', async (_, options?: { includeApiKeys?: boolean }) => {
+      try {
+        return { success: true, data: await BackupManager.getInstance().create(options ?? {}) };
+      } catch (error) {
+        this.log.error('backup:create 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    ipcMain.handle('backup:list', async () => {
+      try {
+        return { success: true, data: await BackupManager.getInstance().list() };
+      } catch (error) {
+        this.log.error('backup:list 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    ipcMain.handle('backup:restore', async (_, filePath: string) => {
+      try {
+        const result = await BackupManager.getInstance().restore(filePath);
+        // 通知渲染层配置已变；监听方可自行刷新 store
+        BrowserWindow.getAllWindows().forEach(w => {
+          if (!w.isDestroyed()) w.webContents.send('backup:restored', result);
+        });
+        return { success: true, data: result };
+      } catch (error) {
+        this.log.error('backup:restore 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    ipcMain.handle('backup:exportToFile', async (_, filePath: string, options?: { includeApiKeys?: boolean }) => {
+      try {
+        return { success: true, data: await BackupManager.getInstance().exportToFile(filePath, options ?? {}) };
+      } catch (error) {
+        this.log.error('backup:exportToFile 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    ipcMain.handle('backup:exportSkills', async (_, filePath: string) => {
+      try {
+        return { success: true, data: await BackupManager.getInstance().exportSkills(filePath) };
+      } catch (error) {
+        this.log.error('backup:exportSkills 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    // 把已有的一份备份复制到用户指定位置（不是重新生成，内容必须与列表里那份一致）
+    ipcMain.handle('backup:copy', async (_, sourcePath: string, targetPath: string) => {
+      try {
+        const backupDir = path.join(getHost().getPath('userData'), 'backups');
+        const root = fs.realpathSync(backupDir);
+        const source = fs.realpathSync(sourcePath);
+        if (source !== root && !source.startsWith(root + path.sep)) {
+          return { success: false, error: '只能导出本地备份目录内的文件' };
+        }
+        if (!fs.statSync(source).isFile()) return { success: false, error: '源不是文件' };
+        fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+        fs.copyFileSync(source, targetPath);
+        return { success: true, data: { filePath: targetPath, size: fs.statSync(targetPath).size } };
+      } catch (error) {
+        this.log.error('backup:copy 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    ipcMain.handle('backup:openFolder', async () => {
+      try {
+        const dir = path.join(getHost().getPath('userData'), 'backups');
+        fs.mkdirSync(dir, { recursive: true });
+        const failure = await shell.openPath(dir);
+        return failure ? { success: false, error: failure } : { success: true };
+      } catch (error) {
+        this.log.error('backup:openFolder 失败', error);
+        return { success: false, error: String(error) };
       }
     });
 
@@ -359,14 +461,528 @@ export class IpcServer {
       }
     });
 
+    // ========== 【M3-A】嵌入后端配置 ==========
+    // 此前 EmbeddingService 的三个真后端(ollama/openai/zhipu)代码都在,
+    // 但【没有任何配置入口】—— provider 默认 stub-deterministic,
+    // 于是召回用的是 SHA-256 伪向量:相似度是噪声,检索等于随机匹配。
+    // 这四个通道是该能力对用户可见的入口。
+
+    ipcMain.handle('hermes:embedding:get', async () => {
+      try {
+        const svc = EmbeddingService.getInstance();
+        const cfg = svc.getConfig();
+        const model: EmbeddingModel = cfg.provider === 'ollama' ? 'ollama-nomic'
+          : cfg.provider === 'openai' ? 'openai-ada'
+          : cfg.provider === 'zhipu' ? 'zhipu-embedding'
+          : 'stub-deterministic';
+        return {
+          success: true,
+          data: {
+            config: cfg,
+            model,
+            // 伪向量 = 语义是假的 —— 界面必须如实告知,不能让用户误以为检索在工作
+            realVectors: model !== 'stub-deterministic',
+          },
+        };
+      } catch (error) {
+        this.log.error('hermes:embedding:get 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    ipcMain.handle('hermes:embedding:set', async (_, cfg: EmbeddingConfig) => {
+      try {
+        const svc = EmbeddingService.getInstance();
+        svc.setConfig(cfg ?? {});
+        // 换后端/换模型 = 旧向量全部作废(维度/语义都变了)——
+        // MemoryVectorStore 在下次 upsert 时会检测到并重建索引。
+        this.log.info('[IpcServer] 嵌入后端已更新', { provider: cfg?.provider, model: cfg?.model });
+        return { success: true, data: { config: svc.getConfig() } };
+      } catch (error) {
+        this.log.error('hermes:embedding:set 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    /** 探测本地 ollama:可达吗?装了哪些嵌入模型? */
+    ipcMain.handle('hermes:embedding:detect', async (_, baseUrl?: string) => {
+      try {
+        const svc = EmbeddingService.getInstance();
+        return { success: true, data: await svc.listOllamaEmbeddingModels(baseUrl) };
+      } catch (error) {
+        this.log.error('hermes:embedding:detect 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    /**
+     * 探测后端可用性 + 语义是否成立。
+     * 「连上了」不等于「有用」—— 伪向量也连得上,但召回是噪声。
+     * 故同时报告「可达」与「相近文本确实比无关文本更相似」。
+     */
+    ipcMain.handle('hermes:embedding:test', async (_, opts?: {
+      provider?: 'ollama' | 'openai' | 'zhipu'
+      baseUrl?: string
+      apiKey?: string
+      modelName?: string
+    }) => {
+      try {
+        const svc = EmbeddingService.getInstance();
+        const model: EmbeddingModel = opts?.provider === 'ollama' ? 'ollama-nomic'
+          : opts?.provider === 'openai' ? 'openai-ada'
+          : opts?.provider === 'zhipu' ? 'zhipu-embedding'
+          : 'stub-deterministic';
+        const result = await svc.probe({
+          model,
+          baseUrl: opts?.baseUrl,
+          apiKey: opts?.apiKey,
+          modelName: opts?.modelName,
+        });
+        return { success: true, data: result };
+      } catch (error) {
+        this.log.error('hermes:embedding:test 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
     // ========== 技能管理 ==========
     ipcMain.handle('skills:list', async () => {
       try {
         const skillLoader = SkillLoader.getInstance();
         const skills = skillLoader.getAllSkills();
-        return { success: true, data: skills };
+        /**
+         * 【M4-D】用【真实数据】覆盖技能卡上的使用统计。
+         *
+         * 此前 `usageCount` / `successRate` 来自 SkillLoader 的技能状态,
+         * 而写这两个字段的 `recordSkillUsage()` **全仓零调用方** ——
+         * 于是技能卡永远显示「0 次使用 / 100% 成功率」,
+         * 那不是"还没数据",那是**编造的**。
+         *
+         * 现改为从 SkillEffectivenessTracker 取真实的应用记录:
+         *   usageCount  = 该技能被应用的次数
+         *   successRate = 应用时运行的成功率(无数据时为 null,UI 显示 "—")
+         */
+        const tracker = SkillEffectivenessTracker.getInstance();
+        const enriched = skills.map((s: any) => {
+          const stat = tracker.getSkillUsage(s.id);
+          return {
+            ...s,
+            usageCount: stat?.runs ?? 0,
+            successRate: stat?.successRate ?? null,
+          };
+        });
+        return { success: true, data: enriched };
       } catch (error) {
         this.log.error('skills:list 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    /**
+     * 【M4-B】技能/工具效果判定 —— 把学习闭环收集到的数据变成可读结论。
+     *
+     * 此前 SkillEffectivenessTracker 收集了调用与成败,但【零读取方】——
+     * 数据进了 skill-stats.json 就再没人看过。本通道是它的第一个读取方。
+     */
+    /**
+     * 【M4-H】设置模型定价 —— 让用户能给自己用的模型配价。
+     * 没有这一步,不在默认表里的模型查表落空 → 成本恒 0 却看不出原因。
+     */
+    ipcMain.handle('insight:setPricing', async (_, payload: { model: string; inputPer1kUsd: number; outputPer1kUsd: number }) => {
+      try {
+        const { CostTracker } = await import('../insight/CostTracker');
+        const model = String(payload?.model ?? '').trim();
+        if (!model) return { success: false, error: '模型名不能为空' };
+        const inputPer1kUsd = Number(payload?.inputPer1kUsd);
+        const outputPer1kUsd = Number(payload?.outputPer1kUsd);
+        if (!Number.isFinite(inputPer1kUsd) || !Number.isFinite(outputPer1kUsd) || inputPer1kUsd < 0 || outputPer1kUsd < 0) {
+          return { success: false, error: '单价必须是非负数(每 1k token 的美元价)' };
+        }
+        const tracker = CostTracker.getInstance();
+        tracker.setPricing(model, { inputPer1kUsd, outputPer1kUsd });
+        return { success: true, data: { model, inputPer1kUsd, outputPer1kUsd } };
+      } catch (error) {
+        this.log.error('insight:setPricing 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    /** 列出已知定价(默认表 + 用户自定义) */
+    ipcMain.handle('insight:getPricing', async () => {
+      try {
+        const { CostTracker } = await import('../insight/CostTracker');
+        return { success: true, data: CostTracker.getInstance().listPricing() };
+      } catch (error) {
+        this.log.error('insight:getPricing 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    /**
+     * 【M4-E】跑一次技能效用对照实验。
+     *
+     * 【成本必须先告知用户】每个任务跑两遍(带/不带技能)→ token 翻倍。
+     * 界面在调用前会先说明。
+     */
+    ipcMain.handle('skills:runUtilityTrial', async (_, payload: { skillId: string; tasks: Array<{ id: string; instruction: string; expectation?: any }>; enableJudge?: boolean; repeats?: number }) => {
+      try {
+        const skillId = String(payload?.skillId ?? '').trim();
+        if (!skillId) return { success: false, error: '技能 id 不能为空' };
+        const tasks = Array.isArray(payload?.tasks) ? payload.tasks : [];
+        if (tasks.length === 0) return { success: false, error: '至少要有一个任务' };
+        const { ChatManager } = await import('../chat/ChatManager');
+        const result = await ChatManager.getInstance().runSkillUtilityTrial(
+          skillId,
+          tasks as any,
+          {
+            // 【M4-V】裁判对照默认关(D7);用户显式开了才请求,且仍要过校准门禁
+            enableJudge: payload?.enableJudge === true,
+            // 【M4-AF】重复次数(默认 1;主进程还会封顶到 5)
+            repeats: Number(payload?.repeats) || 1,
+          },
+        );
+        return { success: true, data: result };
+      } catch (error) {
+        this.log.error('skills:runUtilityTrial 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    /**
+     * 【M4-X】开源技能库 —— 搜索 / 推荐 / 下载安装。
+     *
+     * 【为什么要有它】
+     * 此前**没有一条能用的路**:原有 ClawHubManager 是本地模拟市场(「下载」按钮是 stub,
+     * 且其 4 个页签与后端已于 M4-X 删除),
+     * ClawHubRegistry 指向 example.com 占位符。技能要么用户手工导入,
+     * 要么没有 —— "联网自动去开源技能库寻找"这条需求是空的。
+     *
+     * 【离线也能用】索引落盘缓存 → 搜索/推荐是**纯本地**过滤,断网照常;
+     * 只有"下载安装"需要网络。
+     */
+    ipcMain.handle('skills:hub:search', async (_, payload: { q?: string; sourceId?: string; category?: string; limit?: number; excludeInstalled?: boolean }) => {
+      try {
+        const { SkillHub } = await import('../skill/SkillHub');
+        const hub = SkillHub.getInstance();
+        // 索引过期就在后台悄悄刷一次 —— 本次先用缓存返回,不让用户等网络
+        if (hub.isStale()) void hub.refresh().catch(() => { /* 刷不到就用缓存 */ });
+        return { success: true, data: hub.search({
+          q: payload?.q,
+          sourceId: payload?.sourceId,
+          category: payload?.category,
+          excludeInstalled: payload?.excludeInstalled,
+          limit: payload?.limit,
+        }) };
+      } catch (error) {
+        this.log.error('skills:hub:search 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    ipcMain.handle('skills:hub:recommend', async (_, payload: { limit?: number }) => {
+      try {
+        const { SkillHub } = await import('../skill/SkillHub');
+        const hub = SkillHub.getInstance();
+        if (hub.isStale()) void hub.refresh().catch(() => { /* 刷不到就用缓存 */ });
+        const cached = hub.getCached();
+        return {
+          success: true,
+          data: {
+            items: hub.recommend({ limit: payload?.limit }),
+            // 索引状态 —— 界面上要如实说"这是缓存/离线",别让用户以为是实时结果
+            index: cached ? {
+              fetchedAt: cached.fetchedAt,
+              count: cached.entries.length,
+              sources: cached.sources,
+            } : null,
+          },
+        };
+      } catch (error) {
+        this.log.error('skills:hub:recommend 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    ipcMain.handle('skills:hub:refresh', async () => {
+      try {
+        const { SkillHub } = await import('../skill/SkillHub');
+        const index = await SkillHub.getInstance().refresh();
+        return { success: true, data: { fetchedAt: index.fetchedAt, count: index.entries.length, sources: index.sources } };
+      } catch (error) {
+        this.log.error('skills:hub:refresh 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    /**
+     * 【M4-AD】自定义源管理。
+     *
+     * 【为什么要有】内置只有两个源。用户想加自己项目/社区的技能库时，
+     * 之前只能改代码。现在存配置 + 校验 + 增删，重启后仍在。
+     */
+    ipcMain.handle('skills:hub:sources:list', async () => {
+      try {
+        const { SkillHub } = await import('../skill/SkillHub');
+        return { success: true, data: SkillHub.getInstance().listSources() };
+      } catch (error) {
+        this.log.error('skills:hub:sources:list 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    ipcMain.handle('skills:hub:sources:add', async (_, payload: { name?: string; repo?: string; branch?: string; indexUrl?: string; kind?: string }) => {
+      try {
+        const { SkillHub } = await import('../skill/SkillHub');
+        const res = SkillHub.getInstance().addExtraSource({
+          name: payload?.name,
+          repo: payload?.repo,
+          branch: payload?.branch,
+          indexUrl: payload?.indexUrl,
+          kind: payload?.kind === 'anthropic-marketplace' ? 'anthropic-marketplace' : 'shelf-index',
+        });
+        if (!res.ok) return { success: false, error: res.error ?? '添加失败' };
+        return { success: true, data: SkillHub.getInstance().listSources() };
+      } catch (error) {
+        this.log.error('skills:hub:sources:add 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    ipcMain.handle('skills:hub:sources:remove', async (_, payload: { id: string }) => {
+      try {
+        const { SkillHub } = await import('../skill/SkillHub');
+        const res = SkillHub.getInstance().removeExtraSource(String(payload?.id ?? ''));
+        if (!res.ok) return { success: false, error: res.error ?? '删除失败' };
+        return { success: true, data: SkillHub.getInstance().listSources() };
+      } catch (error) {
+        this.log.error('skills:hub:sources:remove 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    /**
+     * 【M4-AC】安装前预览：列出包内文件，标出可执行脚本。
+     *
+     * 用户授权了「装完整包」，但授权不等于闭眼装 ——
+     * 装之前让他看见"会进来哪些 .py/.sh"，成本几乎为零。
+     */
+    ipcMain.handle('skills:hub:preview', async (_, payload: { id: string }) => {
+      try {
+        const { SkillHub } = await import('../skill/SkillHub');
+        const hub = SkillHub.getInstance();
+        const entry = hub.getCached()?.entries.find(e => e.id === payload?.id);
+        if (!entry) return { success: false, error: '索引里找不到该技能(请先刷新索引)' };
+        const res = await hub.previewInstall(entry);
+        if (!res.ok) return { success: false, error: res.error ?? '预览失败' };
+        return { success: true, data: { files: res.files ?? [], executables: res.executables ?? [] } };
+      } catch (error) {
+        this.log.error('skills:hub:preview 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    ipcMain.handle('skills:hub:install', async (_, payload: { id: string }) => {
+      try {
+        const { SkillHub } = await import('../skill/SkillHub');
+        const { SkillLoader } = await import('../skill/SkillLoader');
+        const hub = SkillHub.getInstance();
+        const entry = hub.getCached()?.entries.find(e => e.id === payload?.id);
+        if (!entry) return { success: false, error: '索引里找不到该技能(请先刷新索引)' };
+        const res = await hub.install(entry);
+        if (!res.ok) return { success: false, error: res.error ?? '安装失败' };
+        // 装完立刻重扫 —— 否则用户得手动刷新才看得到新技能
+        SkillLoader.getInstance().reloadSkills();
+        const skills = SkillLoader.getInstance().getAllSkills();
+        return { success: true, data: { skillId: res.skillId, skills } };
+      } catch (error) {
+        this.log.error('skills:hub:install 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    /**
+     * 【M4-V】查当前裁判能不能用。
+     *
+     * 界面用它决定"启用裁判对照"的勾选框能不能勾 —— 门禁不通过时
+     * 勾选框禁用,并把**具体哪一项不达标**写给用户看。
+     */
+    /**
+     * 【M4-AG】开跑前的样本量指引 —— 动态算，不写死数字。
+     *
+     * 用户写任务时就能看到"要检出多大的差异、大概需要多少个任务"，
+     * 而不是跑完才发现"样本不足"。数字来自 `requiredPairsForPower`
+     * （配对二值的标准功效公式），与测试里的算法是同一个。
+     */
+    ipcMain.handle('skills:trialGuidance', async () => {
+      try {
+        const { requiredPairsForPower } = await import('../learning/TrialStatistics');
+        const effects = [0.5, 0.3, 0.2];
+        return {
+          success: true,
+          data: {
+            // 6 = McNemar 精确检验的硬下限：5 个配对即使全对全错也只有 p=0.0625
+            minTasks: 6,
+            byEffect: effects.map(d => ({ delta: d, pairs: requiredPairsForPower(d) })),
+          },
+        };
+      } catch (error) {
+        this.log.error('skills:trialGuidance 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    ipcMain.handle('skills:judgeTrust', async () => {
+      try {
+        const { ChatManager } = await import('../chat/ChatManager');
+        return { success: true, data: ChatManager.getInstance().getJudgeTrust() };
+      } catch (error) {
+        this.log.error('skills:judgeTrust 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    /**
+     * 【M4-F】上报用户接受度信号。
+     *
+     * 用户对某条助手答复的反应:点了「重新生成」= 明确不要;下一条消息含
+     * 纠正词 = 不满意;含认可词 = 满意;都没命中 = unknown(**不猜**)。
+     */
+    ipcMain.handle('learning:recordAcceptance', async (_, payload: {
+      conversationId: string; messageId: string; verdict: 'accepted' | 'rejected' | 'unknown'; reason?: string;
+    }) => {
+      try {
+        const { AcceptanceLog } = await import('../learning/AcceptanceLog');
+        const messageId = String(payload?.messageId ?? '').trim();
+        if (!messageId) return { success: false, error: 'messageId 不能为空' };
+        const verdict = payload?.verdict;
+        if (verdict !== 'accepted' && verdict !== 'rejected' && verdict !== 'unknown') {
+          return { success: false, error: 'verdict 必须是 accepted / rejected / unknown' };
+        }
+        AcceptanceLog.getInstance().recordVerdict(
+          String(payload?.conversationId ?? ''),
+          messageId,
+          verdict,
+          payload?.reason,
+        );
+        return { success: true };
+      } catch (error) {
+        this.log.error('learning:recordAcceptance 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    /**
+     * 查接受度。
+     *   给了 skillId → 该技能的汇总
+     *   没给        → **全部技能的汇总**(界面要的是这个形态)
+     */
+    ipcMain.handle('learning:getAcceptance', async (_, skillId?: string) => {
+      try {
+        const { AcceptanceLog } = await import('../learning/AcceptanceLog');
+        const log = AcceptanceLog.getInstance();
+        if (skillId) {
+          return { success: true, data: log.skillAcceptance(skillId) };
+        }
+        // 汇总每个出现过的技能
+        const ids = new Set<string>();
+        for (const r of log.list()) for (const s of r.skills) ids.add(s);
+        return { success: true, data: [...ids].map(id => log.skillAcceptance(id)) };
+      } catch (error) {
+        this.log.error('learning:getAcceptance 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    ipcMain.handle('skills:getEffectiveness', async () => {
+      try {
+        const tracker = SkillEffectivenessTracker.getInstance();
+        return { success: true, data: tracker.listAllVerdicts() };
+      } catch (error) {
+        this.log.error('skills:getEffectiveness 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    /**
+     * 【M4-D】技能的边际效用 —— 同类别任务下,带它 vs 不带它的成功率差。
+     *
+     * 这是「这个技能到底有没有用」目前能给出的最强信号。
+     * 【口径】观察性对比,非受控实验(详见 SkillEffectivenessTracker.getMarginalUtility)。
+     */
+    ipcMain.handle('skills:getUtility', async () => {
+      try {
+        const tracker = SkillEffectivenessTracker.getInstance();
+        return { success: true, data: tracker.listAllUtilities() };
+      } catch (error) {
+        this.log.error('skills:getUtility 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    // ══════════ 【M3-D】技能目录管理 ══════════
+    // 这 6 个通道在 preload 里**早就声明了**,但主进程从没有实现、渲染层也从没调用 ——
+    // 典型的"能力只有一张嘴":真调了会得到 "No handler registered"。
+    // 现补齐实现(用户自定义技能目录的增删查 + 技能删除 + 存储信息)。
+
+    ipcMain.handle('skills:addCustomDir', async (_, dirPath: string) => {
+      try {
+        const loader = SkillLoader.getInstance();
+        const r = loader.addExtraDir(dirPath);
+        return { success: r.ok, data: r.dirs, error: r.error };
+      } catch (error) {
+        this.log.error('skills:addCustomDir 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    ipcMain.handle('skills:removeCustomDir', async (_, dirPath: string) => {
+      try {
+        const loader = SkillLoader.getInstance();
+        const r = loader.removeExtraDir(dirPath);
+        return { success: true, data: r.dirs };
+      } catch (error) {
+        this.log.error('skills:removeCustomDir 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    ipcMain.handle('skills:getCustomDirs', async () => {
+      try {
+        const loader = SkillLoader.getInstance();
+        return { success: true, data: loader.getExtraDirs() };
+      } catch (error) {
+        this.log.error('skills:getCustomDirs 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    ipcMain.handle('skills:getDirectoryPreview', async (_, dirPath: string) => {
+      try {
+        const loader = SkillLoader.getInstance();
+        return { success: true, data: loader.previewDirectory(dirPath) };
+      } catch (error) {
+        this.log.error('skills:getDirectoryPreview 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    ipcMain.handle('skills:getStorageInfo', async () => {
+      try {
+        const loader = SkillLoader.getInstance();
+        return { success: true, data: loader.getStorageInfo() };
+      } catch (error) {
+        this.log.error('skills:getStorageInfo 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    ipcMain.handle('skills:remove', async (_, skillId: string) => {
+      try {
+        const loader = SkillLoader.getInstance();
+        const r = loader.removeSkill(skillId);
+        return { success: r.ok, data: r, error: r.error };
+      } catch (error) {
+        this.log.error('skills:remove 失败', error);
         return { success: false, error: String(error) };
       }
     });
@@ -397,8 +1013,9 @@ export class IpcServer {
     // ========== NOVA #003-C · M2 — BootDirector handshake (第②笔) ==========
     // 命名空间 nova:* (与既有 webcontainer:renderer-ready 命名空间分属, 不冲突)
     //   交叉引用: electron/preload.ts:1228 webcontainer.notifyRendererReady → 'webcontainer:renderer-ready'
-    //   本处只追加 nova:renderer-ready / nova:boot-skip, 零改动既有语义
-    //   nova:boot-event 走 main→splash 推(SplashWindow.pushEvent), 不经 ipcMain
+    //   本处只追加 nova:renderer-ready(真就绪握手), 零改动既有语义
+    //   nova:boot-event 走 main→splash 推(SplashWindow.pushBootLog), 不经 ipcMain
+    //   旧 nova:boot-skip 已随"跳过"入口一并移除
     //
     ipcMain.handle('nova:renderer-ready', async () => {
       try {
@@ -409,16 +1026,8 @@ export class IpcServer {
       }
     });
 
-    ipcMain.on('nova:boot-skip', () => {
-      try {
-        this.novaBoot?.markSkipped();
-      } catch (error) {
-        this.log.warn(`NOVA: nova:boot-skip 回调异常: ${String(error as Error)}`);
-      }
-    });
-
     // ========== NOVA #004-B · M3 — 联网搜索 (第②笔, 追加式; NovaBootBridge 零改) ==========
-    // 命名空间 nova:* 续段; 与 nova:renderer-ready / nova:boot-skip (M2) 同命名空间分属。
+    // 命名空间 nova:* 续段; 与 nova:renderer-ready (M2) 同命名空间分属。
     // 红线: 不进 commandDecide / 安全确认链(稿 F3 §2 结论); 端点域名硬编码在 provider 内。
     // 动态 import(对齐本文件 llm-config:test / llm:chat 段的 await import 既有惯例)。
     // 单例注册只发生一次(static 标志); 单测隔离由 vitest pool:forks 天然保证。
@@ -458,8 +1067,28 @@ export class IpcServer {
       }
     });
 
+    // ========== v4.8 — 联网搜索开关(get/set) ==========
+    // 静态 import webSearchSettings(纯 ConfigStore 读写,零 electron 依赖)。
+    ipcMain.handle('nova:search:get-settings', async () => {
+      try {
+        const { getWebSearchSettings } = await import('../llm/webSearchSettings')
+        return { success: true, data: getWebSearchSettings() }
+      } catch (error) {
+        return { success: false, error: String(error) }
+      }
+    })
+    ipcMain.handle('nova:search:set-settings', async (_: unknown, patch: { enabled?: boolean }) => {
+      try {
+        const { setWebSearchEnabled, getWebSearchSettings } = await import('../llm/webSearchSettings')
+        if (typeof patch?.enabled === 'boolean') setWebSearchEnabled(patch.enabled)
+        return { success: true, data: getWebSearchSettings() }
+      } catch (error) {
+        return { success: false, error: String(error) }
+      }
+    })
+
     // ========== NOVA #005-B · M4 — nova:voice 接线 (第②笔, 追加式; NovaBootBridge/NovaSearchBridge 零改) ==========
-    // 命名空间 nova:voice:* 与 nova:* 续段; 与 nova:renderer-ready / nova:boot-skip (M2) / nova:search (M3) 同命名空间分属。
+    // 命名空间 nova:voice:* 与 nova:* 续段; 与 nova:renderer-ready (M2) / nova:search (M3) 同命名空间分属。
     // 红线: 不进 commandDecide / 安全确认链(稿 F3 §2); settings 持久化走既有 ConfigStore(不在本单新增 fs 通道)。
     // 单例注册只发生一次(static 标志); 单测隔离由 vitest pool:forks 天然保证。
     // settings 真值 key = 'nova.voice.settings'(ConfigStore 嵌套 key, 沿用 L137 路径解析);
@@ -1086,6 +1715,7 @@ export class IpcServer {
     ipcMain.handle('execution:mode:get', () => {
       try {
         const configStore = ConfigStore.getInstance();
+        // 【M1-E】默认保持 craft;与 ChatManager.getExecutionMode 保持单一真源
         const mode = configStore.get('execution.mode') || 'craft';
         return { success: true, data: mode };
       } catch (error) {
@@ -1106,9 +1736,25 @@ export class IpcServer {
       }
     });
 
+    /**
+     * 【M1-D】用户确认执行计划 —— 渲染层确认框的确认/拒绝回传。
+     * 此前渲染层的确认弹窗是死代码(无此通道),LLM 生成步骤后立即执行。
+     * 未知 planId 一律返回失败(fail-safe)。
+     */
+    ipcMain.handle('chat:task:confirm', (_, payload: { planId: string; confirmed: boolean }) => {
+      try {
+        const ok = ChatManager.getInstance().resolveTaskConfirmation(payload?.planId, !!payload?.confirmed);
+        return { success: ok };
+      } catch (error) {
+        this.log.error('chat:task:confirm 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
     ipcMain.handle('execution:mode:check', (_, operation: string, _params: any) => {
       try {
         const configStore = ConfigStore.getInstance();
+        // 【M1-E】默认保持 craft;UI 已常驻显示当前模式,用户知情
         const mode = configStore.get('execution.mode') || 'craft';
         const permissionManager = PermissionManager.getInstance();
 
@@ -1358,6 +2004,60 @@ export class IpcServer {
       }
     });
 
+    // ========== 成品文件打开 / 定位 ==========
+    // 渲染层只能传路径字符串；这里做真实路径解析 + 目录白名单 + 文件类型校验。
+    // 白名单只放 agent 产物目录与下载目录，符号链接也会先 realpath 再校验，逃不出去。
+    const resolveArtifact = (filePath: unknown): string | null => {
+      if (typeof filePath !== 'string' || !filePath.trim()) return null;
+      let real: string;
+      try {
+        real = fs.realpathSync(path.resolve(filePath));
+      } catch {
+        return null;
+      }
+      let roots: string[];
+      try {
+        const userData = getHost().getPath('userData');
+        roots = [
+          path.resolve(userData, 'workspace'),
+          path.resolve(userData, 'sandbox'),
+          path.resolve(getHost().getPath('downloads')),
+        ];
+      } catch {
+        return null;
+      }
+      if (!roots.some(root => real === root || real.startsWith(root + path.sep))) return null;
+      try {
+        return fs.statSync(real).isFile() ? real : null;
+      } catch {
+        return null;
+      }
+    };
+
+    ipcMain.handle('file:open', async (_, filePath: string) => {
+      const resolved = resolveArtifact(filePath);
+      if (!resolved) return { success: false, error: '路径不在允许的成品目录内或文件不存在' };
+      try {
+        const failure = await shell.openPath(resolved);
+        return failure
+          ? { success: false, error: failure }
+          : { success: true, data: { path: resolved } };
+      } catch (e) {
+        return { success: false, error: String(e) };
+      }
+    });
+
+    ipcMain.handle('file:showInFolder', async (_, filePath: string) => {
+      const resolved = resolveArtifact(filePath);
+      if (!resolved) return { success: false, error: '路径不在允许的成品目录内或文件不存在' };
+      try {
+        shell.showItemInFolder(resolved);
+        return { success: true, data: { path: resolved } };
+      } catch (e) {
+        return { success: false, error: String(e) };
+      }
+    });
+
     // ========== 对话导出 ==========
 
     ipcMain.handle('conversation:export', async (_, conversation: any, format: 'markdown' | 'pdf' | 'word', outputPath?: string) => {
@@ -1367,7 +2067,16 @@ export class IpcServer {
           format,
           outputPath: outputPath || ''
         });
-        return { success: result.success, data: { filePath: result.filePath }, error: result.error, guidance: result.guidance };
+        return {
+          success: result.success,
+          data: {
+            filePath: result.filePath,
+            actualFormat: result.actualFormat,
+            degraded: result.degraded,
+          },
+          error: result.error,
+          guidance: result.guidance,
+        };
       } catch (error) {
         this.log.error('conversation:export 失败', error);
         return { success: false, error: String(error) };
@@ -1605,6 +2314,12 @@ export class IpcServer {
           this.log.error('mcp:start-server server not ready', err);
           throw err;
         }
+        // 【M3-A】server 就绪 → 工具同步进 agent,LLM 才能用上
+        try {
+          await LlmAgentBrain.getInstance().syncMcpTools();
+        } catch (e) {
+          this.log.warn('mcp:start-server 工具同步失败(非致命)', e);
+        }
         return { success: true, data: status };
       } catch (error) {
         this.log.error('mcp:start-server 失败', error);
@@ -1617,6 +2332,14 @@ export class IpcServer {
       try {
         const mgr = McpManager.getInstance();
         await mgr.stopServer(name);
+        // 【M3-A】server 停了,它提供的工具也要从 agent 工具表移除 ——
+        // 否则 LLM 会一直尝试调用一个已经死掉的工具。
+        try {
+          const removed = LlmAgentBrain.getInstance().removeMcpToolsOfServer(name);
+          if (removed > 0) this.log.info('mcp:stop-server 已移除 agent 工具', { name, removed });
+        } catch (e) {
+          this.log.warn('mcp:stop-server 工具移除失败(非致命)', e);
+        }
         return { success: true };
       } catch (error) {
         this.log.error('mcp:stop-server 失败', error);
@@ -1996,25 +2719,57 @@ export class IpcServer {
       }
     });
 
-    // ========== Channel 能力域 (W3 新增) ==========
+    // ========== Channel 能力域 (W3 新增 / IM 真连通:去掉恒假桩) ==========
     ipcMain.handle('channel:list', async () => {
       try {
-        // W7 才实现 ChannelRouter,本期先返回空数组
-        return { success: true, data: [] as Array<{ id: string; name: string; healthy: boolean }> };
+        const router = ChannelRouter.getInstance()
+        const metas = router.listMetadata()
+        // 真健康检查；并行 + 8s 截止，避免不可达端点拖死 UI
+        const health = await Promise.all(
+          metas.map((m) =>
+            Promise.race([
+              router.healthCheck(m.id),
+              new Promise<{ healthy: boolean; error?: string }>((resolve) =>
+                setTimeout(() => resolve({ healthy: false, error: '健康检查超时' }), 8000),
+              ),
+            ]),
+          ),
+        )
+        return {
+          success: true,
+          data: metas.map((m, i) => ({
+            id: m.id,
+            name: m.displayName,
+            kind: m.kind,
+            enabled: m.enabled,
+            healthy: health[i]?.healthy ?? false,
+            ...(health[i]?.error ? { healthError: health[i].error } : {}),
+          })),
+        }
       } catch (error) {
-        this.log.error('channel:list 失败', error);
-        return { success: false, error: String(error) };
+        this.log.error('channel:list 失败', error)
+        return { success: false, error: String(error) }
       }
-    });
+    })
 
     ipcMain.handle('channel:health', async (_, channelId: string) => {
       try {
-        return { success: true, data: { healthy: true, latencyMs: 0, stub: true, channelId } };
+        const health = await ChannelRouter.getInstance().healthCheck(channelId)
+        return { success: true, data: { ...health, channelId } }
       } catch (error) {
-        this.log.error('channel:health 失败', error);
-        return { success: false, error: String(error) };
+        this.log.error('channel:health 失败', error)
+        return { success: false, error: String(error) }
       }
-    });
+    })
+
+    // IM 真连通:入站长轮询状态(状态页可观测,测试可断言)
+    ipcMain.handle('channel:poller-status', () => {
+      try {
+        return { success: true, data: getTelegramPollerStatus() }
+      } catch (error) {
+        return { success: false, error: String(error) }
+      }
+    })
 
     // P0-02 状态仪表板:今日消息统计
     ipcMain.handle('channel:message-stats', () => {
@@ -2106,14 +2861,47 @@ export class IpcServer {
       }
     })
 
-    // P0-05 权限 CRUD(IMPermissionManager 已有 isAllowed;补 list/add/remove)
+    // P0-05 权限 CRUD(IM 真连通:此前调不存在的 listRules → 恒返回 [])
     ipcMain.handle('permission:list', () => {
       try {
-        const mgr = IMPermissionManager.getInstance() as any
-        const list = typeof mgr.listRules === 'function' ? mgr.listRules() : []
+        const all = IMPermissionManager.getInstance().listAll()
+        // IMPermissionManager 存 channelKind → userId[]，转成 UI 表格的行结构
+        const list = Object.entries(all).flatMap(([channel, users]) =>
+          users.map((userId) => ({
+            id: `${channel}:${userId}`,
+            subject: userId,
+            level: 'member',
+            scope: channel,
+          })),
+        )
         return { success: true, data: list }
       } catch (error) {
         this.log.error('permission:list 失败', error)
+        return { success: false, error: String(error) }
+      }
+    })
+
+    // 真授权 / 撤权：直接影响 IMPermissionManager.isAllowed 的入站判定
+    ipcMain.handle('permission:grant', (_, args: { channelKind: string; userId: string }) => {
+      try {
+        if (!args?.channelKind || !args?.userId) {
+          return { success: false, error: 'channelKind 和 userId 必填' }
+        }
+        IMPermissionManager.getInstance().grant(args.channelKind as any, args.userId)
+        return { success: true }
+      } catch (error) {
+        return { success: false, error: String(error) }
+      }
+    })
+
+    ipcMain.handle('permission:revoke', (_, args: { channelKind: string; userId: string }) => {
+      try {
+        if (!args?.channelKind || !args?.userId) {
+          return { success: false, error: 'channelKind 和 userId 必填' }
+        }
+        const ok = IMPermissionManager.getInstance().revoke(args.channelKind as any, args.userId)
+        return { success: true, data: { revoked: ok } }
+      } catch (error) {
         return { success: false, error: String(error) }
       }
     })
@@ -2140,106 +2928,6 @@ export class IpcServer {
         return { success: false, error: String(error) }
       }
     })
-
-    // P1-03~06 ClawHub 技能市场
-    ipcMain.handle('clawhub:publish', (_, args: any) => {
-      try {
-        const mgr = ClawHubManager.getInstance()
-        const skill = mgr.publish(args)
-        return { success: true, data: skill }
-      } catch (error) {
-        this.log.error('clawhub:publish 失败', error)
-        return { success: false, error: String(error) }
-      }
-    })
-
-    ipcMain.handle('clawhub:review', (_, args: { skillId: string; approve: boolean; reviewerId: string; reason?: string }) => {
-      try {
-        const mgr = ClawHubManager.getInstance()
-        const skill = mgr.review(args.skillId, args.approve, args.reviewerId, args.reason)
-        return { success: !!skill, data: skill }
-      } catch (error) {
-        this.log.error('clawhub:review 失败', error)
-        return { success: false, error: String(error) }
-      }
-    })
-
-    ipcMain.handle('clawhub:search', (_, opts: any = {}) => {
-      try {
-        const mgr = ClawHubManager.getInstance()
-        return { success: true, data: mgr.search(opts) }
-      } catch (error) {
-        this.log.error('clawhub:search 失败', error)
-        return { success: false, error: String(error) }
-      }
-    })
-
-    ipcMain.handle('clawhub:rate', (_, args: any) => {
-      try {
-        const mgr = ClawHubManager.getInstance()
-        const review = mgr.rate(args)
-        return { success: !!review, data: review }
-      } catch (error) {
-        this.log.error('clawhub:rate 失败', error)
-        return { success: false, error: String(error) }
-      }
-    })
-
-    ipcMain.handle('clawhub:list-pending', () => {
-      try {
-        const mgr = ClawHubManager.getInstance()
-        return { success: true, data: mgr.listPending() }
-      } catch (error) {
-        this.log.error('clawhub:list-pending 失败', error)
-        return { success: false, error: String(error) }
-      }
-    })
-
-    // P2-03 技能模板
-    ipcMain.handle('clawhub:list-templates', (_, opts: { category?: string; query?: string } = {}) => {
-      try {
-        const mgr = ClawHubManager.getInstance()
-        return { success: true, data: mgr.listTemplates(opts) }
-      } catch (error) {
-        this.log.error('clawhub:list-templates 失败', error)
-        return { success: false, error: String(error) }
-      }
-    })
-
-    ipcMain.handle('clawhub:get-template', (_, id: string) => {
-      try {
-        const mgr = ClawHubManager.getInstance()
-        const tpl = mgr.getTemplate(id)
-        return { success: !!tpl, data: tpl }
-      } catch (error) {
-        this.log.error('clawhub:get-template 失败', error)
-        return { success: false, error: String(error) }
-      }
-    })
-
-    ipcMain.handle('clawhub:list-template-categories', () => {
-      try {
-        const mgr = ClawHubManager.getInstance()
-        return { success: true, data: mgr.listTemplateCategories() }
-      } catch (error) {
-        this.log.error('clawhub:list-template-categories 失败', error)
-        return { success: false, error: String(error) }
-      }
-    })
-
-    ipcMain.handle(
-      'clawhub:instantiate-template',
-      (_, args: { templateId: string; customName?: string; authorId: string; authorName: string }) => {
-        try {
-          const mgr = ClawHubManager.getInstance()
-          const skill = mgr.instantiateTemplate(args)
-          return { success: true, data: skill }
-        } catch (error) {
-          this.log.error('clawhub:instantiate-template 失败', error)
-          return { success: false, error: String(error) }
-        }
-      },
-    )
 
     // ClawHub 远程仓库 (registry): 列出可安装/可更新的技能
     ipcMain.handle('skills:clawhub:registry:list', async (_, baseUrl?: string) => {
@@ -2350,7 +3038,8 @@ export class IpcServer {
         if (!result.ok) {
           return { success: false, error: result.error || 'send failed' }
         }
-        return { success: true, data: { messageId: `msg-${Date.now()}` } }
+        // 不编造 messageId：各通道 send() 未回报平台消息 id，只回真实已发送的目标
+        return { success: true, data: { channelId: msg.channelId, to: msg.to } }
       } catch (error) {
         this.log.error('channel:send 失败', error)
         return { success: false, error: String(error) }
@@ -2358,6 +3047,66 @@ export class IpcServer {
     })
 
     // ========== P7 Sandbox 能力域 (W3 新增) ==========
+    /**
+     * 【M4.9】沙箱档位 / 自动审查 读写。
+     * Codex 式双闸门的用户面：档位决定"能碰什么"，自动审查决定"何时打扰"。
+     */
+    ipcMain.handle('sandbox:get-approval-config', async () => {
+      try {
+        const { ApprovalGate } = require('../sandbox/ApprovalGate');
+        const gate = ApprovalGate.getInstance();
+        const { ProcessLimiter } = require('../sandbox/ProcessLimiter');
+        return {
+          success: true,
+          data: {
+            tier: gate.getSandboxTier(),
+            autoReview: gate.isAutoReviewEnabled(),
+            limits: ProcessLimiter.getInstance().getLimits(),
+          },
+        };
+      } catch (error) {
+        this.log.error('sandbox:get-approval-config 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    ipcMain.handle('sandbox:set-approval-config', async (_, patch: { tier?: string; autoReview?: boolean; limits?: any }) => {
+      try {
+        const { ApprovalGate } = require('../sandbox/ApprovalGate');
+        const gate = ApprovalGate.getInstance();
+        if (patch?.tier && ['read-only', 'workspace', 'full'].includes(patch.tier)) {
+          gate.setSandboxTier(patch.tier as any);
+        }
+        if (typeof patch?.autoReview === 'boolean') {
+          gate.setAutoReview(patch.autoReview);
+        }
+        if (patch?.limits && typeof patch.limits === 'object') {
+          const { ProcessLimiter } = require('../sandbox/ProcessLimiter');
+          ProcessLimiter.getInstance().setLimits(patch.limits);
+        }
+        return {
+          success: true,
+          data: {
+            tier: gate.getSandboxTier(),
+            autoReview: gate.isAutoReviewEnabled(),
+          },
+        };
+      } catch (error) {
+        this.log.error('sandbox:set-approval-config 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    /** 各通道入站真实状态（供 IM 管理页显示"已连通"而不是假装） */
+    ipcMain.handle('channel:inbound-status', async () => {
+      try {
+        const { getInboundStatus } = require('../channel/bootstrap');
+        return { success: true, data: getInboundStatus() };
+      } catch (error) {
+        return { success: false, error: String(error) };
+      }
+    });
+
     ipcMain.handle('sandbox:detect', async () => {
       try {
         // W9 才实现 SandboxBuilder,本期先 stub:返回 host 平台 + docker 是否可用(用 which 探测)
@@ -2373,7 +3122,7 @@ export class IpcServer {
             platform: process.platform,
             arch: process.arch,
             dockerAvailable,
-            sandboxRoot: require('node:os').homedir() + '/.pipiclaw/sandbox',
+            sandboxRoot: require('node:os').homedir() + '/.newworld/sandbox',
             stub: true
           }
         };
@@ -2433,9 +3182,36 @@ export class IpcServer {
       }
     });
 
+    /**
+     * 【M3-E】今日成本 —— 此前是**硬编码 0 的 stub**。
+     *
+     * 【为什么这是个真问题】
+     * CostTracker 一直在真实记账(agent 路径 + AgentBrain 都调 recordUsage),
+     * 而这个唯一的读出口返回 `{totalCostUsd: 0, totalTokens: 0, stub: true}` ——
+     * 也就是说:数据在,接口在,唯独读出来是假的。
+     * 用户看到"今天花了 $0.0000",会以为没花钱 —— 而钱已经花了。
+     * 假数据比没数据更危险。
+     *
+     * 现改为读 CostTracker 的真实汇总,并把分项与按模型分布一并给出
+     * (分项能区分"提示词长"还是"回答长";按模型分布依赖 M3-E 修好的真实模型名)。
+     */
     ipcMain.handle('insight:cost:today', async () => {
       try {
-        return { success: true, data: { totalCostUsd: 0, totalTokens: 0, stub: true } };
+        const { CostTracker } = await import('../insight/CostTracker');
+        const tracker = CostTracker.getInstance();
+        const today = tracker.getTodayCost();
+        return {
+          success: true,
+          data: {
+            totalCostUsd: today.totalCostUsd,
+            totalTokens: today.totalInputTokens + today.totalOutputTokens,
+            totalInputTokens: today.totalInputTokens,
+            totalOutputTokens: today.totalOutputTokens,
+            byModel: today.byModel,
+            recent: tracker.getRecentUsage(20),
+            stub: false,
+          },
+        };
       } catch (error) {
         this.log.error('insight:cost:today 失败', error);
         return { success: false, error: String(error) };
@@ -2470,9 +3246,24 @@ export class IpcServer {
       try {
         const { IMConfigStore } = require('../channel/IMConfigStore')
         IMConfigStore.getInstance().set(args.platform as any, args.config)
+        // 热重载:配置保存后立刻重新注册通道 / 重启入站轮询，无需重启 App
+        await refreshChannels()
         return { success: true }
       } catch (error) {
         this.log.error('channel-config:save 失败', error)
+        return { success: false, error: String(error) }
+      }
+    })
+
+    // IM 真连通:真删除(此前 UI 只是把 enabled 置 false 的假删除)
+    ipcMain.handle('channel-config:delete', async (_: any, args: { platform: string }) => {
+      try {
+        const { IMConfigStore } = require('../channel/IMConfigStore')
+        const removed = IMConfigStore.getInstance().remove(args.platform as any)
+        await refreshChannels()
+        return { success: true, data: { removed } }
+      } catch (error) {
+        this.log.error('channel-config:delete 失败', error)
         return { success: false, error: String(error) }
       }
     })
@@ -2486,15 +3277,17 @@ export class IpcServer {
         try {
           channel = createChannelByKind(args.platform as any, 'test-' + Date.now())
         } catch {
-          return { success: false, message: 'unknown platform' }
+          return { success: false, message: 'unknown platform', data: { message: 'unknown platform' } }
         }
         const health = await channel.healthCheck()
-        return {
-          success: health.healthy,
-          message: health.healthy ? `连接成功 (${health.latencyMs}ms)` : `连接失败: ${health.error}`,
-        }
+        const message = health.healthy
+          ? `连接成功 (${health.latencyMs}ms)`
+          : `连接失败: ${health.error}`
+        // 顶层 message 供 UI 读取，data.message 兼容旧 UI 的 result.data?.message 写法
+        return { success: health.healthy, message, error: health.healthy ? undefined : message, data: { message } }
       } catch (error) {
-        return { success: false, message: String(error) }
+        const message = String(error)
+        return { success: false, message, error: message, data: { message } }
       }
     })
 

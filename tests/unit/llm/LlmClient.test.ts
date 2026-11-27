@@ -1,12 +1,12 @@
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest'
 import * as fs from 'node:fs'
 
-const TEST_USER_DATA = '/tmp/pipiclaw-llmclient-test'
+const TEST_USER_DATA = '/tmp/newworld-llmclient-test'
 
 vi.mock('electron', () => ({
   app: {
     getPath: vi.fn(() => TEST_USER_DATA),
-    getName: () => 'pipiclaw',
+    getName: () => 'newworld',
     getVersion: () => '0.0.0',
   },
   safeStorage: {

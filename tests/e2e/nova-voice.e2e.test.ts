@@ -2,7 +2,7 @@
  * NOVA #005-B · M4 \u8bed\u97f3 \u00b7 nova-voice.e2e.test.ts (\u7b2c\u2462\u7b14)
  *
  * \u8bbe\u8ba1\u7a3f F7 \u53e3\u5f84 (\u7c89\u9636\u5f0f \u2014\u2014 stub \u8de8 e2e):
- *   - speechSynthesis stub (PIPICLAW_E2E=1 \u73af\u5883\u4e0b\u4e0d\u53ef\u80fd\u4f9d\u8d56\u771f\u5b9e\u5f15\u64ce)
+ *   - speechSynthesis stub (NW_E2E=1 \u73af\u5883\u4e0b\u4e0d\u53ef\u80fd\u4f9d\u8d56\u771f\u5b9e\u5f15\u64ce)
  *   - getUserMedia stub
  *   - SpeechRecognition stub
  *
@@ -41,7 +41,7 @@ describe('NOVA #005-B M4 voice \u8def\u7531 + stub speak \u72b6\u6001\u673a', ()
     const title = await titleEl.textContent()
     expect(title?.length ?? 0).toBeGreaterThan(0)
     // \u586b\u5165
-    await page.locator('textarea[aria-label="tts-input"]').fill('pipiclaw nova-voice e2e test')
+    await page.locator('textarea[aria-label="tts-input"]').fill('newworld nova-voice e2e test')
     // \u70b9\u51fb\u671f\u520a
     await page.locator('button.voice-btn').click()
     // \u7b49\u5f85\u53d8\u6001: speaking \u6216 error(unavailable) \u90fd\u5408\u7406 (e2e \u73af\u5883\u53ef\u80fd\u6ca1\u6709 speechSynthesis)
@@ -59,7 +59,7 @@ describe('NOVA #005-B M4 voice \u8def\u7531 + stub speak \u72b6\u6001\u673a', ()
     if (!page) throw new Error('page not ready')
     await page.goto(`${BASE_URL}/#/voice`, { waitUntil: 'domcontentloaded', timeout: 15000 })
     await page.locator('h2.voice-title').waitFor({ state: 'visible', timeout: 10000 })
-    await page.locator('textarea[aria-label="tts-input"]').fill('pipiclaw cancel test')
+    await page.locator('textarea[aria-label="tts-input"]').fill('newworld cancel test')
     await page.locator('button.voice-btn').click()
     await page.waitForTimeout(2000)
     // \u671f\u520a\u4e2d \u2192 cancel \u2192 \u5982\u679c\u521d\u59cb state = speaking, \u51fa\u73b0 stop \u6309\u94ae; \u5982\u679c error \u4e0d\u51fa\u73b0 stop, \u8df3\u8fc7\u8be5\u68c0\u67e5

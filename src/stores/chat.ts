@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - 聊天状态管理 (Pinia Store)
+ * New World - 聊天状态管理 (Pinia Store)
  * 
  * 核心功能：
  * 1. 会话管理（创建、删除、归档、置顶）
@@ -10,6 +10,8 @@
 import { defineStore } from 'pinia';
 import { ref, computed, watch } from 'vue';
 import { ElMessage } from "element-plus/es/components/message/index";
+import { classifyAcceptance } from '@/utils/acceptanceSignal';
+import type { ProducedArtifact } from '@/types/electron-api';
 
 // ========== 类型定义 ==========
 
@@ -22,6 +24,10 @@ export interface ChatMessage {
   role: MessageRole;
   content: string;
   thinking?: string;
+  /** 【P2】provider 真实回传的思考 token 数；缺失时 ThinkingBlock 不显示计数 */
+  thinkingTokens?: number;
+  /** agent 真实落盘的成品（stat 过的路径/大小），刷新后仍可打开 */
+  artifacts?: ProducedArtifact[];
   timestamp: number;
   status: MessageStatus;
   modelId?: string;
@@ -46,6 +52,36 @@ export interface TaskExecutionPlan {
   steps: TaskStepResult[];
   estimatedDuration?: number;
   riskLevel: 'low' | 'medium' | 'high';
+}
+
+/**
+ * 【M1-C】agent 工具调用轨迹条目 —— 渲染层据此展示"agent 在干什么"。
+ * 这是把 agent 从黑盒变成可观测对象的关键数据结构。
+ */
+export interface AgentTraceEntry {
+  type: 'tool_call' | 'tool_result'
+  runId: string
+  name: string
+  args?: Record<string, unknown>
+  ok?: boolean
+  durationMs?: number
+  error?: string
+}
+
+/**
+ * 【P3】并行子任务轨迹 —— 与工具调用轨迹分开：
+ * 子任务有自己的生命周期（started/done/failed）和子 runId，按 subtaskId 归并。
+ */
+export interface SubtaskTraceEntry {
+  id: string
+  parentRunId: string
+  childRunId: string
+  index: number
+  instruction: string
+  status: 'running' | 'done' | 'failed'
+  durationMs?: number
+  tokens?: number
+  error?: string
 }
 
 export interface TaskStepResult {
@@ -197,6 +233,23 @@ export const useChatStore = defineStore('chat', () => {
   const currentTaskResult = ref<TaskExecutionResult | null>(null);
   const showTaskConfirmDialog = ref(false);
   const pendingTaskPlan = ref<TaskExecutionPlan | null>(null);
+
+  /**
+   * 【M1-C】agent 工具调用轨迹 —— 让用户看到 agent 在干什么。
+   * 此前 10 种 agent 事件零订阅者,用户在 Chat 里完全看不到工具调用过程。
+   * 按 conversationId 隔离:切换会话不能串数据。
+   */
+  const agentTrace = ref<AgentTraceEntry[]>([])
+  const agentTraceConvId = ref<string | null>(null)
+  /** 【P3】并行子任务轨迹，同样按会话隔离 */
+  const subtaskTrace = ref<SubtaskTraceEntry[]>([])
+
+  /** 切换会话时清空轨迹 —— 避免 A 会话的工具调用/子任务显示在 B 会话 */
+  function resetAgentTrace(conversationId: string | null): void {
+    agentTrace.value = []
+    subtaskTrace.value = []
+    agentTraceConvId.value = conversationId
+  }
 
   // ========== 计算属性 ==========
   
@@ -600,41 +653,34 @@ export const useChatStore = defineStore('chat', () => {
    * 确认执行任务计划
    * 真正调用 TaskExecutor 执行任务
    */
+  /**
+   * 确认执行任务计划。
+   *
+   * 【M1-D 行为变更 —— 修复双重执行陷阱】
+   * 修复前: 渲染层收到计划后【自己再调 task.execute】执行一遍。
+   *         但主进程 sendMessage 链路里 TaskExecutor 也在跑,
+   *         同一个任务会被执行两次。
+   * 现在: 执行权归主进程(它在等这个确认)。渲染层只回传"用户点了确认",
+   *       主进程 promise 兑现后才真正执行,单次执行、顺序确定。
+   */
   async function confirmExecuteTask(): Promise<void> {
     const plan = pendingTaskPlan.value;
     if (!plan) return;
-    executingTask.value = true;
     showTaskConfirmDialog.value = false;
 
     try {
-      const conversationId = currentConversationId.value ?? '';
-      const messageId = `${plan.planId}-msg`;
-      const task = planToTask(plan, conversationId, messageId);
-
-      const resp = await electronAPI?.task?.execute?.(task);
-      if (resp?.success && resp.data) {
-        const result = resp.data as {
-          success: boolean;
-          summary?: string;
-          result?: { steps?: Array<{ status: string; result?: any; error?: string }> };
-          duration?: number;
-        };
-        currentTaskResult.value = {
-          success: result.success,
-          status: result.success ? 'completed' : 'failed',
-          steps: (result.result?.steps ?? []) as TaskStepResult[],
-          summary: result.summary,
-          duration: result.duration,
-        };
-      } else {
+      executingTask.value = true;
+      const resp = await electronAPI?.chat?.confirmTaskPlan?.(plan.planId, true);
+      if (resp && resp.success === false) {
+        // 主进程已不在等待(超时/已取消)—— 回退说明,避免 UI 假装在执行
         currentTaskResult.value = {
           success: false,
           status: 'failed',
-          error: resp?.error ?? '执行失败',
+          error: resp.error ?? '确认已过期,请重新发起',
         };
       }
     } catch (err) {
-      console.error('[ChatStore] 任务执行失败:', err);
+      console.error('[ChatStore] 任务确认失败:', err);
       currentTaskResult.value = {
         success: false,
         status: 'failed',
@@ -642,6 +688,23 @@ export const useChatStore = defineStore('chat', () => {
       };
     } finally {
       executingTask.value = false;
+      pendingTaskPlan.value = null;
+    }
+  }
+
+  /**
+   * 拒绝执行计划(用户主动取消)
+   * 主进程同样在等这个结果 —— 必须回传,否则主进程会等到 60s 超时。
+   */
+  async function rejectExecuteTask(): Promise<void> {
+    const plan = pendingTaskPlan.value;
+    if (!plan) return;
+    showTaskConfirmDialog.value = false;
+    try {
+      await electronAPI?.chat?.confirmTaskPlan?.(plan.planId, false);
+    } catch (err) {
+      console.error('[ChatStore] 任务拒绝回传失败:', err);
+    } finally {
       pendingTaskPlan.value = null;
     }
   }
@@ -693,6 +756,9 @@ export const useChatStore = defineStore('chat', () => {
       return false;
     }
 
+    // 【M1-C】新一轮开始:清空上轮工具调用轨迹(否则新旧混在一起分不清)
+    resetAgentTrace(currentConversationId.value);
+
     console.log('[ChatStore] ========== [SEND] sendMessage 被调用 ==========');
     console.log('[ChatStore] [MSG] 消息内容:', content);
     console.log('[ChatStore] [PROV] Provider:', providerId, 'Model:', modelId);
@@ -704,6 +770,26 @@ export const useChatStore = defineStore('chat', () => {
     const conv = currentConversation.value!;
     const effectiveProviderId = providerId || lastProviderId.value || conv.providerId;
     const effectiveModelId = modelId || lastModelId.value || conv.modelId;
+
+    // 【M4-F】采集用户对**上一条**答复的态度。
+    //   用户的新消息是唯一自然信号:以纠正词开头 = 不满意,以认可词开头 = 满意。
+    //   都没命中就不报 —— 「用户没再说话」不等于满意,不猜。
+    try {
+      const prev = [...conv.messages].reverse().find(m => m.role === 'assistant' && m.content);
+      if (prev) {
+        const signal = classifyAcceptance(content);
+        if (signal.verdict !== 'unknown') {
+          void (window as any).electronAPI?.learning?.recordAcceptance?.({
+            conversationId: conv.id,
+            messageId: prev.id,
+            verdict: signal.verdict,
+            reason: signal.reason,
+          });
+        }
+      }
+    } catch (e) {
+      console.warn('[ChatStore] 上报接受度信号失败', e);
+    }
 
     // Step 1: 立即添加用户消息到本地
     const userMsgId = `msg_${Date.now()}_user`;
@@ -1083,6 +1169,17 @@ export const useChatStore = defineStore('chat', () => {
     if (msg.status !== 'streaming') {
       msg.status = 'streaming';
     }
+
+    // ===== NW 语义化生命体征: 每个 token chunk 驱动一次神经脉冲/粒子喷射 =====
+    // 仅当前会话 + content 类型计入"输出 token", 避免后台会话串扰。
+    // 惰性 import 避免 store 初始化环 (chat store 初始化时 orb store 可能未就绪)。
+    if (conversationId === currentConversationId.value && type === 'content' && delta) {
+      import('@/stores/orb').then(({ useOrbStore }) => {
+        const orb = useOrbStore();
+        orb.setState('speaking', 'nw token stream'); // thinking → speaking (优先级更高, 允许)
+        orb.noteToken(delta.length);
+      }).catch(() => { /* orb store 不可用时静默降级, 不影响聊天主链路 */ });
+    }
   }
 
   /**
@@ -1114,6 +1211,13 @@ export const useChatStore = defineStore('chat', () => {
   let unsubscribeMessage: (() => void) | null = null;
   let unsubscribeConversation: (() => void) | null = null;
   let unsubscribeStream: (() => void) | null = null;
+  /** 【NW】真实 token usage (主进程 CostTracker 同源) */
+  let unsubscribeUsage: (() => void) | null = null;
+  /** 【M1-D】任务计划确认 + 步骤流 */
+  let unsubscribeTaskPlan: (() => void) | null = null;
+  let unsubscribeTaskStep: (() => void) | null = null;
+  /** 【M1-C】agent 工具调用事件 */
+  let unsubscribeAgentEvent: (() => void) | null = null;
 
   /**
    * 初始化 Store
@@ -1144,6 +1248,10 @@ export const useChatStore = defineStore('chat', () => {
       unsubscribeStream();
       console.log('[ChatStore] 清理旧的流式监听器');
     }
+    if (unsubscribeUsage) {
+      unsubscribeUsage();
+      console.log('[ChatStore] 清理旧的 usage 监听器');
+    }
 
     // 注册 IPC 事件监听
     unsubscribeMessage = electronAPI?.chat?.onMessage?.((data: { conversationId: string; message: ChatMessage }) => {
@@ -1159,6 +1267,114 @@ export const useChatStore = defineStore('chat', () => {
     unsubscribeStream = electronAPI?.chat?.onStreamUpdate?.((data: { conversationId: string; messageId: string; delta: string; type: 'content' | 'thinking' }) => {
       console.log('[ChatStore] 收到 onStreamUpdate 事件:', data.conversationId, data.messageId, 'delta:', data.delta?.length, 'type:', data.type);
       handleStreamChunkEvent(data);
+    }) || null;
+
+    // ===== 【NW】真实 token usage → 生命体 Orb 精确遥测 =====
+    // 主进程 dispatchToAgent 完成后广播, 与 CostTracker 记账同源。
+    unsubscribeUsage = electronAPI?.chat?.onUsage?.((data: {
+      conversationId: string;
+      usage: { promptTokens: number; completionTokens: number; totalTokens: number; reasoningTokens?: number; model: string };
+    }) => {
+      if (data?.conversationId !== currentConversationId.value || !data?.usage) return;
+      import('@/stores/orb').then(({ useOrbStore }) => {
+        useOrbStore().setExactUsage({
+          promptTokens: data.usage.promptTokens,
+          completionTokens: data.usage.completionTokens,
+          totalTokens: data.usage.totalTokens,
+          model: data.usage.model,
+          reasoningTokens: data.usage.reasoningTokens,
+        });
+      }).catch(() => { /* orb store 不可用静默降级 */ });
+    }) || null;
+
+    // ===== 【M1-D】任务计划确认事件订阅 =====
+    // 此前渲染层的确认弹窗是死代码:showTaskConfirmDialog 从未被置 true,
+    // 因为主进程从不广播计划、preload 也无此通道。
+    if (unsubscribeTaskPlan) unsubscribeTaskPlan();
+    if (unsubscribeTaskStep) unsubscribeTaskStep();
+    if (unsubscribeAgentEvent) unsubscribeAgentEvent();
+
+    unsubscribeTaskPlan = electronAPI?.chat?.onTaskPlan?.((data: { conversationId: string; planId: string; instruction: string; steps: Array<{ order: number; description: string; status: string; params?: Record<string, unknown> }>; riskLevel: string }) => {
+      if (data?.conversationId !== currentConversationId.value) return;
+      pendingTaskPlan.value = data as unknown as TaskExecutionPlan;
+      showTaskConfirmDialog.value = true;
+    }) || null;
+
+    unsubscribeTaskStep = electronAPI?.chat?.onTaskStep?.((data: { conversationId: string; planId: string; order: number; status: string; description?: string; error?: string }) => {
+      if (data?.conversationId !== currentConversationId.value) return;
+      const plan = pendingTaskPlan.value;
+      if (!plan || plan.planId !== data.planId) return;
+      const step = plan.steps.find(s => s.order === data.order);
+      if (step) step.status = data.status as TaskStepResult['status'];
+      // 触发响应式更新(plan 是 ref,改内部字段需要整体替换)
+      pendingTaskPlan.value = { ...plan };
+    }) || null;
+
+    // ===== 【M1-C】agent 工具调用事件(可视化用) =====
+    unsubscribeAgentEvent = electronAPI?.chat?.onAgentEvent?.((data: { conversationId: string; event: { type: string; runId: string; data: Record<string, unknown> } }) => {
+      if (data?.conversationId !== currentConversationId.value) return;
+      const ev = data.event;
+      if (!ev) return;
+
+      // 会话切换后第一次收到事件时重置轨迹 —— 不把上个会话的工具调用带过来
+      if (agentTraceConvId.value !== data.conversationId) {
+        agentTraceConvId.value = data.conversationId;
+        agentTrace.value = [];
+        subtaskTrace.value = [];
+      }
+
+      // 【P3】并行子任务：started 建档，done/failed 按 subtaskId 原地更新
+      if (ev.type === 'subtask.started' || ev.type === 'subtask.done' || ev.type === 'subtask.failed') {
+        const d = ev.data as {
+          subtaskId?: string; childRunId?: string; parentRunId?: string; index?: number
+          instruction?: string; durationMs?: number; tokens?: number; error?: string
+        };
+        const id = String(d.subtaskId ?? '');
+        if (id) {
+          const existing = subtaskTrace.value.find(s => s.id === id);
+          if (existing) {
+            if (ev.type === 'subtask.done') {
+              existing.status = 'done';
+              existing.durationMs = Number(d.durationMs ?? 0);
+              existing.tokens = Number(d.tokens ?? 0);
+            } else if (ev.type === 'subtask.failed') {
+              existing.status = 'failed';
+              existing.durationMs = Number(d.durationMs ?? 0);
+              existing.error = d.error;
+            }
+          } else if (ev.type === 'subtask.started') {
+            subtaskTrace.value.push({
+              id,
+              parentRunId: String(d.parentRunId ?? ev.runId ?? ''),
+              childRunId: String(d.childRunId ?? ''),
+              index: Number(d.index ?? 0),
+              instruction: String(d.instruction ?? ''),
+              status: 'running',
+            });
+          }
+          subtaskTrace.value = [...subtaskTrace.value];
+        }
+        return;
+      }
+
+      if (ev.type === 'tool_call') {
+        agentTrace.value.push({
+          type: 'tool_call',
+          runId: ev.runId,
+          name: String((ev.data as { name?: string })?.name ?? ''),
+          args: ((ev.data as { args?: Record<string, unknown> })?.args ?? {}) as Record<string, unknown>,
+        });
+      } else if (ev.type === 'tool_result') {
+        agentTrace.value.push({
+          type: 'tool_result',
+          runId: ev.runId,
+          name: String((ev.data as { name?: string })?.name ?? ''),
+          ok: !!(ev.data as { ok?: boolean })?.ok,
+          durationMs: Number((ev.data as { durationMs?: number })?.durationMs ?? 0),
+          error: (ev.data as { error?: string })?.error,
+        });
+      }
+      agentTrace.value = [...agentTrace.value];
     }) || null;
 
     console.log('[ChatStore] 初始化完成，监听器已注册');
@@ -1239,6 +1455,10 @@ export const useChatStore = defineStore('chat', () => {
     isGenerating,
     showTaskConfirmDialog,
     pendingTaskPlan,
+    agentTrace,
+    subtaskTrace,
+    resetAgentTrace,
+    rejectExecuteTask,
     cancelExecuteTask,
     confirmExecuteTask
   };

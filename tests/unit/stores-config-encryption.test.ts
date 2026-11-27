@@ -16,7 +16,7 @@ vi.mock('electron', () => {
   return {
     app: {
       getPath: vi.fn((key: string) => key === 'userData' ? TEST_USER_DATA : '/tmp'),
-      getName: () => 'pipiclaw',
+      getName: () => 'newworld',
       getVersion: () => '0.0.0',
     },
     safeStorage: {

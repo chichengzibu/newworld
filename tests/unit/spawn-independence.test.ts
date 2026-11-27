@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - #005 spawn 章 (R1 独立实例 + R2 深度封顶 + R3 单例保留 + 预算隔离 + 快照溯源)
+ * New World - #005 spawn 章 (R1 独立实例 + R2 深度封顶 + R3 单例保留 + 预算隔离 + 快照溯源)
  *
  * ═══ 被测机制（LlmAgentBrain.spawn 重写 + run 预算/快照扩展）═══
  *   R1: spawn 返回【新 LlmAgentBrain 实例】(独立 tools/runs), 禁 `brain: this` 自引用 (旧 stub 债已删)
@@ -22,7 +22,7 @@
  *   - LlmClient.streamChat 脚本化: n=1,2 轮 → tool_call(Bash node)+usage(10); n≥3 轮 → final
  *   - 断言"子收到哪个 contextKind / 是否触发预算 / 快照 parentRunId" 全靠显式探针, 不依赖模块态 (不存在了)
  */
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, afterEach, beforeEach } from 'vitest'
 import { vi } from 'vitest'
 import type { LlmStreamChunk } from '../../electron/llm/types'
 
@@ -56,8 +56,25 @@ vi.mock('../../electron/llm/LlmClient', () => ({
 
 import { LlmAgentBrain, LlmAgentBrainEvents } from '../../electron/agent/LlmAgentBrain'
 import { BUILTIN_TOOLS } from '../../electron/agent/tools'
+import { installToolConfirmation, activatePermissiveForTest } from '../unit/auto-confirm'
+
+/**
+ * 【M2-B】工具权限门测试桥 —— 本文件的验证主题不是权限,只是顺带调了
+ * Edit/Bash 写工具。装一个"总是同意"的桥,避免新加的 fail-safe 安全门
+ * 把这些无关测试拦下。
+ *
+ * 护栏:主题为权限的测试【不得】使用本桥(见 ToolGate.test.ts,
+ *       以及 harness-wiring 的 G3 用户拒绝用例)。
+ */
+/** 【M2-B】确认桥 —— 显式传入 run(),不写全局。护栏见 auto-confirm.ts。 */
+const CONFIRM_ALL = installToolConfirmation();
+
 
 describe('#005 spawn 章 (R1 独立 + R2 深度 + 预算 + 快照溯源)', () => {
+  beforeEach(() => {
+    activatePermissiveForTest() // v4.8: 本文件验证 spawn 隔离，非权限主题，显式放行 RBAC
+  })
+
   it('SP-1 独立性: spawn 返回新实例 (非 brain:this); 子/父 tools 同源 BUILTIN_TOOLS; runs Map 各自独立', async () => {
     const parent = LlmAgentBrain.getInstance()
     const child = await parent.spawn({ instruction: 'sub task' }, { parentRunId: 'run-p1' })
@@ -123,7 +140,7 @@ describe('#005 spawn 章 (R1 独立 + R2 深度 + 预算 + 快照溯源)', () =>
     unsub = LlmAgentBrainEvents.subscribe((e) => {
       if (e && (e as { type: string }).type === 'run_error' && /budget/i.test((e as { error?: string }).error ?? '')) gotBudgetErr = true
     })!
-    let iterations = 0
+    const iterations = 0
     try {
       const r = await (parent as LlmAgentBrain).run('p', { maxTokens: 5, conversationId: 'c' } as never)
       expect(r.content).not.toBe('') // 降级到 final (最后 assistant content)

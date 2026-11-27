@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - Channel / DiscordChannel (W8)
+ * New World - Channel / DiscordChannel (W8)
  *
  * Discord REST API(真实 fetch 实现)。msg.to = 频道(channel) id。
  * 发消息: https://discord.com/api/v10/channels/{channelId}/messages

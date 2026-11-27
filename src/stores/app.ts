@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - 应用状态管理
+ * New World - 应用状态管理
  *
  * 主题系统(从 5 套彩色主题 → 2 套极简主题):
  *   - light (白) - Tare 风格
@@ -44,11 +44,8 @@ export const useAppStore = defineStore('app', () => {
   /** 初始化状态描述 */
   const initStatus = ref<string>('');
 
-  /** 是否首次启动 */
+  /** 是否首次启动（v4.8：引导已移除，仅保留状态供未来空态/提示使用） */
   const isFirstLaunch = ref<boolean>(true);
-
-  /** 是否显示新手引导 */
-  const showGuide = ref<boolean>(false);
 
   // ==================== 动作方法 ====================
 
@@ -69,15 +66,9 @@ export const useAppStore = defineStore('app', () => {
         // 获取平台信息
         platform.value = window.electronAPI.app.getPlatform();
 
-        // 检查是否首次启动
+        // 检查是否首次启动（v4.8：首次引导已移除，仅保留状态供未来空态/提示使用）
         const firstRunResult = await window.electronAPI.config.get('firstRun');
-        if (firstRunResult?.success && firstRunResult.data === true) {
-          isFirstLaunch.value = true;
-          showGuide.value = true;
-        } else {
-          isFirstLaunch.value = false;
-          showGuide.value = false;
-        }
+        isFirstLaunch.value = firstRunResult?.success && firstRunResult.data === true;
 
         // 读取用户保存的主题
         // P1-7 bugfix: key 必须是 'app.theme' 匹配 ConfigStore 默认 schema (v4.2 重构遗留)
@@ -198,7 +189,6 @@ export const useAppStore = defineStore('app', () => {
    */
   async function markFirstLaunchComplete(): Promise<void> {
     isFirstLaunch.value = false;
-    showGuide.value = false;
 
     if (window.electronAPI) {
       try {
@@ -206,23 +196,6 @@ export const useAppStore = defineStore('app', () => {
       } catch (error) {
         console.error('更新首次启动配置失败:', error);
       }
-    }
-  }
-
-  /**
-   * 打开新手引导
-   */
-  function openGuide(): void {
-    showGuide.value = true;
-  }
-
-  /**
-   * 关闭新手引导
-   */
-  function closeGuide(): void {
-    showGuide.value = false;
-    if (isFirstLaunch.value) {
-      markFirstLaunchComplete();
     }
   }
 
@@ -237,7 +210,6 @@ export const useAppStore = defineStore('app', () => {
     initialized,
     initStatus,
     isFirstLaunch,
-    showGuide,
 
     // 方法
     initialize,
@@ -246,7 +218,5 @@ export const useAppStore = defineStore('app', () => {
     applyTheme,
     setLanguage,
     markFirstLaunchComplete,
-    openGuide,
-    closeGuide,
   };
 });

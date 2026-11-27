@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - 定时任务状态管理
+ * New World - 定时任务状态管理
  */
 
 import { defineStore } from 'pinia';

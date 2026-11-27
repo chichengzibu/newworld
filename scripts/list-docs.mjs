@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * PiPiClaw docs/site metadata lister
+ * New World docs/site metadata lister
  *
  * Walks docs/site/, prints a markdown table of all .md files with size and
  * first heading.  No external deps; runs in < 100 ms.
@@ -40,7 +40,7 @@ function walk(dir, out = []) {
 
 const files = walk(DOCS_ROOT).sort((a, b) => a.path.localeCompare(b.path))
 
-console.log(`# PiPiClaw docs/site inventory (${files.length} files)`)
+console.log(`# New World docs/site inventory (${files.length} files)`)
 console.log()
 console.log('| Path | Size (chars) | Title |')
 console.log('| --- | ---: | --- |')

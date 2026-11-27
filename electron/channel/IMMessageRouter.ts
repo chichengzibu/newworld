@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - Channel / IMMessageRouter (W7.1)
+ * New World - Channel / IMMessageRouter (W7.1)
  *
  * 收到一条消息 → permission + security + routing 决策。
  * 不直接调 Channel.send(),由 ChannelRouter 负责。
@@ -41,10 +41,13 @@ export class IMMessageRouter {
     return IMMessageRouter.instance
   }
 
+  /** 新增或按 id 更新（UI 编辑规则走同一入口，避免重复 push 出多条同 id 规则） */
   addRule(rule: RouteRule): void {
-    this.rules.push(rule)
+    const idx = this.rules.findIndex(r => r.id === rule.id)
+    if (idx >= 0) this.rules[idx] = rule
+    else this.rules.push(rule)
     this.log.info(
-      `IMMessageRouter: 加规则 ${rule.id} (${rule.trigger} → ${rule.targetChannel})`,
+      `IMMessageRouter: ${idx >= 0 ? '更新' : '新增'}规则 ${rule.id} (${rule.trigger} → ${rule.targetChannel})`,
     )
   }
 
@@ -86,7 +89,15 @@ export class IMMessageRouter {
     // 4. match route rule
     const matched = this.matchRule(processed.cleanContent ?? '')
     if (!matched) {
-      return { allowed: true, sanitized: true, rejectReason: 'no matching route rule' }
+      // 【IM 真连通】此前这里漏带 cleanContent，导致「无路由规则」时下游
+      // InboundBridge 拿到空内容直接跳过 —— 默认回原通道的闭环根本走不通。
+      // 无规则 ≠ 拒绝：仍要把清洗后的正文交给回复生成器。
+      return {
+        allowed: true,
+        sanitized: true,
+        cleanContent: processed.cleanContent,
+        rejectReason: 'no matching route rule',
+      }
     }
     return {
       allowed: true,

@@ -60,10 +60,10 @@ electron/openclaw/OpenClawGateway.ts:720       throw new Error(`runCommand: 不�
 ### B5. MCP 角色澄清（关键偏差源）
 | 项 | 证据 |
 |---|---|
-| PiPiClaw 是 MCP **client** | `electron/mcp/McpManager.ts:325` `const resp = await inst.transport.request<McpToolResult>('tools/call', params);` |
+| New World 是 MCP **client** | `electron/mcp/McpManager.ts:325` `const resp = await inst.transport.request<McpToolResult>('tools/call', params);` |
 | MCP 不在 runCommand 链 | `grep -rn "runCommand\|run_command\|BashTool" electron/mcp/` → **空** |
 
-**含义**：v3 规格 #3 "放分发层使 MCP 调用自动被覆盖" 的前提 **不成立**（MCP 是调**外部 server**，PiPiClaw 自身不暴露 runCommand 作为 MCP tool）。合规矩阵里此条按"偏差 + 理由"处理。
+**含义**：v3 规格 #3 "放分发层使 MCP 调用自动被覆盖" 的前提 **不成立**（MCP 是调**外部 server**，New World 自身不暴露 runCommand 作为 MCP tool）。合规矩阵里此条按"偏差 + 理由"处理。
 
 ---
 
@@ -75,7 +75,7 @@ electron/openclaw/OpenClawGateway.ts:720       throw new Error(`runCommand: 不�
 
 ```ts
 /**
- * PiPiClaw - BashTool 三层名单 (v3 终版 + 5 裁决; 唯一可调松紧处)
+ * New World - BashTool 三层名单 (v3 终版 + 5 裁决; 唯一可调松紧处)
  *
  * 设计原则：
  *   1. 自动放行: 只读/无网/无副作用 —— 默任信任，免确认
@@ -111,7 +111,7 @@ electron/openclaw/OpenClawGateway.ts:720       throw new Error(`runCommand: 不�
 export const SECRETS_GUARD_PATTERNS: ReadonlyArray<string> = [
   // 裁决 #2a: 路径段感知 → 以下均为 "段名", 匹配 basename or path-segment
   '.ssh',                          // /home/user/.ssh/, C:\Users\xxx\.ssh\
-  '.pipiclaw-secrets',             // 自定义秘钥包
+  '.newworld-secrets',             // 自定义秘钥包
   'clawhub-dev-ed25519.key',       // 已入库禁止文件 (即使不在 .git 里也拦截)
   'id_rsa',                        // 常见 SSH 私钥文件名
   'id_dsa',
@@ -227,7 +227,7 @@ export function contextAllowsConfirm(kind: ContextKind): boolean {
 
 ```ts
 /**
- * PiPiClaw - 命令三层决策 + 确认 + 审计 咽喉点 (v3 #3)
+ * New World - 命令三层决策 + 确认 + 审计 咽喉点 (v3 #3)
  *
  * 单点强制: BashTool.execute() 与 OpenClawGateway.runCommand() 都调用本模块
  *   的 `execCommand()`。禁止任何调用点自行复制决策逻辑。
@@ -637,7 +637,7 @@ expect(decideCommand('env', ['SECRET']).kind).toBe('confirm')
 // 命中 (段名 == 表项)
 expect(decideCommand('cat', ['/.ssh/id_rsa']).kind).toBe('deny')
 expect(decideCommand('cat', ['/home/user/.ssh']).kind).toBe('deny')
-expect(decideCommand('cat', ['/path/to/.pipiclaw-secrets']).kind).toBe('deny')
+expect(decideCommand('cat', ['/path/to/.newworld-secrets']).kind).toBe('deny')
 expect(decideCommand('cat', ['id_rsa']).kind).toBe('deny')
 // 不命中 (段名 != 表项, 禁裸子串)
 expect(decideCommand('cat', ['/etc/passwd']).kind).toBe('auto')
@@ -768,8 +768,8 @@ expect(rLs.ok).toBe(true)
 | #4 | contextKind = ui / im_inbound / scheduler / headless，入口派生 | **按规格实现**（2.5 入口派生表）；**附注** brain 默认 headless（v3 #B4 的 fallback），im_inbound/scheduler 留待后续接入点 |
 | #5 | 弹窗：命令+cwd+args 预览；仅两键；30s 超时拒；无窗拒；"记住"→backlog | **按规格实现**（2.6 + 2.7）；"记住本会话" 不实现，列 backlog（2.7 注释） |
 | #6 | 审计：`{userData}/audit/openclaw.audit.jsonl` 同步追加；字段 ts/opId/baseCmd/args/cwd/exit/denied/denialReason/humanConfirm/confirmChannel/contextKind；拒绝也落盘；写失败→命令拒(audit-unavailable)；头注释注敏感参数；轮转→backlog | **偏差 + 理由**（见偏差清单 #7：审计由"单行追加"细化为"两段式 占位 pending + 终态 finish"，因真实 exit 只在 execFile 后可得；**四颗审计钉子**：哨兵 pending / phase 配对 / 孤儿可检测 / 分段失败语义——start 段写失败即拒（fail-closed 语义不变），finish 段写失败不改判命令；字段全量 + phase 在 start 行满足）；**附注** 轮转不实现，留 backlog |
-| #7 | 密钥 guard: args 或 cwd 含 `.pipiclaw-secrets` / `clawhub-dev-ed25519.key` → deny | **按规格实现 + 裁决 #2 扩展** —— (a) 加 `/.ssh` / `/.aws` 为段名(裁决 #2a: 段名感知,非裸子串);(b) SECRETS_GUARD_PATTERNS **数据表化**(裁决 #2b: 改数据不改代码);(c) 头注释已注"尽力而为、可绕过、根治 = Windows 沙箱 P2"(裁决 #2c) |
-| #8 | 残留风险条款写 constants.ts 头 + 旗舰文档 | **按规格实现**（2.1 constants.ts 头已写；旗舰文档在 Step D 后更新 `PiPiClaw-项目文档记录.md` 第 7 节安全部分） |
+| #7 | 密钥 guard: args 或 cwd 含 `.newworld-secrets` / `clawhub-dev-ed25519.key` → deny | **按规格实现 + 裁决 #2 扩展** —— (a) 加 `/.ssh` / `/.aws` 为段名(裁决 #2a: 段名感知,非裸子串);(b) SECRETS_GUARD_PATTERNS **数据表化**(裁决 #2b: 改数据不改代码);(c) 头注释已注"尽力而为、可绕过、根治 = Windows 沙箱 P2"(裁决 #2c) |
+| #8 | 残留风险条款写 constants.ts 头 + 旗舰文档 | **按规格实现**（2.1 constants.ts 头已写；旗舰文档在 Step D 后更新 `New World-项目文档记录.md` 第 7 节安全部分） |
 | #9 | 拒绝语义复用 PERMISSION_DENIED；metachar/null-byte/sandbox/execFile 数组传参保留 | **按规格实现**（2.4 throw 带 `errorCode:'PERMISSION_DENIED'`；2.2 `doExecFile` 保留 metachar/null-byte 校验；sandbox 校验从 `BashTool.isCwdInSandbox` 抽出复用；execFile 数组传参） |
 | 测试 | 集合迭代断言/三值/归一化四连/find 7 参/secrets/T9 正向/T6 contextKind/T7 审计+fail-closed+四钉子/T8 brain/T12 MCP 窄项/injection 三连(T10) | **按规格实现**（2.8 T1-T12 全条对应；**T7 钉四颗审计钉子**：哨兵 pending / phase 配对 / 孤儿可检测 / 分段失败①start拒②finish真 warn；**T8 含 T11 落地说明**） |
 | 门禁·升级 a | P1/P3 stub+ui 强制，禁 echo/ls 降级；stub 失败报偏差+理由 | **按裁定升级 a**（PART 4 方针 #5 + 偏差 #8 + 门禁检查锚点：diff 必见 `command:'node'`+`contextKind:'ui'`） |
@@ -801,7 +801,7 @@ expect(rLs.ok).toBe(true)
 | 1 | `npm test` 全绿 | **总数上抬**（原 930 → + T1-T12；**数字一律实测口径**：文件数 / 过 / skip / 失败 四项，禁止预估） |
 | 2 | `npx playwright test tests/e2e/p0-security-injection.spec.ts` | 3 绿 |
 | 3 | `vue-tsc --noEmit` | 0 错（Step A 已归 0，本批零新增） |
-| 4 | 审计文件 `%APPDATA%/pipiclaw/audit/openclaw.audit.jsonl` 人工可读 | start 行含哨兵 `exit:'pending'`+`phase:'start'`+`humanConfirm` 字段；finish 行含 `exit:0`+`phase:'finish'`；含至少 1 条 deny 条目 |
+| 4 | 审计文件 `%APPDATA%/newworld/audit/openclaw.audit.jsonl` 人工可读 | start 行含哨兵 `exit:'pending'`+`phase:'start'`+`humanConfirm` 字段；finish 行含 `exit:0`+`phase:'finish'`；含至少 1 条 deny 条目 |
 | 5 | `git status --porcelain` 干净（除 gitignore） | 空 |
 | 6 | ROE 任一红 → **BLOCKED** 报回，不带伤往下走 | 严格 |
 | 7 | 设计稿复审抽验 F 段 ≥2 条 file:line（指挥层自查条款，防臆造方法名 / 推断机制被误当事实）— **#007 首落（2026-10-16 修正版 A 放行进 4）** | 严格 |

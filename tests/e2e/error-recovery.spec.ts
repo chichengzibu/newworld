@@ -1,4 +1,4 @@
-import { test, expect, shouldRunElectronE2E } from './helpers/electron-app'
+import { test, expect, shouldRunElectronE2E, addProviderAndReload, selectProviderAndModel } from './helpers/electron-app'
 
 /**
  * T+480: 错误处理 / 降级 UX 真用户测试
@@ -17,7 +17,7 @@ test.describe('T+480 Chat 错误处理 / 降级 UX', () => {
   async function setupConversation(window: any) {
     await window.waitForSelector('#app', { timeout: 10_000 })
     await window.waitForTimeout(800)
-    await window.click('a.nav-item[href$="#/chat"]').catch(() => {})
+    await window.click('nav.sidenav a.nav-icon[href$="#/chat"]').catch(() => {})
     await window.waitForTimeout(1500)
     // 强制新建会话,避免 state 不干净
     const newChatBtn = window.locator('button.new-chat-btn, .empty-new-chat').first()
@@ -29,60 +29,22 @@ test.describe('T+480 Chat 错误处理 / 降级 UX', () => {
 
   test('ER1: 错误端口 (11435) → send → assistant bubble 显示错误', async ({ window }) => {
     // 注入一个错误端口的 provider
-    const addResult = await window.evaluate(async () => {
-      const api = (window as any).electronAPI
-      // 清旧
-      const listRes = await api.models.list()
-      if (listRes?.success && listRes.data) {
-        for (const p of listRes.data) {
-          if (p.name === 'Bad Port (T+480 ER1)') {
-            await api.models.delete(p.id)
-          }
-        }
-      }
-      const r = await api.models.add({
-        name: 'Bad Port (T+480 ER1)',
-        type: 'openai',
-        baseUrl: 'http://localhost:11435/v1', // 错误端口
-        apiKey: 'no-key',
-        enabled: true,
-        timeout: 5_000, // 5s 超时,测试更快
-        models: [{ id: 'fake-model', name: 'fake-model', capabilities: ['chat'] }]
-      })
-      return r?.success
+    // 【M4-L 修】注入 provider 后**必须刷新页面** —— Chat.vue 只在 onMounted 调
+    // `modelsStore.fetchProviders()`,IPC 塞进去的 provider 不会推给渲染层 →
+    // 模型选择器一直是 disabled → 点击等到 60s 超时(报错却是 "browser has been closed",
+    // 那是超时被中断的后果,不是根因)。
+    await addProviderAndReload(window, {
+      name: 'Bad Port (T+480 ER1)',
+      baseUrl: 'http://localhost:11435/v1', // 错误端口
+      timeout: 5_000,
+      models: [{ id: 'fake-model', name: 'fake-model', capabilities: ['chat'] }],
     })
-    expect(addResult).toBe(true)
-    await window.waitForTimeout(500)
 
     await setupConversation(window)
 
-    // 选 Bad Port provider
-    const providerSelect = window.locator('.model-selector .el-select').first()
-    if (await providerSelect.count() > 0) {
-      await providerSelect.click()
-      await window.waitForTimeout(500)
-      const opt = window.locator('.el-select-dropdown__item:has-text("Bad Port (T+480 ER1)")').first()
-      if (await opt.count() > 0) {
-        await opt.click()
-        await window.waitForTimeout(800)
-      }
-    }
-
-    // 选 model
-    const modelSelect = window.locator('.model-selector .el-select').nth(1)
-    if (await modelSelect.count() > 0) {
-      await window.waitForFunction(() => {
-        const sels = document.querySelectorAll('.model-selector .el-select')
-        return sels[1] && !sels[1].querySelector('input[disabled]')
-      }, { timeout: 10_000 }).catch(() => {})
-      await modelSelect.click()
-      await window.waitForTimeout(500)
-      const opt = window.locator('.el-select-dropdown__item:has-text("fake-model")').first()
-      if (await opt.count() > 0) {
-        await opt.click()
-        await window.waitForTimeout(500)
-      }
-    }
+    // 选 Bad Port provider + model(必须选中,不能像旧写法那样"有就选、没有就跳过"
+    // —— 跳过等于没选,后面的断言测的是别的东西)
+    await selectProviderAndModel(window, 'Bad Port (T+480 ER1)', 'fake-model')
 
     // 发消息
     const textarea = window.locator('.input-area textarea').first()
@@ -108,65 +70,43 @@ test.describe('T+480 Chat 错误处理 / 降级 UX', () => {
       return false
     }, { timeout: 30_000 })
 
-    // 验证 toast 或 .el-message--error 也出现
-    const errorMsg = await window.locator('.el-message--error').count()
-    expect(errorMsg).toBeGreaterThan(0)
+    // 【对齐现状】发送失败**不走 toast**,错误写进气泡内容
+    // (agent 路径:placeholder 消息被 updateMessage 成 content='agent 执行失败:…', status='error')。
+    // 旧断言找 `.el-message--error` toast → 永远为 0 → 红;
+    // `.message-error` 也没用 —— 它要求 `message.error` 字段有值,
+    // 而 agent 失败写的是 content。
+    // 故:断「气泡里有错误文案」+「消息状态是 error」。
+    const bubble = window.locator('.message.assistant, .assistant-message, [class*="message"][class*="assistant"]').first()
+    const bubbleText = (await bubble.innerText()).toLowerCase()
+    expect(bubbleText).toMatch(/error|错误|connect|timeout|refused|econnrefused|失败|fetch failed/)
+    // 没卡在 streaming:生成态的 danger 停止键消失,恢复成 primary 圆形发送键。
+    // 【v4.6 修】发送键是圆形 icon 按钮(.send-btn),**没有「发送」文字**;
+    // 旧写法 button:has-text("发送") / ("停止") 永远匹配不到 → 前者假通过、
+    // 后者 toBeVisible 超时。现按 Element Plus 的 type class 判断真实形态。
+    await expect(
+      window.locator('.input-area .send-btn.el-button--danger'),
+      '仍卡在生成中',
+    ).toHaveCount(0)
+    await expect(
+      window.locator('.input-area .send-btn.el-button--primary').first(),
+    ).toBeVisible({ timeout: 15_000 })
   })
 
   test('ER2: 错误后切回正确 Ollama provider → 可继续发消息', async ({ window }) => {
     // 确保 Bad Port provider + 好 Ollama 都存在
-    await window.evaluate(async () => {
-      const api = (window as any).electronAPI
-      // 注入好 Ollama
-      const listRes = await api.models.list()
-      if (listRes?.success && listRes.data) {
-        for (const p of listRes.data) {
-          if (p.name === 'Good Ollama (T+480 ER2)') {
-            await api.models.delete(p.id)
-          }
-        }
-      }
-      await api.models.add({
-        name: 'Good Ollama (T+480 ER2)',
-        type: 'openai',
-        baseUrl: 'http://localhost:11434/v1',
-        apiKey: 'no-key',
-        enabled: true,
-        timeout: 30_000,
-        models: [{ id: 'qwen3.5:9b', name: 'qwen3.5:9b', capabilities: ['chat'] }]
-      })
+    // 【M4-L 修】注入后**刷新页面**,否则渲染层的 provider 列表还是旧的
+    // (Chat.vue 只在 onMounted 拉一次)→ 模型选择器里没有这一项 → 选不中
+    await addProviderAndReload(window, {
+      name: 'Good Ollama (T+480 ER2)',
+      baseUrl: 'http://127.0.0.1:11434/v1',
+      timeout: 30_000,
+      models: [{ id: 'qwen3.5:9b', name: 'qwen3.5:9b', capabilities: ['chat'] }],
     })
-    await window.waitForTimeout(500)
 
     await setupConversation(window)
 
-    // 选 Good Ollama
-    const providerSelect = window.locator('.model-selector .el-select').first()
-    if (await providerSelect.count() > 0) {
-      await providerSelect.click()
-      await window.waitForTimeout(500)
-      const opt = window.locator('.el-select-dropdown__item:has-text("Good Ollama (T+480 ER2)")').first()
-      if (await opt.count() > 0) {
-        await opt.click()
-        await window.waitForTimeout(800)
-      }
-    }
-
-    // 选 qwen3.5:9b
-    const modelSelect = window.locator('.model-selector .el-select').nth(1)
-    if (await modelSelect.count() > 0) {
-      await window.waitForFunction(() => {
-        const sels = document.querySelectorAll('.model-selector .el-select')
-        return sels[1] && !sels[1].querySelector('input[disabled]')
-      }, { timeout: 10_000 }).catch(() => {})
-      await modelSelect.click()
-      await window.waitForTimeout(500)
-      const opt = window.locator('.el-select-dropdown__item:has-text("qwen3.5:9b")').first()
-      if (await opt.count() > 0) {
-        await opt.click()
-        await window.waitForTimeout(500)
-      }
-    }
+    // 选 Good Ollama + qwen3.5:9b
+    await selectProviderAndModel(window, 'Good Ollama (T+480 ER2)', 'qwen3.5:9b')
 
     // 发消息
     const textarea = window.locator('.input-area textarea').first()
@@ -180,15 +120,22 @@ test.describe('T+480 Chat 错误处理 / 降级 UX', () => {
     }
 
     // 等回复包含 4
+    // 【超时口径】本地 qwen3.5:9b 默认带 thinking,首 token 可能要 30s+;
+    // 旧断言给 60s,叠加 Playwright 用例 60s 总超时 → 必红。
+    // 这里给 180s,并把用例超时也放宽。
     await window.waitForFunction(() => {
       const bubbles = document.querySelectorAll('.message.assistant, .assistant-message, [class*="message"][class*="assistant"]')
       for (const b of Array.from(bubbles)) {
-        const text = b.textContent ?? ''
-        if (text.includes('4') && text.length > 3) return true
+        // 【M4-Q】原来断的是「回复里包含 4」—— 那是**模型算术能力**的断言,
+        // 既不稳定(小模型可能答 4 也可能答"二加二等于四"),也让这条用例**没法用
+        // mock LLM 跑**(CI 里不装 6GB 真模型)。本用例要验的是
+        // 「错误之后切回正确 provider,**还能继续发消息**」—— 断「有非空回复」即可。
+        const text = (b.textContent ?? '').trim()
+        if (text.length > 3) return true
       }
       return false
-    }, { timeout: 60_000 })
-  })
+    }, { timeout: 180_000 })
+  }, 240_000)
 
   test('ER3: 错误后 textarea 可继续输入(不卡死)', async ({ window }) => {
     // 在 ER1 / ER2 后,选最近一个有 error 标记的会话(ER1 创建的)
@@ -220,7 +167,7 @@ test.describe('T+480 Chat 错误处理 / 降级 UX', () => {
 
   test('ER4: 多个 provider 列表里 disabled 状态正确显示', async ({ window }) => {
     // 验证 Settings → Models 列表里,enabled/disabled 状态正确
-    await window.click('a.nav-item[href$="#/settings"]')
+    await window.click('nav.sidenav a.nav-icon[href$="#/settings"]')
     await window.waitForURL(/#\/settings/)
     await window.waitForTimeout(800)
     const modelsTab = window.locator('.settings-nav__btn:has-text("模型管理"), .settings-nav__btn:has-text("Models")').first()

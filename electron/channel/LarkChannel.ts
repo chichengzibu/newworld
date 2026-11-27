@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - Channel / LarkChannel (W8)
+ * New World - Channel / LarkChannel (W8)
  *
  * Lark(海外飞书)IM 通道(真实 fetch 实现,复用飞书逻辑,base 改为 open.larksuite.com)。
  * 鉴权: appId + appSecret → tenant_access_token

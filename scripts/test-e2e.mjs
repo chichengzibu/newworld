@@ -1,5 +1,5 @@
 /**
- * PiPiClaw test:e2e launcher
+ * New World test:e2e launcher
  *
  * 职责(顺序):
  *  1. 把 PLAYWRIGHT_BROWSERS_PATH 钉为 '0'(官方约定:解析到项目本地

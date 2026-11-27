@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * PiPiClaw release checklist
+ * New World release checklist
  * Usage: node scripts/release-checklist.mjs
  *
  * 7 steps total; 0 hard fail required for GA

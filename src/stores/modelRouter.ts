@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - 智能模型路由状态管理
+ * New World - 智能模型路由状态管理
  */
 
 import { defineStore } from 'pinia';

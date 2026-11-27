@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - Agent / AgentTypes (W5.2.1)
+ * New World - Agent / AgentTypes (W5.2.1)
  *
  * Shared internal types for the Agent domain. Kept separate from contracts/types.ts
  * so contract surface stays small and internal evolution does not break consumers.

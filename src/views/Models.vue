@@ -6,7 +6,7 @@
         <span class="provider-count">{{ t('models.providerCount', { enabled: modelsStore.enabledCount, total: modelsStore.totalCount }) }}</span>
       </div>
       <div class="header-right">
-        <Breadcrumb />
+        <!-- 【设计审计 #P1-5】面包屑已移除: 60px 图标栏已表达位置, 页头只留主操作 -->
         <el-button type="primary" @click="handleAddProvider">
           <el-icon><Plus /></el-icon>
           {{ t('models.addProvider') }}
@@ -260,11 +260,12 @@ import { ref, reactive, onMounted, computed } from 'vue';
 import { ElMessage } from "element-plus/es/components/message/index"
 import { ElMessageBox } from "element-plus/es/components/message-box/index";
 import { useI18n } from 'vue-i18n';
-import Breadcrumb from '@/components/layout/Breadcrumb.vue';
 import { useModelsStore, PROVIDER_DEFAULTS, type ProviderConfig, type ProviderFormData } from '@/stores/models';
 import { Plus } from '@element-plus/icons-vue';
+import { useRouter } from 'vue-router';
 
 const { t } = useI18n();
+const router = useRouter();
 
 const modelsStore = useModelsStore();
 
@@ -617,6 +618,9 @@ async function handleDelete(id: string, name: string): Promise<void> {
   justify-content: space-between;
   align-items: center;
   flex-shrink: 0;
+  /* 【M4-M】窄窗口下按钮换行,不被裁掉 */
+  flex-wrap: wrap;
+  gap: var(--space-2);
 }
 
 .header-left {
@@ -648,6 +652,8 @@ async function handleDelete(id: string, name: string): Promise<void> {
   flex: 1;
   min-height: 0;
   overflow-y: auto;
+  /* 【M4-M】同上:不锁 min-content 宽度,否则页面撑破窗口、页头按钮被裁 */
+  min-width: 0;
 }
 
 .provider-grid {
