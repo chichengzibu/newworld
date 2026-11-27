@@ -62,6 +62,52 @@
 
       <!-- Tab 2: 状态仪表板(P0-02) -->
       <el-tab-pane label="状态仪表板" name="status">
+        <!-- 【v4.13】入站连通性 —— 这一块回答的是「消息真的能收进来吗」，
+             而不是「配置填完了吗」。两者是不同的问题，之前的页面只回答了后者。 -->
+        <div class="inbound-panel">
+          <div class="inbound-head">
+            <div>
+              <h3>入站连通性</h3>
+              <p class="inbound-hint">
+                只有这 4 个通道能在<strong>本机、无公网 IP、无域名、无证书</strong>的条件下真正收到消息。
+                其余通道仅支持出站发送（官方要求公网 HTTP 回调，桌面环境物理上无法满足）。
+              </p>
+            </div>
+            <el-button size="small" :loading="inboundLoading" @click="refreshInbound">
+              刷新入站状态
+            </el-button>
+          </div>
+          <div class="inbound-grid">
+            <div
+              v-for="row in inboundRows"
+              :key="row.kind"
+              class="inbound-card"
+              :class="row.stateClass"
+            >
+              <div class="inbound-card-main">
+                <span class="inbound-dot" />
+                <div class="inbound-title">
+                  <strong>{{ row.label }}</strong>
+                  <span class="inbound-mech">{{ row.mechanism }}</span>
+                </div>
+              </div>
+              <div class="inbound-card-meta">
+                <el-tag :type="row.tagType" size="small" disable-transitions>{{ row.stateText }}</el-tag>
+                <span v-if="row.messages > 0" class="inbound-msgs">已收 {{ row.messages }} 条</span>
+              </div>
+              <p class="inbound-detail">{{ row.detail }}</p>
+            </div>
+          </div>
+          <div class="inbound-outbound">
+            <span class="inbound-outbound-label">仅出站：</span>
+            <span>{{ outboundOnlyLabels }}</span>
+          </div>
+          <p v-if="!hasAnyInboundConfigured" class="inbound-empty-tip">
+            还没有配置任何可入站通道。到「通道配置」页添加上述任一个即可在本机直接收消息，
+            无需公网 IP、域名或证书。
+          </p>
+        </div>
+
         <div class="status-summary">
           <el-statistic title="在线" :value="statusSummary.online" />
           <el-statistic title="离线" :value="statusSummary.offline" />
@@ -522,6 +568,112 @@ async function loadPermissions(): Promise<void> {
 
 // IM 真连通：状态页「健康」列取 channel:list 的真实健康检查结果，不再恒绿
 const healthLoading = ref(false)
+
+/**
+ * 【v4.13】入站连通性面板
+ *
+ * 「配置填了」和「消息真能收进来」是两个不同的问题。
+ * 这张面板只回答后者 —— 数据来自主进程 channel:inbound-status，
+ * 反映的是轮询/长连接循环**此刻是否真的在跑**，而不是配置文件写了什么。
+ *
+ * 只有 4 个通道可能为真：Telegram / Discord / Slack / Rocket.Chat。
+ * 其余 7 个官方只支持「平台反向回调你的服务器」，需要公网 IP + 域名 + 证书，
+ * 桌面应用物理上做不到 —— 这里如实标为「仅出站」，不假装已连通。
+ */
+const INBOUND_CAPABLE: Array<{ kind: string; label: string; mechanism: string }> = [
+  { kind: 'im-telegram', label: 'Telegram', mechanism: 'getUpdates 长轮询' },
+  { kind: 'im-discord', label: 'Discord', mechanism: 'Gateway WebSocket' },
+  { kind: 'im-slack', label: 'Slack', mechanism: 'Socket Mode' },
+  { kind: 'im-rocket', label: 'Rocket.Chat', mechanism: 'REST 轮询' },
+]
+
+const OUTBOUND_ONLY_KINDS = [
+  'im-feishu',
+  'im-lark',
+  'im-dingtalk',
+  'im-wechat-work',
+  'im-wechat',
+  'im-qq',
+  'im-whatsapp',
+]
+
+const inboundLoading = ref(false)
+/** 主进程返回的原始状态：{ 'im-telegram': { running, messages } } */
+const inboundRaw = ref<Record<string, { running: boolean; messages: number }>>({})
+/** 已启用的通道 kind 集合（判断「没在跑」是因为没启用还是因为出错） */
+const enabledKindSet = computed(
+  () => new Set(channels.value.filter((c) => c.enabled).map((c) => c.kind)),
+)
+
+const outboundOnlyLabels = computed(() => {
+  const present = new Set(channels.value.map((c) => c.kind))
+  const labels = OUTBOUND_ONLY_KINDS.filter((k) => present.has(k)).map(
+    (k) => ALL_KINDS.find((x) => x.value === k)?.label || k,
+  )
+  return labels.length > 0 ? labels.join('、') : '（未配置其它通道）'
+})
+
+/** 4 个可入站通道里是否已配置任意一个 —— 都没配时给引导提示 */
+const hasAnyInboundConfigured = computed(() =>
+  INBOUND_CAPABLE.some((cap) => enabledKindSet.value.has(cap.kind)),
+)
+
+const inboundRows = computed(() =>
+  // 【v4.13】4 个可入站通道**恒定展示**。
+  //
+  // 曾按「已启用或正在跑」过滤，结果新用户一个通道都没配时，
+  // 整块面板是空的 —— 用户看不到「有这么 4 个通道可以真入站」这件事，
+  // 也就不知道自己有什么选项。面板的首要作用是**告知能力**，不只是报状态。
+  INBOUND_CAPABLE.map((cap) => {
+    const st = inboundRaw.value[cap.kind]
+    const running = st?.running === true
+    const messages = st?.messages ?? 0
+    const enabled = enabledKindSet.value.has(cap.kind)
+
+    if (running) {
+      return {
+        ...cap,
+        stateClass: 'is-running',
+        tagType: 'success' as const,
+        stateText: '入站运行中',
+        messages,
+        detail: messages > 0 ? `已收到 ${messages} 条消息，链路可用。` : '循环正在运行，尚未收到消息。',
+      }
+    }
+    if (!enabled) {
+      return {
+        ...cap,
+        stateClass: 'is-off',
+        tagType: 'info' as const,
+        stateText: '未启用',
+        messages: 0,
+        detail: '通道已关闭，入站循环未启动。',
+      }
+    }
+    return {
+      ...cap,
+      stateClass: 'is-warn',
+      tagType: 'warning' as const,
+      stateText: '已启用但未运行',
+      messages: 0,
+      detail: '配置为启用但入站循环没有在跑 —— 通常意味着缺少凭据、凭据无效，或启动时连接失败。请查看日志。',
+    }
+  }),
+)
+
+async function refreshInbound(): Promise<void> {
+  inboundLoading.value = true
+  try {
+    const res = await window.electronAPI.channel.inboundStatus()
+    inboundRaw.value = res?.success && res.data ? res.data : {}
+  } catch (e) {
+    ElMessage.error('读取入站状态失败：' + String(e))
+    inboundRaw.value = {}
+  } finally {
+    inboundLoading.value = false
+  }
+}
+
 async function refreshHealth(): Promise<void> {
   healthLoading.value = true
   try {
@@ -544,6 +696,8 @@ async function refreshHealth(): Promise<void> {
   } finally {
     healthLoading.value = false
   }
+  // 健康检查与入站状态是一回事的两个侧面，一起刷新才不会出现「健康但没在收消息」
+  await refreshInbound()
 }
 
 /** 路由规则启用开关 → 真同步到 IMMessageRouter（addRule 现在是 upsert） */
@@ -827,6 +981,8 @@ onMounted(async () => {
     loadPermissions(),
     reloadMessages(),
   ])
+  // 入站状态依赖 channels（要先知道哪些通道被启用），所以放在其后
+  await refreshInbound()
   initialLoading.value = false
 })
 </script>
@@ -935,6 +1091,127 @@ onMounted(async () => {
     border-radius: 8px;
     flex: 1;
   }
+}
+
+/* ===== 【v4.13】入站连通性面板 ===== */
+.inbound-panel {
+  margin-bottom: 20px;
+  padding: 16px;
+  border-radius: 10px;
+  background: var(--card-bg, #fff);
+  border: 1px solid var(--border-color, #e4e7ed);
+}
+.inbound-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 14px;
+
+  h3 {
+    margin: 0 0 4px;
+    font-size: 15px;
+    font-weight: 600;
+  }
+}
+.inbound-hint {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-secondary, #999);
+  max-width: 640px;
+}
+.inbound-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 10px;
+}
+.inbound-card {
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border-color, #e4e7ed);
+  background: var(--bg-secondary, #fafafa);
+
+  &.is-running {
+    border-color: var(--success-base, #67c23a);
+  }
+  &.is-warn {
+    border-color: var(--warning-base, #e6a23c);
+  }
+  &.is-off {
+    opacity: 0.6;
+  }
+}
+.inbound-card-main {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.inbound-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-secondary, #bbb);
+  flex-shrink: 0;
+
+  .is-running & {
+    background: var(--success-base, #67c23a);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--success-base, #67c23a) 20%, transparent);
+  }
+  .is-warn & {
+    background: var(--warning-base, #e6a23c);
+  }
+}
+.inbound-title {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+
+  strong {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary, #303133);
+  }
+}
+.inbound-mech {
+  font-size: 11px;
+  color: var(--text-secondary, #999);
+}
+.inbound-card-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+.inbound-msgs {
+  font-size: 11px;
+  color: var(--text-secondary, #999);
+}
+.inbound-detail {
+  margin: 0;
+  font-size: 11px;
+  line-height: 1.55;
+  color: var(--text-secondary, #999);
+}
+.inbound-outbound {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border-color, #e4e7ed);
+  font-size: 11px;
+  color: var(--text-secondary, #999);
+}
+.inbound-outbound-label {
+  font-weight: 600;
+}
+.inbound-empty-tip {
+  margin: 10px 0 0;
+  padding: 8px 10px;
+  border-radius: 6px;
+  background: var(--accent-soft, rgba(64, 158, 255, 0.08));
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-secondary, #666);
 }
 .status-list-head {
   display: flex;

@@ -80,6 +80,8 @@ export class TelegramPoller {
   private loopPromise: Promise<void> | null = null
   private consecutiveErrors = 0
   private pollCount = 0
+  /** 【v4.13】累计成功分发的消息数 —— 供入站状态面板展示「真收到几条」 */
+  private messageCount = 0
 
   constructor(opts: TelegramPollerOptions) {
     this.opts = opts
@@ -90,6 +92,7 @@ export class TelegramPoller {
 
   getOffset(): number { return this.nextOffset }
   getPollCount(): number { return this.pollCount }
+  getMessageCount(): number { return this.messageCount }
   isRunning(): boolean { return this.running }
 
   private creds(): { apiBase: string; botToken: string } | null {
@@ -165,6 +168,10 @@ export class TelegramPoller {
       }
     }
     if (Array.isArray(updates) && updates.length > 0) this.saveOffset()
+    // 【v4.13】累计成功分发的消息数 —— 供入站状态面板展示「真收到几条」。
+    // 原来只有 pollCount（轮询次数），面板只能显示「循环在跑但 0 条消息」，
+    // 与事实不符：消息可能一直在收，只是没被计数。
+    this.messageCount += handled
     this.pollCount++
     this.consecutiveErrors = 0
     return handled

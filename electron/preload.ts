@@ -281,6 +281,7 @@ const IpcChannels = {
   CHANNEL_MESSAGE_STATS: 'channel:message-stats',
   CHANNEL_MESSAGE_HISTORY: 'channel:message-history',
   CHANNEL_POLLER_STATUS: 'channel:poller-status',
+  CHANNEL_INBOUND_STATUS: 'channel:inbound-status',
 
   // 路由规则
   ROUTING_LIST: 'routing:list',
@@ -1360,6 +1361,10 @@ const electronAPI = {
     }>> => ipcRenderer.invoke(IpcChannels.CHANNEL_MESSAGE_STATS),
     messageHistory: (opts?: { channelId?: string; limit?: number }): Promise<IpcResponse<any[]>> =>
       ipcRenderer.invoke(IpcChannels.CHANNEL_MESSAGE_HISTORY, opts || {}),
+
+    // 【v4.13】各通道入站真实状态 —— 4 个免公网通道是否真的在收消息
+    inboundStatus: (): Promise<IpcResponse<Record<string, { running: boolean; messages: number }>>> =>
+      ipcRenderer.invoke(IpcChannels.CHANNEL_INBOUND_STATUS),
 
     // P0-04 路由规则
     routingList: (): Promise<IpcResponse<any[]>> => ipcRenderer.invoke(IpcChannels.ROUTING_LIST),

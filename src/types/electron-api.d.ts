@@ -129,6 +129,24 @@ export interface NWElectronAPI {
     getPlatform: () => string
   }
 
+  // ========== IM 通道(v4.13: 收编入站状态，供 IM 管理页展示真实连通性) ==========
+  channel: {
+    /** 各通道入站真实状态 —— key 是通道 kind，running 表示入站循环是否在跑 */
+    inboundStatus: () => Promise<IpcResponse<Record<string, { running: boolean; messages: number }>>>
+    /** 通道列表(启用/健康状态) */
+    list: () => Promise<IpcResponse<Array<{
+      id: string
+      name: string
+      kind: string
+      enabled: boolean
+      healthy: boolean
+      healthError?: string
+    }>>>
+    /** Telegram 长轮询状态 */
+    pollerStatus?: () => Promise<IpcResponse<{ running: boolean; offset: number; polls: number }>>
+    [key: string]: unknown
+  }
+
   // ========== 错误台账(P0 工程规范可观测性) ==========
   errors: {
     report: (record: { kind?: string; message: string; source?: string; stack?: string }) =>

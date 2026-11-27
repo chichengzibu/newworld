@@ -236,7 +236,9 @@ export function getInboundStatus(): Record<string, { running: boolean; messages:
   const out: Record<string, { running: boolean; messages: number }> = {
     'im-telegram': {
       running: poller?.isRunning() ?? false,
-      messages: 0,
+      // 【v4.13】原为硬编码 0 —— TelegramPoller 此前没统计消息数，
+      // 面板只能显示「运行中但 0 条」，与事实不符（可能一直在收）。
+      messages: poller?.getMessageCount() ?? 0,
     },
   }
   for (const [kind, r] of receivers) {

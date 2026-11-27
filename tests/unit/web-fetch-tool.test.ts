@@ -225,3 +225,124 @@ describe('⑥ 联网开关关闭时模型看不到 web_fetch', () => {
     expect(filtered).not.toContain('web_fetch')
   })
 })
+
+describe('⑦ GitHub 仓库页：附加 raw 内容（v4.13）', () => {
+  it('parseGitHubRepoUrl 正确解析仓库页', async () => {
+    const { parseGitHubRepoUrl } = await import('../../electron/agent/tools/WebFetchTool')
+    const r = parseGitHubRepoUrl(new URL('https://github.com/chichengzibu/newworld'))
+    expect(r).toEqual({ owner: 'chichengzibu', repo: 'newworld', path: '' })
+  })
+
+  it('parseGitHubRepoUrl 带子路径（指向具体文件）', async () => {
+    const { parseGitHubRepoUrl } = await import('../../electron/agent/tools/WebFetchTool')
+    const r = parseGitHubRepoUrl(new URL('https://github.com/owner/repo/blob/main/README.md'))
+    expect(r?.path).toBe('blob/main/README.md')
+  })
+
+  it('parseGitHubRepoUrl 剥掉 .git 后缀', async () => {
+    const { parseGitHubRepoUrl } = await import('../../electron/agent/tools/WebFetchTool')
+    const r = parseGitHubRepoUrl(new URL('https://github.com/owner/repo.git'))
+    expect(r?.repo).toBe('repo')
+  })
+
+  it('非 github.com 域名返回 null', async () => {
+    const { parseGitHubRepoUrl } = await import('../../electron/agent/tools/WebFetchTool')
+    expect(parseGitHubRepoUrl(new URL('https://gitlab.com/owner/repo'))).toBeNull()
+    expect(parseGitHubRepoUrl(new URL('https://example.com/a/b'))).toBeNull()
+  })
+
+  it('github.com 的非仓库路径返回 null（features/pricing 等）', async () => {
+    const { parseGitHubRepoUrl } = await import('../../electron/agent/tools/WebFetchTool')
+    expect(parseGitHubRepoUrl(new URL('https://github.com/features/copilot'))).toBeNull()
+    expect(parseGitHubRepoUrl(new URL('https://github.com/pricing'))).toBeNull()
+    expect(parseGitHubRepoUrl(new URL('https://github.com/topics/electron'))).toBeNull()
+    expect(parseGitHubRepoUrl(new URL('https://github.com/settings/profile'))).toBeNull()
+  })
+
+  it('抓 GitHub 仓库页时附加 raw README 内容', async () => {
+    const { WebFetchTool } = await import('../../electron/agent/tools/WebFetchTool')
+    const tool = new WebFetchTool()
+
+    const calls: string[] = []
+    globalThis.fetch = (async (input: any) => {
+      const u = String(input)
+      calls.push(u)
+      if (u.includes('raw.githubusercontent.com')) {
+        // 模拟 raw README，仅 main 分支命中
+        if (u.includes('/main/README.md')) {
+          return {
+            ok: true,
+            status: 200,
+            headers: new Headers({ 'content-type': 'text/plain' }),
+            text: async () => '# MyProject\n\n这是 README 正文，说明项目用途。',
+          } as any
+        }
+        return { ok: false, status: 404, headers: new Headers(), text: async () => '' } as any
+      }
+      // GitHub 页面本身：只有外壳内容
+      return {
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'text/html' }),
+        arrayBuffer: async () => Buffer.from('<html><body><nav>导航</nav><p>About 描述</p></body></html>'),
+      } as any
+    }) as any
+
+    const r = await tool.execute({ url: 'https://github.com/owner/repo' })
+    expect(r.ok).toBe(true)
+    // 原页面内容还在
+    expect(r.result).toContain('About 描述')
+    // raw 内容被附加
+    expect(r.result).toContain('这是 README 正文')
+    expect(r.result).toContain('raw.githubusercontent.com')
+    expect(r.result).toContain('补充而非替代')
+    // 确实抓过 raw
+    expect(calls.some((u) => u.includes('raw.githubusercontent.com'))).toBe(true)
+  })
+
+  it('raw 全部取不到时给出说明（不假装有内容，也不判任务失败）', async () => {
+    const { WebFetchTool } = await import('../../electron/agent/tools/WebFetchTool')
+    const tool = new WebFetchTool()
+
+    globalThis.fetch = (async (input: any) => {
+      const u = String(input)
+      if (u.includes('raw.githubusercontent.com')) {
+        return { ok: false, status: 404, headers: new Headers(), text: async () => '' } as any
+      }
+      return {
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'text/html' }),
+        arrayBuffer: async () => Buffer.from('<html><body><p>页面正文</p></body></html>'),
+      } as any
+    }) as any
+
+    const r = await tool.execute({ url: 'https://github.com/owner/repo' })
+    // 主流程成功（页面抓到了）
+    expect(r.ok).toBe(true)
+    expect(r.result).toContain('页面正文')
+    // 如实说明没取到原始文件，而不是静默缺失
+    expect(r.result).toContain('未能取到原始文件内容')
+  })
+
+  it('非 GitHub 站点不触发 raw 附加', async () => {
+    const { WebFetchTool } = await import('../../electron/agent/tools/WebFetchTool')
+    const tool = new WebFetchTool()
+
+    let hitRaw = false
+    globalThis.fetch = (async (input: any) => {
+      if (String(input).includes('raw.githubusercontent.com')) hitRaw = true
+      return {
+        ok: true,
+        status: 200,
+        headers: new Headers({ 'content-type': 'text/html' }),
+        arrayBuffer: async () => Buffer.from('<html><body><p>普通网页</p></body></html>'),
+      } as any
+    }) as any
+
+    const r = await tool.execute({ url: 'https://blog.example.com/post' })
+    expect(r.ok).toBe(true)
+    expect(hitRaw).toBe(false)
+    expect(r.result).not.toContain('附加：仓库原始文件')
+  })
+})
