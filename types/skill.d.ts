@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - 技能类型定义
+ * New World - 技能类型定义
  */
 
 export interface SkillParameter {

@@ -2,7 +2,7 @@ import { defineConfig } from 'vitest/config'
 import vue from '@vitejs/plugin-vue'
 
 /**
- * PiPiClaw - 纯 Web 渲染 e2e(vitest + Playwright chromium)
+ * New World - 纯 Web 渲染 e2e(vitest + Playwright chromium)
  *
  * 覆盖范围:
  *   - tests/e2e/routes-render.test.ts   (核心路由 no-fallback 冒烟)

@@ -1,7 +1,7 @@
 import { defineConfig } from '@playwright/test'
 
 /**
- * PiPiClaw Playwright 配置
+ * New World Playwright 配置
  *
  * ⚠️ 重要:本项目是 Electron 桌面应用,Renderer 由 Electron 主进程拉起,
  * 不能用 webServer + chromium 项目。Specs 通过 _electron API 直接驱动

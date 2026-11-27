@@ -1,9 +1,9 @@
-# PiPiClaw sandbox base image
+# New World sandbox base image
 # W9 plan: ubuntu:24.04 + node 22 + python 3.12 + java 21 + go 1.23 + 国内镜像源
 
 FROM ubuntu:24.04
 
-LABEL maintainer="PiPiClaw" version="1.0.0"
+LABEL maintainer="New World" version="1.0.0"
 
 # ============ 1. 系统包 ============
 ENV DEBIAN_FRONTEND=noninteractive

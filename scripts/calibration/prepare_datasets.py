@@ -76,7 +76,7 @@ MTB_PARQUET = "data/human-00000-of-00001-25f4910818759289.parquet"
 MTB_LICENSE = "cc-by-4.0"
 MTB_URL = "https://huggingface.co/datasets/lmsys/mt_bench_human_judgments"
 
-USER_AGENT = "newworld-calibration-prep/1.0 (+https://github.com/pipiclaw)"
+USER_AGENT = "newworld-calibration-prep/1.0 (+https://github.com/chichengzibu/newworld)"
 
 
 # ── 下载 ────────────────────────────────────────────────────────────────
