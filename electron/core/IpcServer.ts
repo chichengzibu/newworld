@@ -3297,10 +3297,16 @@ export class IpcServer {
         const { d1SkillDefinition } = require('../skill/builtin/D1ScreenshotQA')
         const { ScreenVision } = require('../computeruse/ScreenVision')
         const vision = ScreenVision.getInstance()
-        await vision.startRecording(1)
-        const frame = await vision.captureFrame()
-        await vision.stopRecording()
-        const result = await d1SkillDefinition.handler({ question: args.question, imageDataUrl: frame?.dataUrl ?? args.imageBase64 })
+        // 【v4.12】改用 captureOnce —— 原先 startRecording(1) + 立刻 captureFrame()
+        // 有竞态：setInterval 首帧要等 1000ms 才采，紧接着调 captureFrame 往往拿不到。
+        const frame = await vision.captureOnce()
+        if (!frame) {
+          return {
+            success: false,
+            error: '截屏失败：没有可用的屏幕源，或系统未授予屏幕录制权限',
+          }
+        }
+        const result = await d1SkillDefinition.handler({ question: args.question, imageDataUrl: frame.dataUrl ?? args.imageBase64 })
         return { success: true, data: result }
       } catch (error) {
         this.log.error('d1-demo:run 失败', error)

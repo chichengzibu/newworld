@@ -1,10 +1,16 @@
 /**
- * New World - Skill / A5ComputerUse (W8.2)
+ * New World - Skill / A5ComputerUse
  *
- * A5 Computer Use v1 minimal demo skill.
- * 流程:ComputerUseHandler.run() → 循环截屏+思考+执行
- * W8 stub:AgentBrain 决策固定返回 "screenshot" 之类的简单 action
- * W9+ 接真实 LLM
+ * Computer Use 技能入口。
+ *
+ * 【v4.12 现状 —— 如实标注，不要让它看起来能用】
+ * 本技能目前**不可用**，原因是底层能力缺失：
+ *   · 截屏可用（ScreenVision.captureOnce 已修好）
+ *   · 屏幕理解 / OCR 未实现（需多模态视觉模型，且 LlmMessage 目前只支持纯文本）
+ *   · 动作执行只能作用于本应用窗口，无法操作其它程序
+ *
+ * 因此 run() 会返回 ok:false + 明确的不可用原因，而不是跑一个"看起来成功"
+ * 的空循环。这样用户知道真相，也便于后续按需补齐能力。
  */
 
 import { LogManager } from '../../core/LogManager'
@@ -25,7 +31,7 @@ export interface A5Input {
 }
 
 /**
- * A5ComputerUse: A5 Computer Use v1 最小 demo
+ * A5ComputerUse: Computer Use 入口
  */
 export async function runA5(input: A5Input): Promise<{ ok: boolean; result?: ComputerUseResult; error?: string }> {
   const log = LogManager.getInstance()
@@ -41,14 +47,24 @@ export async function runA5(input: A5Input): Promise<{ ok: boolean; result?: Com
     } else {
       log.info('A5ComputerUse: autoExecute=false,只记录(沙箱模式)')
     }
-    const frame = await vision.captureFrame()
+
+    // 截屏能力可用，先真实截一帧确认环境（也顺带验证屏幕录制权限）
+    const frame = await vision.captureOnce()
     if (!frame) {
-      return { ok: false, error: 'A5: 截屏失败,无可用屏幕' }
+      return {
+        ok: false,
+        error: '截屏失败：没有可用的屏幕源，或系统未授予屏幕录制权限。请在系统设置中允许本应用录制屏幕。',
+      }
     }
     void EventBus.getInstance().publish('a5:start', { instruction: input.instruction, frameWidth: frame.width, frameHeight: frame.height })
 
     const result = await handler.run({ id: `a5-${Date.now()}`, instruction: input.instruction, maxSteps: input.maxSteps ?? 5, autoExecute: input.autoExecute })
     void EventBus.getInstance().publish('a5:done', { taskId: result.taskId, stepCount: result.steps.length, hitMaxSteps: result.hitMaxSteps })
+
+    // handler 因能力缺失返回 ok:false 时，如实向上透传，不要吞掉
+    if (!result.ok) {
+      return { ok: false, error: result.error }
+    }
     return { ok: true, result }
   } catch (e) {
     log.error('A5ComputerUse: 失败', e)
@@ -58,7 +74,7 @@ export async function runA5(input: A5Input): Promise<{ ok: boolean; result?: Com
 
 export const a5SkillHandler = {
   name: A5_SKILL_NAME,
-  description: 'Computer Use v1 最小 demo(看屏幕+思考+执行)',
+  description: 'Computer Use（当前未实现：屏幕理解与 OCR 缺失，请勿声称可用）',
   requiresPermission: true,
   async execute(args: A5Input) {
     return runA5(args)

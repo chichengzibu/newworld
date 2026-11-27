@@ -70,6 +70,43 @@ export class ComputerUseHandler {
     this.log.info(`ComputerUseHandler: 启动 task ${taskId} (${task.instruction.slice(0, 40)})`)
     void this.bus.publish('computeruse:task:start', { taskId, instruction: task.instruction })
 
+    // 【v4.12】能力前置校验：屏幕理解未实现时直接拒绝，不让它"看起来跑了"。
+    //
+    // 原实现在这里会拿着 understandFrame() 返回的占位文案（"待 W9 接入 Ollama Vision"）
+    // 当屏幕内容拼进 LLM prompt —— 模型据此决策等于在瞎猜，还会返回 ok:true
+    // 让用户以为任务真的执行了。这比"明确说没实现"危险得多。
+    try {
+      const probe = await this.vision.captureAndAnalyze({ ocr: false, understand: true })
+      if (!probe.understanding?.available) {
+        const reason = probe.understanding?.unavailableReason ?? '屏幕理解能力不可用'
+        this.log.warn(`ComputerUseHandler: 能力不可用，任务中止 — ${reason}`)
+        void this.bus.publish('computeruse:task:end', { taskId, stepCount: 0, ok: false, reason })
+        return {
+          ok: false,
+          taskId,
+          steps: [],
+          totalDurationMs: Date.now() - startMs,
+          hitMaxSteps: false,
+          error:
+            `Computer Use 暂不可用：${reason}。` +
+            '当前版本没有实现屏幕理解与 OCR，无法根据屏幕内容自主决策。' +
+            '截屏本身可用，但"看懂屏幕"这一步缺失。' +
+            '请改用具体工具（Read/Edit/Bash/web_fetch）完成任务。',
+        }
+      }
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      void this.bus.publish('computeruse:task:end', { taskId, stepCount: 0, ok: false, reason: msg })
+      return {
+        ok: false,
+        taskId,
+        steps: [],
+        totalDurationMs: Date.now() - startMs,
+        hitMaxSteps: false,
+        error: `Computer Use 无法启动：${msg}。请确认系统已授予屏幕录制权限。`,
+      }
+    }
+
     for (let i = 0; i < maxSteps; i++) {
       const stepStartMs = Date.now()
       try {

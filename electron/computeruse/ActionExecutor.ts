@@ -35,18 +35,24 @@ export interface ActionResult {
 
 /**
  * ActionExecutor: 键盘鼠标执行器
- * W8 阶段:stub 实现,所有 action 仅记录到 EventBus
- *         不真执行,需要用户手动确认(避免误触)
- * W9+ 阶段:用 robotjs / nut.js (W9 评估) 真正执行
  *
- * 注:不引入新依赖。本任务用 Electron 内置 webContents.sendInputEvent
- *     但 W8 阶段不真触发(只记录)。
+ * 【v4.12 现状说明 —— 请勿被"能执行"误导】
+ * 本类内部实现是**真实**的：autoExecute=true 时会调 webContents.sendInputEvent
+ * 真的派发鼠标/键盘事件。但它只能作用于**本应用自己的 BrowserWindow**，
+ * 无法操作系统里其它程序（要跨进程注入需要 robotjs / nut.js 之类原生模块，
+ * 是原生依赖，与"零额外依赖"的取舍冲突，暂不引入）。
+ *
+ * 而当前**没有任何 UI 入口能把它打开**：既没有确认弹窗，也没有设置开关，
+ * 上层 ComputerUseHandler 又因屏幕理解未实现而在更早一步就中止。
+ * 所以实际上它不会被调用到。
+ *
+ * 结论：这是「库存在但链路不通」的组件。对外表述不得声称具备桌面自动化能力。
  */
 export class ActionExecutor {
   private static instance: ActionExecutor
   private log = LogManager.getInstance()
   private bus = EventBus.getInstance()
-  /** 用户确认开关:false = 沙箱/手动确认;true = 自动执行(W8 默认 false) */
+  /** 用户确认开关:false = 只记录不执行（默认）;true = 真派发输入事件 */
   private autoExecute: boolean = false
 
   private constructor() {}
@@ -78,7 +84,9 @@ export class ActionExecutor {
         kind: req.kind,
         durationMs: Date.now() - startMs,
         executed: false,
-        note: 'W8 stub: action 未真执行,需用户在 UI 确认后调 setAutoExecute(true) 或手动执行',
+        // 原提示说"需用户在 UI 确认后调 setAutoExecute(true)"，但不存在这个 UI，
+        // 会让人去找一个找不到的开关。改成如实说明。
+        note: '未执行：autoExecute=false。当前版本没有开启自动执行的界面入口。',
       }
     }
 
