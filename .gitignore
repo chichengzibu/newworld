@@ -151,3 +151,6 @@ e2e-screenshots/
 coverage.bak-*/
 release-fresh-*/
 release-new/
+release.bak-*/
+PiPiClaw-*-Setup.exe
+*.asar
