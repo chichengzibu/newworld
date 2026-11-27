@@ -1,7 +1,7 @@
 /**
  * NOVA #003-C · BootDirector 状态机(纯逻辑核心)
  *
- * 口径(设计稿 docs/NOVA-#003-M2-boot-director-design.md F3/F5/F7):
+ * 口径 (F3/F5/F7):
  *   - 阶段序固定: config → ipc → llm-config → memory → skills → chats → channels
  *     (renderer-ready 不属于阶段序, 是独立握手信号)
  *   - progress = 已完成阶段数 / 阶段总数, 单调不减(防御 clamp)

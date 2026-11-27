@@ -14,7 +14,7 @@
  * 与 electron/hermes/ 的文本记忆层 (hermes.memories + vector-cache.json,
  * "用户要什么语义") 语义正交 — 两套体系不合并, 各自独立持久化。
  * 详见: electron/hermes/MemoryVectorStore.ts 顶部 X1 正向注释
- *       docs/#006-memory-persistence-design.md § B.5
+ *        § B.5
  * 若未来需要跨层桥接 (如"从执行观察提炼语义偏好"), 应显式通过
  * HermesMemory.addExperienceMemory 入口, 而非本类直接写向量层。
  */

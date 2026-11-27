@@ -1,7 +1,7 @@
 /**
  * NOVA #004-B · M3 联网搜索 · DuckDuckGo HTML Provider（第①笔）
  *
- * 设计稿: docs/NOVA-#004-M3-search-provider-design.md §F2 / §F7 / §F8
+ * 设计稿:  §F2 / §F7 / §F8
  * 端点: 首选 lite.duckduckgo.com/lite/ (纯 <table> 结构, 抗营销位漂移);
  *       备选 html.duckduckgo.com/html/ (富标记; 全零时端点切换兜底, 容错三保险 (c))
  * 方法: POST form-urlencoded(q=<urlencoded query>)

@@ -1,7 +1,7 @@
 /**
  * NOVA #004-B · M3 联网搜索 · 类型契约（第①笔）
  *
- * 设计稿: docs/NOVA-#004-M3-search-provider-design.md §F1 (F8 截断上限)
+ * 设计稿:  §F1 (F8 截断上限)
  * 零 electron import / 零新依赖 — 可被 node 单测直测。
  *
  * 安全边界锚定(稿 F8):

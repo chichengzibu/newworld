@@ -1,6 +1,9 @@
 # Changelog
 
-All notable changes to PiPiClaw will be documented in this file.
+All notable changes to New World will be documented in this file.
+
+> 说明：早期条目中引用的内部设计稿（`docs/NOVA-*`、`docs/#*`、`docs/superpowers/*`）
+> 属于开发过程文档，不随仓库发布，仅作历史记录保留在此。
 
 ## [Unreleased] - 2026-10-25 (W5 接线批 — 能力已写就,从未接线)
 

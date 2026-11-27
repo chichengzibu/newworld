@@ -1,7 +1,7 @@
 /**
  * NOVA #004-B · M3 联网搜索 · Provider 注册表（第①笔）
  *
- * 设计稿: docs/NOVA-#004-M3-search-provider-design.md §F1 §3
+ * 设计稿:  §F1 §3
  *   对标 getInstance 单例家族（G4 实证 electron 域 100+ 处:
  *   electron/core/ConfigStore.ts:40 / GlobalShortcut.ts:33 / IpcServer.ts:76 等）。
  *   勘误口径(G3): 无同名 class ModelProvider —— electron/models/ModelProvider.ts 为

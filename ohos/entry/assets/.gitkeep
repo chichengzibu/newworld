@@ -1,8 +1,0 @@
-# 构建产物暂存目录(内容由 `npm run ohos:build` 生成,已 gitignore)
-#
-# 结构:
-#   assets/app/package.json        —— Electron 应用清单(main 指向 dist-electron/main.js)
-#   assets/app/dist/               —— vite 渲染进程产物(base:'./' 相对路径)
-#   assets/app/dist-electron/      —— 主进程 main.js + preload.js(CJS)+ mcp/bin
-#
-# 生成命令: node ohos/scripts/sync-assets.mjs

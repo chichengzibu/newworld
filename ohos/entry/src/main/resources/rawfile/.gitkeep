@@ -1,7 +1,0 @@
-# rawfile 目录占位
-#
-# TODO(需官方 OHOS Electron runtime 确认):
-# 若官方 runtime 要求 app 资源(dist/ + dist-electron/)以 rawfile 形式打进 HAP,
-# 则 ohos/scripts/sync-assets.mjs 的输出目录应改为本目录:
-#   NW_OHOS_ASSET_DIR=ohos/entry/src/main/resources/rawfile/app npm run ohos:build
-# 当前默认输出到 ohos/entry/assets/app(暂存),避免在未确认注入方式前污染资源目录。

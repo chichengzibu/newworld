@@ -44,7 +44,7 @@ const execProbe = vi.hoisted(() => ({
 
 vi.mock('node:child_process', () => {
   // 【M3-C】生产执行路径已从 execFile 换成 ProcessSandbox 的 spawn
-  // (杀整棵进程树, 见 docs/NOVA-#009-m3c-process-sandbox-design.md),
+  // (杀整棵进程树),
   // 故本 mock 需同时提供 spawn —— 只给 execFile 会让生产代码拿到
   // "spawn is not a function"。
   //

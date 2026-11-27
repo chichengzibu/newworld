@@ -413,7 +413,7 @@ const unsubscribe = window.electronAPI.chat.onMessage((data) => {
 
 ## 📄 许可证
 
-MIT License
+[MIT](LICENSE) © 2026 chichengzibu
 
 ## 🆘 支持与问题
 
@@ -422,45 +422,20 @@ MIT License
 2. 查看日志文件
 3. 提交 Issue
 
-## 📚 文档索引
+## 📚 文档
 
-### Retros(阶段回顾)
-- [W1-W6 retro](docs/superpowers/retros/2026-07-15-w1-w6-retro.md)
-- [A 5 demo real-env validation](docs/superpowers/retros/2026-07-16-a5demo-real-env/retros.md)
-- [B IM account integration](docs/superpowers/retros/2026-07-16-b-im-account-integration/retros.md)
-- [C sandbox validation](docs/superpowers/retros/2026-07-16-c-sandbox-validation/retros.md)
-- [real LLM integration](docs/superpowers/retros/2026-07-17-real-llm-integration/retro.md)
-- [real proxy wc jupyter](docs/superpowers/retros/2026-07-17-real-proxy-wc-jupyter/retro.md)
-- [Phase 1 engineering hygiene](docs/superpowers/retros/2026-07-17-phase1-engineering-hygiene/retro.md)
-- [Phase 2 vue-tsc zero errors](docs/superpowers/retros/2026-07-21-phase2-vue-tsc-zero/retro.md)
-- [Phase 3 product quality](docs/superpowers/retros/2026-07-22-phase3-product-quality/retro.md)
-- [Phase 4 cross-platform + auto-update](docs/superpowers/retros/2026-07-22-phase4-cross-platform/retro.md)
-- [Phase 5 GA public release](docs/superpowers/retros/2026-07-22-phase5-ga/retro.md)
+- **[文档中心](docs/site/README.md)** — 全部用户文档入口
+  - [新手入门](docs/site/user-guide/getting-started.md)
+  - [用户手册](docs/site/user-guide/user-guide.md)
+  - [常见问题](docs/site/user-guide/faq.md)
+  - [故障排查](docs/site/user-guide/troubleshooting.md)
+  - [架构总览](docs/site/architecture/overview.md)
+- **[架构决策记录 (ADR)](docs/adr/)** — 关键技术选型的背景与取舍
+- **[性能基准](docs/perf/baseline.md)** — 启动耗时、内存占用实测数据
+- **[发布流程](docs/release/)** — 打包、签名、分发说明
 
-### 公开文档站点
-- [docs/site/README.md](docs/site/README.md) - 文档中心入口
-- [新手入门](docs/site/user-guide/getting-started.md)
-- [用户手册](docs/site/user-guide/user-guide.md)
-- [FAQ](docs/site/user-guide/faq.md)
-- [故障排查](docs/site/user-guide/troubleshooting.md)
-- [架构总览](docs/site/architecture/overview.md)
-- [性能基准](docs/perf/baseline.md)
-
-### Plans(实施计划)
-- [v2 plan](docs/superpowers/plans/2026-07-10-newworld-v2-plan.md)
-- [real LLM integration](docs/superpowers/plans/2026-07-17-real-llm-integration.md)
-- [real proxy wc jupyter](docs/superpowers/plans/2026-07-17-real-proxy-wc-jupyter.md)
-- [Phase 1 engineering hygiene](docs/superpowers/plans/2026-07-17-phase1-engineering-hygiene.md)
-- [Phase 3 product quality](docs/superpowers/plans/2026-07-21-phase3-product-quality.md)
-
-### Specs(设计文档)
-- [v2 design](docs/superpowers/specs/2026-07-10-newworld-v2-design.md)
-- [A demo validation design](docs/superpowers/specs/2026-07-16-a-5demo-real-env-validation-design.md)
-- [B IM integration design](docs/superpowers/specs/2026-07-16-b-real-im-account-integration-design.md)
-- [C sandbox validation design](docs/superpowers/specs/2026-07-16-c-sandbox-validation-design.md)
-
-完整索引见 [docs/CHANGELOG-INDEX.md](docs/CHANGELOG-INDEX.md)。
+> 内部开发过程文档（阶段计划、评审记录、任务分派）不随仓库发布。
 
 ---
 
-**New World (NW)** - 让 AI 为你自动化一切！ 🎉
+**New World (NW)** - 让 AI 为你自动化一切

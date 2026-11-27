@@ -1,7 +1,7 @@
 /**
  * NOVA #005-B · M4 语音 · VoiceRegistry(单例家族对标, 第①笔)
  *
- * 设计稿: docs/NOVA-#005-M4-voice-design.md §F11 (F1 §1)
+ * 设计稿:  §F11 (F1 §1)
  * 对标 electron 域 getInstance 单例家族(G4 实证 100+ 处, e.g. ConfigStore:40 / GlobalShortcut:33 /
  *   IpcServer:76 / LlmClient:33 / SearchRegistry:getInstance)。
  *

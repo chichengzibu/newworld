@@ -1,7 +1,7 @@
 /**
  * NOVA #005-B · M4 语音 · 类型契约（第①笔）
  *
- * 设计稿: docs/NOVA-#005-M4-voice-design.md §F1 / §F6 / §F7
+ * 设计稿:  §F1 / §F6 / §F7
  * 零 electron import / 零新依赖 — 可被 node 单测直测。
  *
  * 边界锚定(稿 F0 + F1):
