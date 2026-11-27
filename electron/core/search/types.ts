@@ -51,7 +51,7 @@ export type SearchErrorCode =
   | 'parse-empty'    // 两端点全零命中
   | 'timeout'        // AbortSignal 到点
   | 'invalid-query'  // query trim 后为空
-  | 'e2e-stub';      // 仅诊断用: PIPICLAW_E2E stub 路径(正常是返回固定结果而非抛此码, 保留此枚举供断言)
+  | 'e2e-stub';      // 仅诊断用: NW_E2E stub 路径(正常是返回固定结果而非抛此码, 保留此枚举供断言)
 
 export class SearchError extends Error {
   readonly code: SearchErrorCode;

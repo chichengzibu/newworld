@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 
 /**
- * PiPiClaw — 私有技能仓库页面测试（M4-X）
+ * New World — 私有技能仓库页面测试（M4-X）
  * ═══════════════════════════════════════════════════════════════════════
  * 【这一批在测什么】
  * M4-X 把本页的 4 个**本地演示**页签删了(本地市场/发布/审核/模板 ——
@@ -115,14 +115,18 @@ describe('M4-X 私有技能仓库页面', () => {
     expect(String((ElMessageMock.error as any).mock.calls[0][0])).toContain('404')
   })
 
-  it('没连接时提示基址与公钥怎么配(用户才知道下一步做什么)', async () => {
+  it('没连接时给用户视角的下一步指引(环境变量细节收进 hover tooltip, 审计 #P1-5)', async () => {
     ;(window as any).electronAPI.channel.clawhubRegistryList.mockResolvedValue({ success: true, data: [] })
     const w = await mountView()
     const btn = w.findAll('button').find((b: any) => b.text().includes('连接仓库'))
     await btn!.trigger('click')
     await flushPromises()
     const text = w.text()
-    expect(text).toContain('PIPICLAW_CLAWHUB_REGISTRY')
-    expect(text).toContain('PIPICLAW_CLAWHUB_PUBKEY')
+    expect(text).toContain('尚未连接私有技能仓库')
+    // 运维细节(环境变量/文件路径)保留在 tooltip 里, 不再常驻正文
+    const hint = w.find('.empty-hint p')
+    const tip = String(hint.attributes('title') ?? '')
+    expect(tip).toContain('NW_CLAWHUB_REGISTRY')
+    expect(tip).toContain('NW_CLAWHUB_PUBKEY')
   })
 })

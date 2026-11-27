@@ -49,10 +49,16 @@ test.describe('私有技能仓库（原 ClawHub）', () => {
     await gotoRoute(window, '/clawhub')
     await window.waitForTimeout(800)
 
-    const body = await window.locator('.clawhub-page').innerText()
+    const page = window.locator('.clawhub-page')
+    const body = await page.innerText()
     // 用户得知道下一步该配什么，而不是面对一个空页面
-    expect(body).toMatch(/PIPICLAW_CLAWHUB_REGISTRY|clawhub-registry\.txt/)
-    expect(body).toMatch(/PIPICLAW_CLAWHUB_PUBKEY|clawhub-pubkey\.txt/)
+    expect(body, '未连接时要有清晰的空态指引').toMatch(/尚未连接|填入仓库地址|连接仓库/)
+    // 具体的环境变量 / 文件路径放在指引的 title(tooltip) 里,不在正文
+    const titled = await page.locator('[title]').evaluateAll((els: Element[]) =>
+      els.map((el) => el.getAttribute('title') ?? '').join(' '),
+    )
+    expect(titled).toMatch(/NW_CLAWHUB_REGISTRY|clawhub-registry\.txt/)
+    expect(titled).toMatch(/NW_CLAWHUB_PUBKEY|clawhub-pubkey\.txt/)
   })
 
   test('CB4: 本地演示的 4 个页签已移除（不许回潮）', async ({ window }) => {

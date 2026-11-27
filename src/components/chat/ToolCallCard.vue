@@ -178,10 +178,9 @@ function formatDuration(ms: number): string {
 .trace-status-icon { flex: none; margin-top: 2px; }
 .trace-item.ok .trace-status-icon { color: var(--el-color-success, #67c23a); }
 .trace-item.failed .trace-status-icon { color: var(--el-color-danger, #f56c6c); }
-.trace-item.running .trace-status-icon { color: var(--el-color-primary, #409eff); }
+.trace-item.running .trace-status-icon { color: var(--el-color-primary, #7c8db5); }
 
-.is-spin { animation: trace-spin 1s linear infinite; }
-@keyframes trace-spin { to { transform: rotate(360deg); } }
+.is-spin { animation: nw-spin 1s linear infinite; }
 
 .trace-content { flex: 1; min-width: 0; }
 .trace-head { display: flex; align-items: baseline; gap: 8px; }

@@ -1,5 +1,5 @@
 /**
- * PiPiClaw — AI 技能路由实跑基准（M4-W）
+ * New World — AI 技能路由实跑基准（M4-W）
  * ═══════════════════════════════════════════════════════════════════════
  * 【这一批在测什么】
  * 「**技能要由 AI 自行判断用哪个**」—— 这件事在本项目里**实现过，但从没验过**。
@@ -25,9 +25,9 @@
  * ④ 任务措辞里**不提技能名** —— 否则测的是"认字",不是"判断"
  *
  * 【怎么跑】
- *   PIPICLAW_SKILL_ROUTING=1 npx vitest run tests/integration/skill-routing-live.test.ts
+ *   NW_SKILL_ROUTING=1 npx vitest run tests/integration/skill-routing-live.test.ts
  *   # 换模型:
- *   PIPICLAW_SKILL_ROUTING=1 PIPICLAW_SKILL_ROUTING_MODEL=qwen3.8-27b-q4km:latest \
+ *   NW_SKILL_ROUTING=1 NW_SKILL_ROUTING_MODEL=qwen3.8-27b-q4km:latest \
  *     npx vitest run tests/integration/skill-routing-live.test.ts
  *
  * 【默认不跑】
@@ -44,7 +44,7 @@ import { TEST_USER_DATA } from '../unit/test-host'
 vi.mock('electron', () => ({
   app: {
     getPath: vi.fn((k: string) => `${TEST_USER_DATA}/${k}`),
-    getName: () => 'pipiclaw',
+    getName: () => 'newworld',
     getVersion: () => '4.5.0',
   },
   safeStorage: {
@@ -66,8 +66,8 @@ import { LlmAgentBrain } from '../../electron/agent/LlmAgentBrain'
 import { SkillLoader } from '../../electron/skill/SkillLoader'
 import { LlmConfigStore } from '../../electron/llm/LlmConfigStore'
 
-const ENABLED = process.env.PIPICLAW_SKILL_ROUTING === '1'
-const MODEL = process.env.PIPICLAW_SKILL_ROUTING_MODEL || 'qwen3.5:9b'
+const ENABLED = process.env.NW_SKILL_ROUTING === '1'
+const MODEL = process.env.NW_SKILL_ROUTING_MODEL || 'qwen3.5:9b'
 /**
  * 变体:`fixed` = 现状;`legacy` = **复现修前行为**(在测试内打补丁,不改产品代码)。
  *
@@ -76,13 +76,13 @@ const MODEL = process.env.PIPICLAW_SKILL_ROUTING_MODEL || 'qwen3.5:9b'
  * 做法:在测试内把「摘要格式 / 系统提示 / 加载兜底」三处打回旧行为,
  * 而不是去改产品代码再改回来 —— 后者容易把改动弄丢,也没法并行对比。
  */
-const VARIANT = (process.env.PIPICLAW_SKILL_ROUTING_VARIANT || 'fixed') as 'fixed' | 'legacy'
+const VARIANT = (process.env.NW_SKILL_ROUTING_VARIANT || 'fixed') as 'fixed' | 'legacy'
 const OLLAMA_BASE = 'http://localhost:11434/v1'
 const OLLAMA_HOST = 'http://localhost:11434'
 const SKILLS_DIR = join(TEST_USER_DATA, 'skills')
 
 /** 【M4-W 修前】的系统提示 —— 技能规则排在最后一条,与「优先用工具拿真实数据」打架 */
-const LEGACY_SYSTEM_PROMPT = `你是 PiPiClaw 代码助手, 跟 ClaudeCode 一样能用 6 个工具:
+const LEGACY_SYSTEM_PROMPT = `你是 New World 代码助手, 跟 ClaudeCode 一样能用 6 个工具:
 - Read: 读文件 (file_path, encoding?)
 - Edit: 精确编辑文件 (file_path, old_string, new_string, replace_all?)
 - Bash: 跑命令 (command, args?, cwd?, timeout_ms?)
@@ -250,13 +250,13 @@ describe('M4-W AI 技能路由实跑基准', () => {
 
   it('量出选对率 / 漏选率 / 误选率 / 负样本误触发率', async (ctx) => {
     if (!ENABLED) {
-      return ctx.skip('[SKIP] 路由基准需显式开启:PIPICLAW_SKILL_ROUTING=1（否则每次 npm test 都打真模型）')
+      return ctx.skip('[SKIP] 路由基准需显式开启:NW_SKILL_ROUTING=1（否则每次 npm test 都打真模型）')
     }
 
     const results: RoutingResult[] = []
     for (const t of BENCH_TASKS) {
       let loaded: string[] = []
-      let attempted: string[] = []
+      const attempted: string[] = []
       const errors: string[] = []
       try {
         const r = await LlmAgentBrain.getInstance().run(t.task, {

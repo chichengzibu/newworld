@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - Hermes 记忆状态管理
+ * New World - Hermes 记忆状态管理
  */
 
 import { defineStore } from 'pinia';

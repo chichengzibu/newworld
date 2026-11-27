@@ -1,5 +1,5 @@
 /**
- * PiPiClaw — 裁判校准记录存档（M4-V）
+ * New World — 裁判校准记录存档（M4-V）
  * ═══════════════════════════════════════════════════════════════════════
  * 【这个文件是什么】
  * 每一条 = 一次**真实跑出来的**校准结果，进仓可审计。
@@ -19,7 +19,7 @@
  * (纯计算,不调模型,秒级出结果)。
  *
  * 【怎么新增一条】
- * ① 重跑校准:PIPICLAW_CALIBRATION=1 npx vitest run tests/integration/judge-calibration-live.test.ts
+ * ① 重跑校准:NW_CALIBRATION=1 npx vitest run tests/integration/judge-calibration-live.test.ts
  * ② 报告会打印可粘贴的记录(用 buildCalibrationRecord 推导,数字与报告同源)
  * ③ 贴到这里,并把结论写成人话 —— **不要只改数字不改结论**。
  */

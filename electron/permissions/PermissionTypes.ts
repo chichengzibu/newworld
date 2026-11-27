@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - 权限系统类型定义
+ * New World - 权限系统类型定义
  */
 
 export type PermissionCategory = 

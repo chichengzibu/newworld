@@ -1,6 +1,6 @@
-# PiPiClaw 鸿蒙 PC — DevEco Studio 真机调试手册
+# New World 鸿蒙 PC — DevEco Studio 真机调试手册
 
-> 目标：从零到在**鸿蒙 PC（HarmonyOS PC）真机**上跑通 PiPiClaw（Electron + Vue3）。
+> 目标：从零到在**鸿蒙 PC（HarmonyOS PC）真机**上跑通 New World（Electron + Vue3）。
 > 打包路线：**鸿蒙 PC 官方 Electron runtime `v34.6.3-20260105.1`** + `ohos/` HAP 壳工程 → HAP。
 > 配套文档：[`docs/跨平台适配方案-Win-macOS-Linux-鸿蒙PC.md`](./跨平台适配方案-Win-macOS-Linux-鸿蒙PC.md)
 > 编写日期：2026-08-07　适用代码基线：`v4.5.0-alpha`（`electron/platform/` 抽象层已落地）
@@ -33,7 +33,7 @@
 
 | 标识 | 值 | 来源 |
 |------|-----|------|
-| `bundleName` | `com.pipiclaw.app` | `ohos/AppScope/app.json5` |
+| `bundleName` | `com.newworld.nw` | `ohos/AppScope/app.json5` |
 | `abilityName` | `EntryAbility` | `ohos/entry/src/main/module.json5` → `abilities[0].name` |
 | `moduleName` | `entry` | `ohos/entry/src/main/module.json5` → `module.name` |
 | `versionName` / `versionCode` | `4.5.0` / `4050000` | `ohos/AppScope/app.json5`（鸿蒙不允许 `-alpha` 后缀） |
@@ -177,7 +177,7 @@ D:/pipiclaw/piclaw/
 > ⚠️ 产物落点当前是 `entry/assets/app/`，**不是** `resources/rawfile/`。这一选择尚未定稿（`ohos/README.md` TODO #4，三选一：rawfile 解压 / hvigor 插件声明 / runtime 直读路径）。
 > 需要切换时用环境变量覆盖，无需改脚本：
 > ```bash
-> PIPICLAW_OHOS_ASSET_DIR=ohos/entry/src/main/resources/rawfile/app npm run ohos:build
+> NW_OHOS_ASSET_DIR=ohos/entry/src/main/resources/rawfile/app npm run ohos:build
 > ```
 
 ### 2.2 打开工程
@@ -203,7 +203,7 @@ export DEVECO_SDK_HOME="$OHOS_SDK"      # 或 HOS_SDK_HOME，二者任一
 生成 wrapper 后校验：
 
 ```bash
-cd /d/pipiclaw/piclaw/ohos
+cd /d/newworld/piclaw/ohos
 ls hvigorw hvigorw.bat hvigor/hvigor-config.json5   # 三者应齐全
 ./hvigorw --version                                  # Windows: ./hvigorw.bat --version
 ./hvigorw --sync --no-daemon
@@ -214,7 +214,7 @@ ls hvigorw hvigorw.bat hvigor/hvigor-config.json5   # 三者应齐全
 ### 2.4 hvigor / ohpm 环境
 
 ```bash
-cd /d/pipiclaw/piclaw/ohos
+cd /d/newworld/piclaw/ohos
 
 # 安装壳工程依赖（等价于 npm install），会生成 oh_modules/
 ohpm install --all
@@ -230,7 +230,7 @@ ohpm config get registry
 **清理命令**（构建行为诡异时先跑这个）：
 
 ```bash
-cd /d/pipiclaw/piclaw/ohos
+cd /d/newworld/piclaw/ohos
 ./hvigorw clean --no-daemon
 rm -rf entry/build .hvigor
 ```
@@ -254,7 +254,7 @@ rm -rf entry/build .hvigor
    - macOS：`~/.ohos/config/`
 
    包含：`default_<projectName>_<xxx>.cer`（调试证书）、`.p12`（密钥库）、`.p7b`（调试 Profile）。
-   > 建议把这三件套复制/软链到 `ohos/signature/` 并按 `ohos/signature/README.md` 的命名（`pipiclaw-debug.p12/.cer/.p7b`），保持团队一致。
+   > 建议把这三件套复制/软链到 `ohos/signature/` 并按 `ohos/signature/README.md` 的命名（`nw-debug.p12/.cer/.p7b`），保持团队一致。
 5. 生成后 `ohos/build-profile.json5` 的 `signingConfigs` 会被自动填充，并**同时**取消 product 的 `signingConfig` 注释：
 
 ```json5
@@ -266,12 +266,12 @@ rm -rf entry/build .hvigor
         "name": "default",
         "type": "HarmonyOS",
         "material": {
-          "storeFile": "./signature/pipiclaw-debug.p12",
+          "storeFile": "./signature/nw-debug.p12",
           "storePassword": "<自动生成的加密串>",
           "keyAlias": "debugKey",
           "keyPassword": "<自动生成的加密串>",
-          "certpath": "./signature/pipiclaw-debug.cer",
-          "profile": "./signature/pipiclaw-debug.p7b",
+          "certpath": "./signature/nw-debug.cer",
+          "profile": "./signature/nw-debug.p7b",
           "signAlg": "SHA256withECDSA"
         }
       }
@@ -304,24 +304,24 @@ rm -rf entry/build .hvigor
 DevEco：**Build → Generate Key and CSR**
 
 - Key store file：新建 `.p12`，密码自行保管
-- Alias：如 `pipiclaw_release`
+- Alias：如 `nw_release`
 - Validity：建议 25 年
 - CN/OU/O/C 按公司信息填
-- 产出：`pipiclaw.p12` + `pipiclaw.csr`
+- 产出：`nw.p12` + `nw.csr`
 
 命令行等价（SDK 自带 `keytool` 场景）：
 
 ```bash
-keytool -genkeypair -alias pipiclaw_release \
-  -keyalg EC -sigalg SHA256withECDSA -dname "CN=PiPiClaw,O=YourOrg,C=CN" \
-  -keystore pipiclaw.p12 -storetype pkcs12 -validity 9125
+keytool -genkeypair -alias nw_release \
+  -keyalg EC -sigalg SHA256withECDSA -dname "CN=New World,O=YourOrg,C=CN" \
+  -keystore nw.p12 -storetype pkcs12 -validity 9125
 
-keytool -certreq -alias pipiclaw_release -keystore pipiclaw.p12 -file pipiclaw.csr
+keytool -certreq -alias nw_release -keystore nw.p12 -file nw.csr
 ```
 
 **Step 2 — AGC 申请证书**
 
-AGC 控制台 → **用户与访问 → 证书管理** → 新增证书 → 上传 `pipiclaw.csr` → 下载 `.cer`（发布证书）。
+AGC 控制台 → **用户与访问 → 证书管理** → 新增证书 → 上传 `nw.csr` → 下载 `.cer`（发布证书）。
 
 > 发布证书每个账号有数量上限（通常调试 2 张、发布 1 张），别乱申请。
 
@@ -330,7 +330,7 @@ AGC 控制台 → **用户与访问 → 证书管理** → 新增证书 → 上�
 AGC → **我的项目 → 选择项目 → HarmonyOS 应用 → Profile 管理** → 新增：
 
 - 类型：**发布（Release）**
-- 包名：**必须为 `com.pipiclaw.app`** ✅（`ohos/AppScope/app.json5`，与 `electron-builder.json5:3` 的 appId 一致）
+- 包名：**必须为 `com.newworld.nw`** ✅（`ohos/AppScope/app.json5`，与 `electron-builder.json5:3` 的 appId 一致）
 - 关联刚申请的发布证书
 - 下载 `.p7b`
 
@@ -343,12 +343,12 @@ AGC → **我的项目 → 选择项目 → HarmonyOS 应用 → Profile 管理*
   "name": "release",
   "type": "HarmonyOS",
   "material": {
-    "storeFile": "./signature/pipiclaw-release.p12",
+    "storeFile": "./signature/nw-release.p12",
     "storePassword": "<CI 从 Secrets 注入，勿提交>",
-    "keyAlias": "pipiclaw_release",
+    "keyAlias": "nw_release",
     "keyPassword": "<CI 从 Secrets 注入，勿提交>",
-    "certpath": "./signature/pipiclaw-release.cer",
-    "profile": "./signature/pipiclaw-release.p7b",
+    "certpath": "./signature/nw-release.cer",
+    "profile": "./signature/nw-release.p7b",
     "signAlg": "SHA256withECDSA"
   }
 }
@@ -364,7 +364,7 @@ AGC → **我的项目 → 选择项目 → HarmonyOS 应用 → Profile 管理*
 | `ohos/build-profile.json5` → `app.products[0].signingConfig` | 指定 product 用哪套签名 | **被注释** |
 | `ohos/build-profile.json5` → `app.products[0].compatibleSdkVersion` | SDK 下限 | `5.0.0(12)` |
 | `ohos/entry/src/main/module.json5` → `module.name` / `abilities[0].name` | §6 的 `aa start` 参数 | `entry` / `EntryAbility` |
-| `ohos/AppScope/app.json5` → `bundleName` / `versionCode` / `versionName` | `hdc install` / `bm dump` 的包名 | `com.pipiclaw.app` / `4050000` / `4.5.0` |
+| `ohos/AppScope/app.json5` → `bundleName` / `versionCode` / `versionName` | `hdc install` / `bm dump` 的包名 | `com.newworld.nw` / `4050000` / `4.5.0` |
 | `ohos/signature/` | 证书材料存放（已 gitignore） | 空 |
 
 ---
@@ -443,7 +443,7 @@ hdc list targets    # 应出现 192.168.1.100:5555
 ### 5.1 `npm run ohos:build`
 
 ```bash
-cd /d/pipiclaw/piclaw
+cd /d/newworld/piclaw
 
 npm run ohos:sync      # 只做 ② —— 已有 dist/ 时用它，秒级
 npm run ohos:build     # ①+②+③ 全量
@@ -493,7 +493,7 @@ head -1 ohos/entry/assets/app/dist-electron/preload.js   # 期望 require("elect
 **命令行方式（推荐，可 CI 化）**：
 
 ```bash
-cd /d/pipiclaw/piclaw/ohos
+cd /d/newworld/piclaw/ohos
 # Windows Git Bash 用 ./hvigorw.bat，macOS/Linux 用 ./hvigorw
 
 # Debug HAP（§3.1 调试签名）
@@ -546,7 +546,7 @@ ohos/entry/build/default/outputs/default/entry-default-unsigned.hap ← 装不�
 ### 6.1 安装
 
 ```bash
-HAP=/d/pipiclaw/piclaw/ohos/entry/build/default/outputs/default/entry-default-signed.hap
+HAP=/d/newworld/piclaw/ohos/entry/build/default/outputs/default/entry-default-signed.hap
 
 # 首次安装
 hdc install "$HAP"
@@ -558,7 +558,7 @@ hdc install -r "$HAP"
 #   install bundle successfully.
 
 # 卸载（bundleName 以 AppScope/app.json5 为准）
-hdc uninstall com.pipiclaw.app
+hdc uninstall com.newworld.nw
 ```
 
 **安装失败对照表**
@@ -575,40 +575,40 @@ hdc uninstall com.pipiclaw.app
 
 ```bash
 # 列出所有已装包，确认包名在列
-hdc shell bm dump -a | grep pipiclaw
+hdc shell bm dump -a | grep newworld
 
 # 查本应用详情（含 abilities 列表 — abilityName 从这里取最准）
-hdc shell bm dump -n com.pipiclaw.app
+hdc shell bm dump -n com.newworld.nw
 ```
 
 ### 6.3 启动
 
 ```bash
 # 标准启动
-hdc shell aa start -b com.pipiclaw.app -a EntryAbility -m entry
+hdc shell aa start -b com.newworld.nw -a EntryAbility -m entry
 #   -b bundleName    ← AppScope/app.json5
 #   -a abilityName   ← entry/src/main/module.json5 → abilities[0].name
 #   -m moduleName    ← entry/src/main/module.json5 → module.name
 
 # 以调试模式启动（挂 debugger 时用，见 §7.3）
-hdc shell aa start -b com.pipiclaw.app -a EntryAbility -m entry -D
+hdc shell aa start -b com.newworld.nw -a EntryAbility -m entry -D
 
 # 强制停止
-hdc shell aa force-stop com.pipiclaw.app
+hdc shell aa force-stop com.newworld.nw
 
 # 查当前运行的 ability
 hdc shell aa dump -a
 ```
 
-> ✅ 三个参数均已由壳工程确定（见 §0.2 表格），可直接照抄。取不准时用 `bm dump -n com.pipiclaw.app` 反查。
+> ✅ 三个参数均已由壳工程确定（见 §0.2 表格），可直接照抄。取不准时用 `bm dump -n com.newworld.nw` 反查。
 >
-> ⚠️ **启动后可能停在占位页**：`ohos/entry/src/main/ets/pages/Index.ets` 是启动占位页，`EntryAbility.ets` 需在 runtime 接管窗口后跳过 `loadContent('pages/Index')`（`ohos/README.md` TODO #2）。若真机上看到的是占位页而非 PiPiClaw UI，说明 TODO #1/#2 尚未闭合，**不是 PiPiClaw 侧的问题**，此时 §8 的验证清单还跑不了。
+> ⚠️ **启动后可能停在占位页**：`ohos/entry/src/main/ets/pages/Index.ets` 是启动占位页，`EntryAbility.ets` 需在 runtime 接管窗口后跳过 `loadContent('pages/Index')`（`ohos/README.md` TODO #2）。若真机上看到的是占位页而非 New World UI，说明 TODO #1/#2 尚未闭合，**不是 New World 侧的问题**，此时 §8 的验证清单还跑不了。
 
 ---
 
 ## 7. 调试
 
-PiPiClaw 在鸿蒙上有**三层日志**，排障时按顺序看：
+New World 在鸿蒙上有**三层日志**，排障时按顺序看：
 
 ```
 ① hilog          → 系统级 / ability 生命周期 / 启动崩溃      ← 先看这层
@@ -627,17 +627,17 @@ hdc shell hilog
 
 # —— 过滤 ——
 # 按 tag 过滤
-hdc shell hilog -T PiPiClaw
+hdc shell hilog -T New World
 
 # 按级别（D/I/W/E/F）
 hdc shell hilog -L E
 
 # 只看本应用（先取 pid）
-PID=$(hdc shell "pidof com.pipiclaw.app")
+PID=$(hdc shell "pidof com.newworld.nw")
 hdc shell hilog -P "$PID"
 
 # 主机侧过滤（最实用，Git Bash 下直接管道）
-hdc hilog | grep -E "PiPiClaw|MiniWindow|TrayManager|GlobalShortcut|AutoUpdater|SandboxL1|DockerDetector"
+hdc hilog | grep -E "New World|MiniWindow|TrayManager|GlobalShortcut|AutoUpdater|SandboxL1|DockerDetector"
 
 # —— 常用控制 ——
 hdc shell hilog -r            # 清空缓冲区（复现前先清）
@@ -664,27 +664,27 @@ hdc shell ls /data/log/hilog/
 
 > ⚠️ **需真机验证**：OHOS Electron runtime 把主进程 `stdout`/`console.log` 映射到 hilog 的哪个 tag/domain，需实测确认。若发现 `log.info(...)` 不进 hilog，就完全依赖 §7.2 的文件日志。
 
-### 7.2 取应用文件日志（PiPiClaw 主通道）
+### 7.2 取应用文件日志（New World 主通道）
 
-`LogManager.ts:39-42` 把日志写到 `<userData>/logs/pipiclaw.log`，而 ohos 下 `userData` 由 `HarmonyHost.ts:43-45` 决定：
+`LogManager.ts:39-42` 把日志写到 `<userData>/logs/newworld.log`，而 ohos 下 `userData` 由 `HarmonyHost.ts:43-45` 决定：
 
 ```ts
 // electron/platform/HarmonyHost.ts:44
-return process.env.PIPICLAW_USER_DATA ?? join(homedir(), '.pipiclaw-ohos')
+return process.env.NW_USER_DATA ?? join(homedir(), '.nw-ohos')
 ```
 
 ```bash
 # 先确认 userData 实际落点
-hdc shell "ls -la /data/app/el2/100/base/com.pipiclaw.app/haps/entry/files/"
+hdc shell "ls -la /data/app/el2/100/base/com.newworld.nw/haps/entry/files/"
 
 # 取日志（路径按上一步实际结果调整）
-hdc file recv /data/app/el2/100/base/com.pipiclaw.app/haps/entry/files/logs/pipiclaw.log ./pipiclaw-ohos.log
+hdc file recv /data/app/el2/100/base/com.newworld.nw/haps/entry/files/logs/newworld.log ./nw-ohos.log
 
 # 看
-grep -nE "ohos|鸿蒙|降级" ./pipiclaw-ohos.log
+grep -nE "ohos|鸿蒙|降级" ./nw-ohos.log
 ```
 
-> ⚠️ **需真机验证**：鸿蒙应用沙箱下 `os.homedir()` 的返回值不确定（可能是 `/` 或不可写路径）。**强烈建议壳工程在拉起 Electron 主进程时显式注入 `PIPICLAW_USER_DATA` 指向应用沙箱 `files` 目录**，否则日志与配置全部写不进去，且失败是静默的。详见验证项 V4。
+> ⚠️ **需真机验证**：鸿蒙应用沙箱下 `os.homedir()` 的返回值不确定（可能是 `/` 或不可写路径）。**强烈建议壳工程在拉起 Electron 主进程时显式注入 `NW_USER_DATA` 指向应用沙箱 `files` 目录**，否则日志与配置全部写不进去，且失败是静默的。详见验证项 V4。
 
 ### 7.3 DevEco Debugger 挂载
 
@@ -696,12 +696,12 @@ grep -nE "ohos|鸿蒙|降级" ./pipiclaw-ohos.log
 
 **方式 B — Attach 到已运行进程**
 
-**Run → Attach Debugger to Process** → 选 `com.pipiclaw.app`。
+**Run → Attach Debugger to Process** → 选 `com.newworld.nw`。
 
 **方式 C — 命令行起调试态，DevEco 再 attach**
 
 ```bash
-hdc shell aa start -b com.pipiclaw.app -a EntryAbility -m entry -D
+hdc shell aa start -b com.newworld.nw -a EntryAbility -m entry -D
 ```
 
 > ⚠️ **需真机验证**：DevEco 的 ArkTS debugger 调的是 **ets 壳层**。**Electron 主进程（Node 侧）的断点大概率挂不上**。主进程调试建议走：
@@ -735,7 +735,7 @@ hdc fport rm tcp:9229 # 删除
 
 ---
 
-## 8. PiPiClaw 专属验证清单
+## 8. New World 专属验证清单
 
 > **这是本手册的核心。** 全部 **18 项（V0–V17）**均基于本仓库真实代码，给出「代码位置 → 期望行为 → 验证命令/日志关键字 → 失败处置」。
 > 建议做成 checklist，首次真机联调逐条打勾。
@@ -747,9 +747,9 @@ hdc fport rm tcp:9229 # 删除
 ```bash
 hdc shell hilog -r                      # 清缓冲
 hdc shell hilog -b DEBUG                # 提日志级别
-hdc shell aa force-stop com.pipiclaw.app
+hdc shell aa force-stop com.newworld.nw
 hdc hilog > ./v-run.log &               # 开始采集
-hdc shell aa start -b com.pipiclaw.app -a EntryAbility -m entry
+hdc shell aa start -b com.newworld.nw -a EntryAbility -m entry
 ```
 
 ---
@@ -770,11 +770,11 @@ hdc shell aa start -b com.pipiclaw.app -a EntryAbility -m entry
 
 | 项 | 内容 |
 |----|------|
-| 代码 | `electron/platform/detect.ts:15-27`，三重信号：`PIPICLAW_PLATFORM=ohos` → `process.platform==='ohos'` → `/etc/os-release` 匹配 `HarmonyOS\|OpenHarmony\|OHOS` |
+| 代码 | `electron/platform/detect.ts:15-27`，三重信号：`NW_PLATFORM=ohos` → `process.platform==='ohos'` → `/etc/os-release` 匹配 `HarmonyOS\|OpenHarmony\|OHOS` |
 | 期望 | 返回 `true` |
 | 验证 | 见 V3 日志；或设备上直接看 `hdc shell cat /etc/os-release` 是否含关键字 |
 | 命令 | `hdc shell "cat /etc/os-release"` |
-| 失败处置 | 鸿蒙 Node 运行时通常把 `process.platform` 报为 `'linux'`（`detect.ts:6-8` 注释已说明），且应用沙箱**可能读不到 `/etc/os-release`** → 此时三条信号全灭。**兜底：注入 `PIPICLAW_PLATFORM=ohos`** —— 壳工程已把它列入 `ohos/entry/assets/app/package.json` 的 `pipiclaw.requiredEnv`，实际注入动作待 `AppAbilityStage.ets` 实现（`ohos/README.md` TODO #1）。这是最可靠的一条，建议**无条件注入**，不要依赖自动探测 |
+| 失败处置 | 鸿蒙 Node 运行时通常把 `process.platform` 报为 `'linux'`（`detect.ts:6-8` 注释已说明），且应用沙箱**可能读不到 `/etc/os-release`** → 此时三条信号全灭。**兜底：注入 `NW_PLATFORM=ohos`** —— 壳工程已把它列入 `ohos/entry/assets/app/package.json` 的 `newworld.requiredEnv`，实际注入动作待 `AppAbilityStage.ets` 实现（`ohos/README.md` TODO #1）。这是最可靠的一条，建议**无条件注入**，不要依赖自动探测 |
 
 ---
 
@@ -784,8 +784,8 @@ hdc shell aa start -b com.pipiclaw.app -a EntryAbility -m entry
 |----|------|
 | 代码 | `electron/platform/index.ts:19-24`：`id === 'ohos' ? new HarmonyHost() : new ElectronHost()` |
 | 期望 | 实例为 `HarmonyHost` |
-| 验证 | 间接判定：`HarmonyHost.getPath('userData')`（`HarmonyHost.ts:47-65`）返回 `~/.pipiclaw-ohos`，而 `ElectronHost`（`ElectronHost.ts:37-39`）返回 Electron 标准 userData。看日志文件实际落点即可区分 |
-| 命令 | `hdc shell "find /data/app/el2/100/base/com.pipiclaw.app -name 'pipiclaw.log'"` |
+| 验证 | 间接判定：`HarmonyHost.getPath('userData')`（`HarmonyHost.ts:47-65`）返回 `~/.nw-ohos`，而 `ElectronHost`（`ElectronHost.ts:37-39`）返回 Electron 标准 userData。看日志文件实际落点即可区分 |
+| 命令 | `hdc shell "find /data/app/el2/100/base/com.newworld.nw -name 'newworld.log'"` |
 | 失败处置 | 落点是标准 Electron userData → 说明走了 `ElectronHost` → 回 V1 |
 
 ---
@@ -799,7 +799,7 @@ hdc shell aa start -b com.pipiclaw.app -a EntryAbility -m entry
 | 日志关键字 | ✅ `[main] ohos: disableHardwareAcceleration 已启用`<br>⚠️ `[main] ohos: disableHardwareAcceleration 调用失败(非致命)` |
 | 命令 | `hdc hilog \| grep "disableHardwareAcceleration"` |
 | 失败处置 | 无任何该行日志 → `isOhos()` 返回了 false（回 V1）；出现「调用失败」→ runtime 不支持该 API，需向 runtime 提供方确认替代开关。⚠️ 需真机验证 |
-| 附加观察 | 用 `hdc shell "ps -ef \| grep pipiclaw"` 观察是否有 GPU 子进程反复出现/消失 |
+| 附加观察 | 用 `hdc shell "ps -ef \| grep newworld"` 观察是否有 GPU 子进程反复出现/消失 |
 
 ---
 
@@ -808,9 +808,9 @@ hdc shell aa start -b com.pipiclaw.app -a EntryAbility -m entry
 | 项 | 内容 |
 |----|------|
 | 代码 | `HarmonyHost.ts:43-45`（base）、`HarmonyHost.ts:47-65`（getPath）、`LogManager.ts:39-42`（日志落点） |
-| 期望 | `<userData>/logs/pipiclaw.log` 存在且持续增长 |
+| 期望 | `<userData>/logs/newworld.log` 存在且持续增长 |
 | 命令 | `hdc shell "ls -la <userData>/logs/"`（userData 路径见 §7.2） |
-| 失败处置 | 文件不存在 → `homedir()` 在鸿蒙沙箱下返回了不可写路径。**注入 `PIPICLAW_USER_DATA`**，壳工程 `ohos/README.md` §2.2 建议值为 `context.filesDir`（即 `/data/app/el2/100/base/com.pipiclaw.app/haps/entry/files`）。⚠️ 需真机验证沙箱真实路径 |
+| 失败处置 | 文件不存在 → `homedir()` 在鸿蒙沙箱下返回了不可写路径。**注入 `NW_USER_DATA`**，壳工程 `ohos/README.md` §2.2 建议值为 `context.filesDir`（即 `/data/app/el2/100/base/com.newworld.nw/haps/entry/files`）。⚠️ 需真机验证沙箱真实路径 |
 | 注意 | electron-log 写失败**不抛错**，是静默的——不要因为「没报错」就认为日志正常 |
 
 ---
@@ -819,11 +819,11 @@ hdc shell aa start -b com.pipiclaw.app -a EntryAbility -m entry
 
 | 项 | 内容 |
 |----|------|
-| 代码 | `HarmonyHost.ts:67-69`：`process.env.PIPICLAW_VERSION ?? '0.0.0'` |
+| 代码 | `HarmonyHost.ts:67-69`：`process.env.NW_VERSION ?? '0.0.0'` |
 | 期望 | 返回真实版本，**不是 `0.0.0`** |
-| 验证 | 应用「设置 → 关于」页显示版本；或日志首行 `main.ts:71` 打的 `PiPiClaw 应用启动 { version: ... }` |
-| 日志关键字 | `PiPiClaw 应用启动` |
-| 失败处置 | 显示 `0.0.0` → 未注入 `PIPICLAW_VERSION`（`requiredEnv` 已声明，注入待 TODO #1） |
+| 验证 | 应用「设置 → 关于」页显示版本；或日志首行 `main.ts:71` 打的 `New World 应用启动 { version: ... }` |
+| 日志关键字 | `New World 应用启动` |
+| 失败处置 | 显示 `0.0.0` → 未注入 `NW_VERSION`（`requiredEnv` 已声明，注入待 TODO #1） |
 | ⚠️ 版本号三处不一致 | 根 `package.json:3` = `4.5.0-alpha`；`ohos/AppScope/app.json5` `versionName` = `4.5.0`（鸿蒙不允许 `-alpha` 后缀）；`ohos/entry/assets/app/package.json` = `4.5.0-alpha`。**注入时以 `versionName` 为准**，并按 `ohos/README.md` TODO #14 由 CI 统一同步 |
 | 备注 | `main.ts:71` 用的是 `app.getVersion()` 而非 `getHost().getVersion()`，两者在 ohos 下可能不一致，⚠️ 需真机对比 |
 
@@ -833,12 +833,12 @@ hdc shell aa start -b com.pipiclaw.app -a EntryAbility -m entry
 
 | 项 | 内容 |
 |----|------|
-| 代码 | `HarmonyHost.ts:75-77`：`process.env.PIPICLAW_APP_PATH ?? join(base, 'app')` |
+| 代码 | `HarmonyHost.ts:75-77`：`process.env.NW_APP_PATH ?? join(base, 'app')` |
 | 期望 | 指向 HAP 内实际资源目录 |
 | 影响面 | 技能加载与自学习模块依赖它（适配方案 §九提到 `SelfLearner` / `SkillLoader` 已改走 `getHost().getAppPath()`） |
 | 验证 | 应用内技能列表非空；日志无 `ENOENT` 类路径错误 |
-| 命令 | `grep -nE "ENOENT\|no such file" ./pipiclaw-ohos.log` |
-| 失败处置 | 注入 `PIPICLAW_APP_PATH` 指向 rawfile 解包后的目录。🚧 待壳工程确定资源释放策略 |
+| 命令 | `grep -nE "ENOENT\|no such file" ./nw-ohos.log` |
+| 失败处置 | 注入 `NW_APP_PATH` 指向 rawfile 解包后的目录。🚧 待壳工程确定资源释放策略 |
 
 ---
 
@@ -943,9 +943,9 @@ hdc shell aa start -b com.pipiclaw.app -a EntryAbility -m entry
 | 期望 | 主窗口正常渲染，非纯白 |
 | 构建期验证 | `grep -o 'src="[^"]*"' dist/index.html` → 必须是 `./assets/...`，出现 `/assets/...` 即错 |
 | 运行期验证 | 日志出现 `加载生产构建页面`（`WindowManager.ts:101`） |
-| 🔴 **连带陷阱** | `WindowManager.ts:37-40` 的 `isDev` 判定是 `!app.isPackaged && PIPICLAW_E2E!=='1' && !CI`。**若 OHOS runtime 下 `app.isPackaged` 返回 `false`**（HAP 不是 asar 结构，很可能如此），`isDev` 为真 → 会去 `loadURL('http://localhost:5173')`（`WindowManager.ts:97`）→ **必定白屏 + `ERR_CONNECTION_REFUSED`** |
+| 🔴 **连带陷阱** | `WindowManager.ts:37-40` 的 `isDev` 判定是 `!app.isPackaged && NW_E2E!=='1' && !CI`。**若 OHOS runtime 下 `app.isPackaged` 返回 `false`**（HAP 不是 asar 结构，很可能如此），`isDev` 为真 → 会去 `loadURL('http://localhost:5173')`（`WindowManager.ts:97`）→ **必定白屏 + `ERR_CONNECTION_REFUSED`** |
 | 判定方法 | 看日志是 `加载开发服务器: http://localhost:5173` 还是 `加载生产构建页面` |
-| 处置 | 壳工程注入 **`PIPICLAW_E2E=1`** 即可强制走 prod 分支（`WindowManager.ts:39` 现成的逃生舱）。注意 `MiniWindow.ts:43` 也用了 `!app.isPackaged`，但 ohos 下 MiniWindow 已在 V8 提前 return，不受影响 |
+| 处置 | 壳工程注入 **`NW_E2E=1`** 即可强制走 prod 分支（`WindowManager.ts:39` 现成的逃生舱）。注意 `MiniWindow.ts:43` 也用了 `!app.isPackaged`，但 ohos 下 MiniWindow 已在 V8 提前 return，不受影响 |
 | ⚠️ | `app.isPackaged` 在 OHOS runtime 下的真实取值，**需真机验证** |
 
 ---
@@ -979,8 +979,8 @@ hdc shell aa start -b com.pipiclaw.app -a EntryAbility -m entry
 | 项 | 内容 |
 |----|------|
 | 现状 | 全仓库搜索 `requestSingleInstanceLock` **零命中**，仅 `electron/platform/PlatformHost.ts:36` 定义了 `'second-instance'` 事件类型但无人使用 |
-| 风险 | 鸿蒙 PC 上重复点图标可能拉起第二个实例 → 两个进程抢 18789 端口（V16）→ 第二个网关启动失败；同时抢 `pipiclaw.log` 与配置文件写入 |
-| 验证 | 连续两次 `hdc shell aa start -b com.pipiclaw.app -a EntryAbility -m entry`，然后 `hdc shell "ps -ef \| grep pipiclaw"` 看进程数 |
+| 风险 | 鸿蒙 PC 上重复点图标可能拉起第二个实例 → 两个进程抢 18789 端口（V16）→ 第二个网关启动失败；同时抢 `newworld.log` 与配置文件写入 |
+| 验证 | 连续两次 `hdc shell aa start -b com.newworld.nw -a EntryAbility -m entry`，然后 `hdc shell "ps -ef \| grep newworld"` 看进程数 |
 | 期望 | 只有一组进程 |
 | 处置 | 若鸿蒙 ability 的 `launchType`（`module.json5`）已设为 `singleton`，系统层已保证单实例，Electron 侧可不加锁 → 🚧 与壳工程 owner 确认 `launchType` 配置。否则需在主进程补 `app.requestSingleInstanceLock()` |
 
@@ -1015,7 +1015,7 @@ hdc shell aa start -b com.pipiclaw.app -a EntryAbility -m entry
 
 ### 9.1 ArkWeb 与 Electron renderer 的差异
 
-| 差异 | 说明 | 对 PiPiClaw 的影响 | 应对 |
+| 差异 | 说明 | 对 New World 的影响 | 应对 |
 |------|------|-------------------|------|
 | 内核不是 Chromium | ArkWeb 基于 Web 引擎但特性集与 Chromium 版本不完全对齐 | Element Plus（`package.json:36`）、highlight.js、marked 都是标准 DOM/CSS，风险低 | 重点回归**滚动性能**与**CSS 变量/backdrop-filter** ⚠️ 真机验证 |
 | DevTools 唤起方式 | 可能不支持 `webContents.openDevTools()` 独立窗口 | `main.ts:61-68` 的 `open-devtools` IPC 可能无效 | 走 §7.4 的 `hdc fport tcp:9222` 远程调试 |
@@ -1052,22 +1052,22 @@ hdc shell aa start -b com.pipiclaw.app -a EntryAbility -m entry
 
 | 问题 | 说明 |
 |------|------|
-| `os.homedir()` 不可靠 | `HarmonyHost.ts:44` 的兜底 `join(homedir(), '.pipiclaw-ohos')` 在鸿蒙应用沙箱下可能落到不可写位置 |
+| `os.homedir()` 不可靠 | `HarmonyHost.ts:44` 的兜底 `join(homedir(), '.nw-ohos')` 在鸿蒙应用沙箱下可能落到不可写位置 |
 | 失败是静默的 | electron-log 写盘失败不抛错（V4），表现为「应用能跑但没有任何日志」，极易误判 |
 | 沙箱路径形态 | 典型为 `/data/app/el2/<userId>/base/<bundleName>/haps/<moduleName>/files`，`<userId>` 常见 100 |
-| **强制建议** | 壳工程**无条件注入** `PIPICLAW_USER_DATA`，不要依赖 `homedir()` 兜底 |
-| 配套 | 同理注入 `TMPDIR`（V7）、`PIPICLAW_APP_PATH`（V6）、`PIPICLAW_VERSION`（V5）、`PIPICLAW_PLATFORM=ohos`（V1）、`PIPICLAW_E2E=1`（V14） |
+| **强制建议** | 壳工程**无条件注入** `NW_USER_DATA`，不要依赖 `homedir()` 兜底 |
+| 配套 | 同理注入 `TMPDIR`（V7）、`NW_APP_PATH`（V6）、`NW_VERSION`（V5）、`NW_PLATFORM=ohos`（V1）、`NW_E2E=1`（V14） |
 
 **环境变量注入清单（交给壳工程 owner 的完整列表）** 🚧
 
 ```bash
-PIPICLAW_PLATFORM=ohos                                   # V1  平台判定，必需
-PIPICLAW_USER_DATA=<沙箱 files 目录>                      # V4  数据/日志落点，必需
-PIPICLAW_APP_PATH=<HAP 资源目录>                          # V6  技能加载
-PIPICLAW_VERSION=4.5.0-alpha                             # V5  版本显示
+NW_PLATFORM=ohos                                   # V1  平台判定，必需
+NW_USER_DATA=<沙箱 files 目录>                      # V4  数据/日志落点，必需
+NW_APP_PATH=<HAP 资源目录>                          # V6  技能加载
+NW_VERSION=4.5.0-alpha                             # V5  版本显示
 TMPDIR=<沙箱 temp 目录>                                   # V7  临时文件
-PIPICLAW_E2E=1                                           # V14 强制走 prod 加载路径
-PIPICLAW_SKIP_UPDATE_CHECK=1                             # V11 双保险，跳过自动更新检查
+NW_E2E=1                                           # V14 强制走 prod 加载路径
+NW_SKIP_UPDATE_CHECK=1                             # V11 双保险，跳过自动更新检查
 ```
 
 ### 9.6 单实例锁
@@ -1096,27 +1096,27 @@ hdc -t <key> shell                                # 多设备指定
 hdc tconn <ip>:5555                               # 网络调试
 
 # —— 构建 ——
-cd /d/pipiclaw/piclaw && npm run ohos:build       # Electron 产物（脚本待补，§5.1）
+cd /d/newworld/piclaw && npm run ohos:build       # Electron 产物（脚本待补，§5.1）
 cd ohos && hvigorw clean --no-daemon
 cd ohos && hvigorw assembleHap --mode module -p product=default -p module=entry@default --no-daemon
 
 # —— 安装启动 ——
 hdc install -r ohos/entry/build/default/outputs/default/entry-default-signed.hap
-hdc shell aa start -b com.pipiclaw.app -a EntryAbility -m entry
-hdc shell aa force-stop com.pipiclaw.app
-hdc uninstall com.pipiclaw.app
-hdc shell bm dump -n com.pipiclaw.app
+hdc shell aa start -b com.newworld.nw -a EntryAbility -m entry
+hdc shell aa force-stop com.newworld.nw
+hdc uninstall com.newworld.nw
+hdc shell bm dump -n com.newworld.nw
 
 # —— 日志 ——
 hdc shell hilog -r                                # 清缓冲
 hdc shell hilog -b DEBUG                          # 提级别
-hdc hilog | grep -E "PiPiClaw|ohos|降级"
-hdc file recv <userData>/logs/pipiclaw.log ./
+hdc hilog | grep -E "New World|ohos|降级"
+hdc file recv <userData>/logs/newworld.log ./
 
 # —— 一键跑验证清单 ——
 hdc shell hilog -r && \
-hdc shell aa force-stop com.pipiclaw.app && \
-hdc shell aa start -b com.pipiclaw.app -a EntryAbility -m entry && \
+hdc shell aa force-stop com.newworld.nw && \
+hdc shell aa start -b com.newworld.nw -a EntryAbility -m entry && \
 hdc hilog | grep -E "disableHardwareAcceleration|MiniWindow|TrayManager|GlobalShortcut|AutoUpdater|SandboxL1|DockerDetector|加载生产构建页面|OpenClaw网关"
 ```
 

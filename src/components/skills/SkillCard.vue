@@ -80,12 +80,13 @@ const emit = defineEmits(['toggle']);
 
 const isEnabled = ref(props.skill.enabled);
 
+// v4.9：低饱和柔和色阶 —— 仍用于区分不同技能，但去掉高饱和「AI 感」撞色
 const iconColors = [
-  '#F59E0B', // 暖橙色
-  '#3B82F6', // 蓝色
-  '#10B981', // 绿色
-  '#8B5CF6', // 紫色
-  '#EC4899'  // 粉色
+  '#C08A3E', // 柔和琥珀
+  '#6E86A8', // 柔和靛蓝
+  '#5C9A7B', // 柔和青绿
+  '#8A7FA8', // 柔和紫灰
+  '#B0788A'  // 柔和玫瑰
 ];
 
 const iconColor = computed(() => {

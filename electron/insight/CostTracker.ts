@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - Insight / CostTracker (W5.1)
+ * New World - Insight / CostTracker (W5.1)
  *
  * Per-model token usage + USD cost bookkeeping.
  * Persists to userData/cost-log.json. Provides today / recent / per-conversation aggregation
@@ -127,7 +127,7 @@ export class CostTracker {
 
     const norm = (s: string): string =>
       s.toLowerCase()
-        .replace(/^(ollama|openai|anthropic|zhipu|deepseek)[-\/]/, '')
+        .replace(/^(ollama|openai|anthropic|zhipu|deepseek)[-/]/, '')
         .replace(/[:@].*$/, '')          // 去掉 ':9b' / '@latest' 标签
         .replace(/-latest$/, '')
         .replace(/-\d{4}-\d{2}-\d{2}$/, '')   // 去掉日期版本

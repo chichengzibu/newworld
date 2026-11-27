@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - Channel / FeishuChannel (W7.2)
+ * New World - Channel / FeishuChannel (W7.2)
  *
  * 飞书 IM 通道(真实 fetch 实现)。
  * API: https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal

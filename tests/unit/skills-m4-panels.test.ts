@@ -1,5 +1,5 @@
 /**
- * PiPiClaw — M4 新增面板的渲染测试
+ * New World — M4 新增面板的渲染测试
  * ═══════════════════════════════════════════════════════════════
  * 【为什么要有这个】
  * 本批新增了 6 个 UI 面板(嵌入后端配置 / 技能目录 / 效果统计 / 边际效用 /
@@ -35,6 +35,8 @@ vi.mock('@element-plus/icons-vue', () => ({
   // 少一个图标整份 spec 全红(见上面 Goods 的注释)。
   Refresh: { template: '<i />' },
   Search: { template: '<i />' },
+  // 「导出技能」按钮用了 Download —— 同样是显式枚举，漏一个整份 spec 全红
+  Download: { template: '<i />' },
 }))
 
 import SkillsView from '../../src/views/SkillsView.vue'
@@ -137,11 +139,14 @@ describe('M4 技能面板渲染', () => {
     installApi()
   })
 
-  it('技能目录卡片:显示主目录路径与技能数', async () => {
+  it('技能目录卡片:主目录默认显示"内置目录", 原始路径收进 hover(审计 #P1-5)', async () => {
     const w = await mountView()
     const text = w.text()
     expect(text).toContain('技能目录')
-    expect(text).toContain('C:/userdata/skills')
+    expect(text).toContain('内置目录')
+    // 完整路径仍可通过 tooltip 获取(开发者细节, 不常驻 UI)
+    const pathEl = w.find('.dir-primary .dir-path')
+    expect(String(pathEl.attributes('title'))).toContain('C:/userdata/skills')
   })
 
   it('技能目录卡片:没有额外目录时给出说明(而不是空白)', async () => {
@@ -467,6 +472,60 @@ describe('M4 技能面板渲染', () => {
     expect(api.skills.hubSearch).toHaveBeenCalled()
     expect((api.skills.hubSearch as any).mock.calls.some((c: any) => c[0]?.q === 'pdf')).toBe(true)
     expect(w.text()).toContain('搜到的技能')
+  })
+
+  it('【P1 生态入口】官方徽标 + 评分/暂无评分 + 下载量元数据落到界面', async () => {
+    installApi()
+    api.skills.hubRecommend.mockResolvedValue({
+      success: true,
+      data: {
+        items: [
+          { id: 'anthropic-skills:pdf', sourceId: 'anthropic-skills', name: 'PDF 处理', description: '处理 PDF', tags: [], official: true, rating: 4.7, downloads: 1234, version: '1.2' },
+          { id: 'shelf:x', sourceId: 'shelf', name: '社区技能', description: '无评分技能', tags: [] },
+        ],
+        index: { fetchedAt: Date.now(), count: 2, sources: [] },
+      },
+    })
+    const w = await mountView()
+    const text = w.text()
+    expect(text).toContain('官方')
+    expect(text).toContain('4.7')
+    expect(text).toContain('1234')
+    expect(text).toContain('v1.2')
+    expect(text).toContain('暂无评分')  // 缺失就是缺失, 不编造
+  })
+
+  it('【P1 生态入口】搜索即时触发(输入防抖)且透传 excludeInstalled:false', async () => {
+    installApi()
+    const w = await mountView()
+    const input = w.find('input[placeholder*="搜索开源技能"]')
+    await input.setValue('pdf')
+    await new Promise(resolve => setTimeout(resolve, 350))
+    await flushPromises()
+    expect(api.skills.hubSearch).toHaveBeenCalled()
+    expect((api.skills.hubSearch as any).mock.calls.some((c: any) => c[0]?.excludeInstalled === false)).toBe(true)
+  })
+
+  it('【P1 生态入口】搜索结果里的已安装项:显示"已安装"且按钮禁用', async () => {
+    installApi()
+    // 已安装列表里有一个 name 为 PDF 处理的技能
+    api.skills.list.mockResolvedValue({
+      success: true,
+      data: [{ id: 'pdf', name: 'PDF 处理', description: '', triggerKeywords: [], enabled: true, usageCount: 0, successRate: null }],
+    })
+    api.skills.hubSearch.mockResolvedValue({
+      success: true,
+      data: [{ id: 'anthropic-skills:pdf', sourceId: 'anthropic-skills', slug: 'pdf', name: 'PDF 处理', description: '已装', tags: [] }],
+    })
+    const w = await mountView()
+    const input = w.find('input[placeholder*="搜索开源技能"]')
+    await input.setValue('pdf')
+    await input.trigger('keyup.enter')
+    await flushPromises()
+    expect(w.text()).toContain('已安装')
+    const buttons = w.findAll('button').filter((b: any) => b.text().includes('已安装'))
+    expect(buttons.length).toBeGreaterThan(0)
+    expect(buttons[0].attributes('disabled')).toBeDefined()
   })
 
   it('【M4-X】点「下载安装」→ 调主进程安装', async () => {

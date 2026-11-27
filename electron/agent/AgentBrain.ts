@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - Agent / AgentBrain (W5.2.2)
+ * New World - Agent / AgentBrain (W5.2.2)
  *
  * Main thinking loop. Structurally duck-typed to the contracts AgentBrain
  * interface (think/call/spawn/checkpoint/restore). Bridge via asAgentBrain()

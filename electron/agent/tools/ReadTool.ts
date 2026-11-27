@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - ReadTool (M1 v0.1)
+ * New World - ReadTool (M1 v0.1)
  *
  * 读取文件内容, 跟 ClaudeCode Read tool 协议对齐:
  *   args: { file_path: string, encoding?: 'utf-8' | 'utf-8-with-bom' | 'base64' }

@@ -1,5 +1,5 @@
 /**
- * PiPiClaw — 陈旧构建锁清理的护栏测试
+ * New World — 陈旧构建锁清理的护栏测试
  * ═══════════════════════════════════════════════════════════════════════
  * 【为什么要有这个】
  * 清理脚本会删**系统临时目录**里的东西 —— 这比删仓库目录更敏感。
@@ -39,7 +39,7 @@ const SCRIPT = path.resolve(__dirname, '../../scripts/cleanup-build-backups.mjs'
 let tmpDir: string
 
 beforeEach(() => {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pipiclaw-locktest-'))
+  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'newworld-locktest-'))
 })
 afterEach(() => {
   try { fs.rmSync(tmpDir, { recursive: true, force: true }) } catch { /* ignore */ }

@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - CrashReport 收集器 (P5-T5.4)
+ * New World - CrashReport 收集器 (P5-T5.4)
  *
  * 监听 process 级 uncaughtException / unhandledRejection,记录到
  * userData/crash-reports/ 下,供用户 / 开发者下次启动时查看。

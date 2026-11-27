@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - Skill / D2PrimeScaffold (W11.5)
+ * New World - Skill / D2PrimeScaffold (W11.5)
  *
  * D2-Prime 项目骨架搭建 demo(旗舰 demo):
  *   用户输入 prompt → AI 解析 → 自动选模板 → 沙盒脚手架 → 端口转发 → 预览

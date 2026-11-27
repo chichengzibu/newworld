@@ -101,8 +101,8 @@ registry-out/
 # 开发期截图(应用跑起来时人工截的)—— 不是产品资产,不入库
 .tmp-nova-shots/
 
-# ── P0:ClawHub 私钥(已移出工作区 → C:\Users\Administrator\.pipiclaw-secrets\)──
-# 通过环境变量 PIPICLAW_CLAWHUB_KEY 指向,禁止入库
+# ── P0:ClawHub 私钥(已移出工作区 → C:\Users\Administrator\.newworld-secrets\)──
+# 通过环境变量 NW_CLAWHUB_KEY 指向,禁止入库
 scripts/clawhub-dev-ed25519.key
 *.ed25519.key
 
@@ -129,3 +129,25 @@ skills/*
 
 # 【M4-Z】构建各步骤的完整日志(门禁红时的证据;不入仓)
 .tmp-build-logs/
+src/locales/generated/
+
+# ── 开发过程中的临时备份/调试产物（不入仓）──
+.nw-backup-*/
+.nw-breath-backup-*/
+.nw-dark-backup-*/
+.nw-design-fix-*/
+.nw-env-backup-*/
+.nw-lowercase-backup-*/
+.nw-ohos-backup-*/
+.nw-theme-backup-*/
+.nw-usage-backup-*/
+.tmp-*.png
+.tmp-*.mjs
+.tmp-audit-*/
+.tmp-error-ledger-test-*/
+.tmp-e2e-*.log
+test-results*/
+e2e-screenshots/
+coverage.bak-*/
+release-fresh-*/
+release-new/

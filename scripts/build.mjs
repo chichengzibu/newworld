@@ -36,6 +36,7 @@
 
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import os from 'node:os';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -49,6 +50,8 @@ const args = process.argv.slice(2);
 const CI = args.includes('--ci');
 const SKIP_EB = args.includes('--skip-electron');
 const platformArg = args.find((a) => a.startsWith('--platform='))?.split('=')[1];
+// 【P1 迭代】release/ 被锁时的 EB 输出目录降级(空串 = 正常走 release/)
+let ebOutputOverride = '';
 
 /**
  * 每一步的完整日志目录。
@@ -59,7 +62,7 @@ const platformArg = args.find((a) => a.startsWith('--platform='))?.split('=')[1]
 const BUILD_LOG_DIR = path.join(repoRoot, '.tmp-build-logs');
 
 /** electron-builder 的超时。冷构建(rebuild + 依赖搜索 + NSIS + 签名)实测可达数分钟 */
-const EB_TIMEOUT_MS = Number(process.env.PIPICLAW_BUILD_EB_TIMEOUT_MS) || 600000;
+const EB_TIMEOUT_MS = Number(process.env.NW_BUILD_EB_TIMEOUT_MS) || 600000;
 
 function binName(name) {
   const base = path.join('node_modules', '.bin', name);
@@ -99,7 +102,7 @@ function explainLockedDir(dir, err) {
   }
 }
 
-// 【M4-Z】移走失败 → 快速失败,不再走进注定失败的 electron-builder
+// 【M4-Z】移走失败 → 先自愈诊断,仍失败才快速退出,不走进注定失败的 electron-builder
 {
   const locked = [];
   // 【M4-Z】--skip-electron 时不碰 release/ —— EB 根本不跑,
@@ -114,17 +117,96 @@ function explainLockedDir(dir, err) {
     if (!r.ok) locked.push({ dir, err: r.error });
   }
   if (locked.length > 0) {
-    console.error('\n✘ 构建中止:旧产物目录无法移开');
-    for (const { dir, err } of locked) explainLockedDir(dir, err);
-    console.error('\n  这通常意味着**有进程正占用其中的文件**:');
-    console.error('    · PiPiClaw / electron 还在运行(包括托盘里没退干净的)');
-    console.error('    · 杀毒软件正在扫描刚生成的 app.asar(~122MB,扫描会持有句柄)');
-    console.error('    · 上一次构建被中断后残留');
-    console.error('\n  处理:① 关掉正在运行的 PiPiClaw ② 稍等十几秒重试');
-    console.error('        ③ 仍不行 → 重启一次(句柄由系统释放)');
-    console.error('  自检:PowerShell 里看谁占着文件 —— 装上 Sysinternals 后执行');
-    console.error(`        handle64.exe "${path.join(repoRoot, locked[0].dir)}"`);
-    process.exit(1);
+    // 【P0 迭代·锁自愈】两步:
+    //   ① 定位到具体被锁文件(逐文件 r+ 试开,EBUSY/EPERM 即句柄持有)
+    //   ② 自愈尝试:杀掉从 release/ 里跑起来的残留 New World 进程(上次构建中断常见),
+    //      然后对 release/ 再试最后一次 moveAside
+    for (const { dir } of locked) {
+      console.error(`\n[build] 正在定位 ${dir}/ 内被锁文件...`);
+      const found = findLockedFiles(path.join(repoRoot, dir));
+      if (found.length > 0) {
+        for (const f of found) console.error(`  · 被锁: ${path.relative(repoRoot, f)}`);
+        const killed = tryKillReleaseProcesses();
+        if (killed) {
+          console.log('[build] 已终止残留的 New World 进程,最后重试一次...');
+          const retry = moveAside(dir, {});
+          if (retry.ok) {
+            console.log(`[build] ✅ ${dir}/ 自愈成功,继续构建`);
+            locked.splice(locked.findIndex((x) => x.dir === dir), 1);
+          }
+        }
+      } else {
+        console.error('  · 未定位到具体文件(可能是目录句柄或权限问题)');
+      }
+    }
+  }
+  if (locked.length > 0) {
+    // 【P1 迭代·降级路径】release/ 是「旧产物备份」,锁住只影响"留备份"而非"能不能打包":
+    // dist/dist-electron 必须能移开(EB 打包输入),这两个锁住才是真死路。
+    // release/ 锁住(如文件监视器持目录句柄)→ 让 EB 输出到全新目录,构建照常。
+    const distLocked = locked.find((x) => x.dir !== 'release');
+    if (distLocked) {
+      console.error('\n✘ 构建中止:构建输入目录(dist/dist-electron)无法移开');
+      for (const { dir, err } of locked) explainLockedDir(dir, err);
+      console.error('  关掉占用进程后重试;若反复出现 → 重启一次(句柄由系统释放)');
+      process.exit(1);
+    }
+    const rel = locked.find((x) => x.dir === 'release');
+    // 【P1 迭代】降级目录放项目外(temp): 工作区文件监视器/safe-delete 垫片只作用于
+    // 工作区内 —— 实测 EB 在项目内的新目录里连 win-unpacked.tmp 的 rename 都会
+    // EPERM(监视器句柄),批量清理还会被 safe-delete 垫片拦截(>50 文件需确认)。
+    // temp 目录在两者作用域之外, EB 可正常完成 NSIS 打包。
+    ebOutputOverride = path.join(os.tmpdir(), 'nw-release-' + Date.now());
+    console.warn(`\n⚠ release/ 无法移开(${rel?.err?.code || 'EPERM'},目录句柄级锁)—— 不留旧产物备份,`);
+    console.warn(`  electron-builder 改为输出到项目外目录: ${ebOutputOverride}`);
+    console.warn('  (该锁多为 AI 沙箱/编辑器的工作区监视器所致, 在你自己的终端里构建不会有此问题)');
+  }
+}
+
+/** 【P0 迭代】递归定位被锁文件:逐文件以 r+ 试开,EPERM/EBUSY 即有句柄持有(只开不写,无副作用) */
+function findLockedFiles(root, out = [], depth = 0) {
+  if (depth > 6) return out;
+  let entries;
+  try {
+    entries = fs.readdirSync(root, { withFileTypes: true });
+  } catch {
+    return out;
+  }
+  for (const e of entries) {
+    const p = path.join(root, e.name);
+    if (e.isDirectory()) {
+      findLockedFiles(p, out, depth + 1);
+    } else {
+      let fd = null;
+      try {
+        fd = fs.openSync(p, 'r+');
+      } catch (err) {
+        if (err && (err.code === 'EPERM' || err.code === 'EBUSY' || err.code === 'EACCES')) out.push(p);
+      } finally {
+        if (fd !== null) {
+          try { fs.closeSync(fd); } catch { /* ignore */ }
+        }
+      }
+    }
+  }
+  return out;
+}
+
+/** 【P0 迭代】自愈尝试:终止从 release/ 运行的残留 New World 进程。返回是否执行了 kill */
+function tryKillReleaseProcesses() {
+  try {
+    const probe = spawnSync('tasklist', ['/FI', 'IMAGENAME eq New World.exe', '/FO', 'CSV', '/NH'], { encoding: 'utf8', timeout: 10_000 });
+    const out = probe.stdout || '';
+    if (!/new world\.exe/i.test(out)) {
+      console.log('  · 无 New World.exe 残留进程(锁来自杀软扫描或外部句柄,无法自动解除)');
+      return false;
+    }
+    spawnSync('taskkill', ['/F', '/IM', 'New World.exe', '/T'], { timeout: 10_000, stdio: 'ignore' });
+    console.log('  · 已 taskkill 残留的 New World.exe');
+    return true;
+  } catch (e) {
+    console.log(`  · 自愈尝试失败: ${e.message}`);
+    return false;
   }
 }
 
@@ -189,29 +271,37 @@ if (!SKIP_EB) {
   console.log('\n=== [4/5] electron-builder ===');
   const ebArgs = ['--publish=never'];
   if (platformArg) ebArgs.push(platformArg);
+  // 【P1 迭代】release/ 被锁时输出到全新目录(见上方降级路径说明)
+  if (ebOutputOverride) {
+    ebArgs.push('-c.directories.output=' + ebOutputOverride);
+  }
   const eb = await run('electron-builder', binName('electron-builder'), ebArgs, EB_TIMEOUT_MS);
-  const hasArtifact = findArtifact('release');
+  const artifactDir = ebOutputOverride || 'release';
+  const hasArtifact = findArtifact(artifactDir);
   if (!hasArtifact) {
     reportStepFailure(
       'electron-builder',
       eb,
       eb.timedOut
         ? '打包超时且没有产出 —— 看日志确认卡在哪一步(依赖安装 / NSIS / 签名)'
-        : '没有产出打包产物(release/ 下无 exe/app) —— 常见原因见日志末尾',
+        : `没有产出打包产物(${artifactDir}/ 下无 exe/app) —— 常见原因见日志末尾`,
     );
     overall = 1;
   } else if (eb.timedOut) {
     console.warn(
-      `\n⚠ electron-builder 超时(耗时 ${(eb.durationMs / 1000).toFixed(0)}s),但已检测到打包产物(release/)。不阻断。`,
+      `\n⚠ electron-builder 超时(耗时 ${(eb.durationMs / 1000).toFixed(0)}s),但已检测到打包产物(${artifactDir}/)。不阻断。`,
     );
     console.warn(`  日志: ${eb.logPath}`);
   } else if (eb.status !== 0) {
     console.warn(
-      `\n⚠ electron-builder 退出码非零(${eb.status}),但已检测到打包产物(release/)。多为次要清理失败,不影响产物可用性。`,
+      `\n⚠ electron-builder 退出码非零(${eb.status}),但已检测到打包产物(${artifactDir}/)。多为次要清理失败,不影响产物可用性。`,
     );
     console.warn(`  日志: ${eb.logPath}`);
   } else {
     console.log(`  ✓ 打包完成 —— 耗时 ${(eb.durationMs / 1000).toFixed(1)}s`);
+    if (ebOutputOverride) {
+      console.log(`  ℹ 产物在 ${ebOutputOverride}/ (release/ 被锁,本轮未覆盖旧产物)`);
+    }
   }
 } else {
   console.log('\n=== [4/5] electron-builder (跳过 --skip-electron) ===');

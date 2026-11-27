@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - 聊天管理器
+ * New World - 聊天管理器
  * 
  * 职责：
  * 1. 聊天消息处理（流式/非流式）
@@ -17,6 +17,7 @@ import { ModelManager } from '../models/ModelManager';
 import { toLlmProviderConfig } from '../models/ModelProvider';
 import { HermesMemory } from '../hermes/HermesMemory';
 import { HermesAdapter, RECALL_CHAT_MIN_SCORE } from '../hermes/HermesAdapter';
+import { MemoryDistiller, type DistilledMemory } from '../hermes/MemoryDistiller';
 import { TaskExecutor } from '../task/TaskExecutor';
 import { InstructionGenerator } from '../task/InstructionGenerator';
 import { HistoryAssembler } from './HistoryAssembler';
@@ -33,6 +34,7 @@ import type { GradableRun } from '../learning/TaskGrader';
 import { CostTracker } from '../insight/CostTracker';
 import { ConfigStore } from '../core/ConfigStore';
 import { AgentEventRelayBus, type AgentRunEvent } from '../agent/AgentEventRelay';
+import type { ProducedArtifact } from '../agent/tools/Tool';
 import type { Conversation, ChatMessage, ChatSettings, MessageRole, MessageStatus, StreamChunk } from './ChatTypes';
 import type { AgentBrain, Disposable } from '../contracts/types';
 
@@ -61,6 +63,12 @@ export class ChatManager {
   private config!: ChatConfig;
   private modelManager!: ModelManager;
   private abortControllers: Map<string, AbortController> = new Map();
+  /**
+   * 【P3】agent run 的中止句柄。此前 UI 点「停止」只 abort 旧流式管道的 controller,
+   * agent 的 LLM 循环和工具照跑 —— 多 agent 并行后更危险(子任务停不下来)。
+   * 这里按会话登记当前 run,stopGeneration 一并中止父 run 及其所有子任务。
+   */
+  private agentAborts: Map<string, Set<{ runId: string; abort: () => boolean }>> = new Map();
   /** M1-C: agent 运行事件中继(把 brain 事件关联会话后广播到渲染层) */
   private agentEventRelay = AgentEventRelayBus;
   /** 【M1-D】等待用户确认的计划表 planId → resolve(true=确认,false=拒绝) */
@@ -191,6 +199,14 @@ export class ChatManager {
       controller.abort();
       this.abortControllers.delete(conversationId);
     }
+    // agent 路径走的是 brain.abortRun(),与上面的旧流式 controller 不是一套。
+    const agentRuns = this.agentAborts.get(conversationId);
+    if (agentRuns) {
+      for (const handle of Array.from(agentRuns)) {
+        try { handle.abort() } catch { /* 单个 run 中止失败不影响其余 */ }
+      }
+      agentRuns.clear();
+    }
   }
 
   // ============ 核心消息发送方法 ============
@@ -230,6 +246,15 @@ export class ChatManager {
         
         // 保存技能
         const saved = selfLearner.saveSkillFromProposal(pendingProposal);
+        // 自进化闭环反向回路：技能落盘后写一条记忆，让下次召回知道"我会这个了"
+        if (saved?.success) {
+          void this.recordSkillToMemory({
+            name: pendingProposal.name,
+            description: pendingProposal.description,
+            triggerCondition: pendingProposal.triggerCondition,
+            keywords: pendingProposal.keywords ?? [],
+          });
+        }
         
         // 回复用户
         const replyMessage: ChatMessage = {
@@ -647,7 +672,7 @@ export class ChatManager {
         this.log.warn('[ChatManager] #006.5 R-2 recall 降级: 管线召回段失败, 核心记忆+历史记忆段仍生效', e);
       }
 
-      let systemPrompt = '你是PiPiClaw智能助手，一个专业的AI自动化助手，内置OpenClaw本地执行引擎。';
+      let systemPrompt = '你是New World智能助手，一个专业的AI自动化助手，内置OpenClaw本地执行引擎。';
       if (memoryPrompt.trim()) {
         systemPrompt += `\n\n用户记忆:\n${memoryPrompt}`;
       }
@@ -672,51 +697,75 @@ export class ChatManager {
 
       const finalMsg = this.config.getMessage(conversationId, assistantMessageId);
       if (finalMsg?.content) {
-        const shouldPrecipitate = /(文件|文件夹|目录|创建|写入|修改|删除|整理|习惯|偏好|喜欢)/.test(content)
-          || /(文件|文件夹|目录|创建|写入|修改|删除|整理)/.test(finalMsg.content);
+        /**
+         * 【M4.9 记忆沉淀升级：正则门控 → LLM 提炼】
+         *
+         * 旧实现：命中 /(文件|整理|创建|偏好|喜欢)/ 就把「用户原话 + 回复前 500 字」
+         * 整段塞进记忆库。问题在于 ——
+         *   · 与语义无关（"我以后都用中文" 没关键词，反而记不进去）
+         *   · 存的是流水账，不是结论
+         *   · 同一件事说五遍存五条，互相稀释
+         *
+         * 新实现：走 MemoryDistiller 做一次轻量 LLM 提炼，产出 0~2 条结构化记忆
+         * （content + importance + kind）。没有值得记的就什么都不存。
+         * LLM 不可用时【静默降级】为原来的正则路径，保证记忆功能不会因为
+         * 没配模型就完全失效。
+         */
+        const distilled = await this.distillMemories(content, finalMsg.content);
 
-        if (shouldPrecipitate) {
-          hermes.addConversationMemory(conversationId,
-            `用户请求: ${content}\nAI回复: ${finalMsg.content.substring(0, 500)}${finalMsg.content.length > 500 ? '...' : ''}`,
-            50
-          );
-          // #006.5 W1: 向量层同步沉淀 — 幂等 (同 conversationId+content → 同 id → Map 覆盖; 禁 Date.now() id,
-          //   否则二次 store 同内容产生两条向量, 违反 #006 V3 upsert 同-id 覆盖的幂等口径)
-          //   容错: catch→log, 不阻塞 chat 主流 (订单开工令)
-          try {
-            const adapter = HermesAdapter.getInstance();
-            const content05 = `用户请求: ${content}\nAI回复: ${finalMsg.content.substring(0, 500)}${finalMsg.content.length > 500 ? '...' : ''}`;
-            const idHash = createHash('sha256').update(`${conversationId}|${content05}`).digest('hex').slice(0, 16);
-            await adapter.store({
-              id: `chat-${idHash}`,
-              content: content05,
-              score: 50,
-              createdAt: Date.now(),
-            });
-          } catch (e) {
-            this.log.warn('[ChatManager] #006.5 W1 向量层沉淀失败 (不阻塞 chat 流)', e);
+        if (distilled.length > 0) {
+          // 提炼成功：只存结论，不存原文
+          for (const d of distilled) {
+            const idHash = createHash('sha256').update(`${conversationId}|${d.content}`).digest('hex').slice(0, 16);
+            try {
+              await HermesAdapter.getInstance().store({
+                id: `mem-${idHash}`,
+                content: d.content,
+                score: d.importance,
+                createdAt: Date.now(),
+              });
+            } catch (e) {
+              this.log.warn('[ChatManager] 提炼记忆入库失败（不阻塞 chat 流）', e);
+            }
           }
+          this.log.info('[ChatManager] LLM 提炼记忆完成', { count: distilled.length });
+        } else {
+          // 降级：提炼不可用（无模型/超时/无值得记的）→ 走原正则门控兜底
+          const shouldPrecipitate = /(文件|文件夹|目录|创建|写入|修改|删除|整理|习惯|偏好|喜欢)/.test(content)
+            || /(文件|文件夹|目录|创建|写入|修改|删除|整理)/.test(finalMsg.content);
 
-          /**
-           * 【M4-B 修正】普通对话流【不再产生技能学习样本】。
-           *
-           * 此前:被中文正则 /(文件|整理|创建|...)/ 门控后,把整轮对话
-           * 推成一条观察(steps 恒为空数组)。后果:
-           *   - 门控是文本猜测,与真实执行无关 —— 用户说"整理一下思路"
-           *     也会被记录,但没有任何执行发生
-           *   - steps 恒为 [] → 分析器拿不到任何可学的操作序列
-           *   - 这样的样本进池,污染了真正有执行轨迹的样本
-           *
-           * 依据调研:「轨迹捕获」要的是【结构化轨迹】,不是聊天文本。
-           * 真正的执行轨迹由两处产生(本批已接):
-           *   - agent tool loop 路径 → recordAgentOutcome
-           *   - TaskExecutor 任务流 → 上方 observeExecution(result, ...)
-           * 普通对话没有执行,没有可学的东西,故不产生观察。
-           *
-           * 对话记忆(hermes.addConversationMemory + 向量沉淀)仍保留 ——
-           * 那是"记住聊过什么",与"学技能"是两件事,不该一起砍。
-           */
+          if (shouldPrecipitate) {
+            hermes.addConversationMemory(conversationId,
+              `用户请求: ${content}\nAI回复: ${finalMsg.content.substring(0, 500)}${finalMsg.content.length > 500 ? '...' : ''}`,
+              50
+            );
+            try {
+              const adapter = HermesAdapter.getInstance();
+              const content05 = `用户请求: ${content}\nAI回复: ${finalMsg.content.substring(0, 500)}${finalMsg.content.length > 500 ? '...' : ''}`;
+              const idHash = createHash('sha256').update(`${conversationId}|${content05}`).digest('hex').slice(0, 16);
+              await adapter.store({
+                id: `chat-${idHash}`,
+                content: content05,
+                score: 50,
+                createdAt: Date.now(),
+              });
+            } catch (e) {
+              this.log.warn('[ChatManager] #006.5 W1 向量层沉淀失败 (不阻塞 chat 流)', e);
+            }
+          }
         }
+
+        /**
+         * 【M4-B 修正】普通对话流【不产生技能学习样本】。
+         *
+         * 门控是文本猜测，与真实执行无关 —— 用户说"整理一下思路"
+         * 也会被记录，但没有任何执行发生；steps 恒为 [] → 分析器拿不到可学序列。
+         * 真正的执行轨迹由两处产生：agent tool loop 与 TaskExecutor 任务流。
+         * 普通对话没有执行，没有可学的东西，故不产生观察。
+         *
+         * 但「记住聊过什么」（记忆）与「学技能」（学习）是两件事：
+         * 记忆沉淀保留（含上面的 LLM 提炼），学习样本不由对话产生。
+         */
       }
 
       return finalMsg || assistantPlaceholder;
@@ -731,8 +780,46 @@ export class ChatManager {
     }
   }
 
-  // ============ 流式响应处理 ============
+  /**
+   * LLM 提炼记忆（M4.9）。
+   *
+   * 与正则门控的区别：让模型判断"这段对话有没有值得长期记住的用户信息"，
+   * 并产出结构化结论。任何失败（无模型/超时/解析失败）都返回 []，
+   * 由调用方降级到原正则路径 —— 记忆功能不会因为没配模型就整体失效。
+   */
+  private async distillMemories(userText: string, assistantText: string): Promise<DistilledMemory[]> {
+    try {
+      return await MemoryDistiller.getInstance().distill(userText, assistantText);
+    } catch (e) {
+      this.log.warn('[ChatManager] 记忆提炼异常，降级为正则门控', e);
+      return [];
+    }
+  }
 
+  /**
+   * 技能落盘后反哺记忆（自进化闭环的反向回路）。
+   *
+   * SelfLearner 写完 SKILL.md 即结束，记忆库原本完全不知道；
+   * 下次遇到同类任务召回不到"我以前把这事固化成技能了"。
+   * 这里写一条 procedure 记忆补上这条回路。失败不影响技能保存。
+   */
+  private async recordSkillToMemory(proposal: { name: string; description: string; triggerCondition: string; keywords: string[] }): Promise<void> {
+    try {
+      const d = MemoryDistiller.getInstance().buildSkillMemory(proposal);
+      const idHash = createHash('sha256').update(`skill|${proposal.name}|${d.content}`).digest('hex').slice(0, 16);
+      await HermesAdapter.getInstance().store({
+        id: `skill-${idHash}`,
+        content: d.content,
+        score: d.importance,
+        createdAt: Date.now(),
+      });
+      this.log.info('[ChatManager] 技能已反哺记忆库', { skill: proposal.name });
+    } catch (e) {
+      this.log.warn('[ChatManager] 技能反哺记忆失败（不影响技能保存）', e);
+    }
+  }
+
+  // ============ 流式响应处理 ============
   private async streamModelResponse(
     conversationId: string,
     messageId: string,
@@ -1158,6 +1245,26 @@ export class ChatManager {
   }
 
   /**
+   * 【NW】真实 token usage 广播 → 渲染层生命体 Orb 精确遥测。
+   * 载荷与 CostTracker 记账同源, 只推送给仍存活的窗口。
+   */
+  private broadcastUsage(conversationId: string, usage: {
+    promptTokens: number;
+    completionTokens: number;
+    totalTokens: number;
+    /** provider 真实回传才有；缺失时渲染层不展示思考计数 */
+    reasoningTokens?: number;
+    model: string;
+  }): void {
+    const windows = BrowserWindow.getAllWindows();
+    windows.forEach(w => {
+      if (!w.isDestroyed()) {
+        w.webContents.send('chat:usage', { conversationId, usage });
+      }
+    });
+  }
+
+  /**
    * Phase 3 Task 1: 真 LLM SSE 增量推送
    * 每收到一个 SSE data 行就立即广播一个增量 chunk 到 chat:streamUpdate,
    * 渲染进程 store 通过订阅 onStreamUpdate 把 delta 累积到消息 content,
@@ -1290,8 +1397,31 @@ export class ChatManager {
     // 事件归属由会话层在中继表登记,这是让 tool_call 可被渲染层消费的前提。
     const runId = `run_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
     this.agentEventRelay.bindRun(runId, conversationId);
+
+    // 【P3】把 agent run 登记到会话的停止句柄表 —— 子任务由父 run 的 AbortSignal 级联中止。
+    let agentAbortHandle: { runId: string; abort: () => boolean } | undefined;
+    const brainAbort = (this.registeredAgent as { abortRun?: (id: string) => boolean }).abortRun;
+    if (typeof brainAbort === 'function') {
+      agentAbortHandle = {
+        runId,
+        abort: () => brainAbort.call(this.registeredAgent, runId),
+      };
+      let handles = this.agentAborts.get(conversationId);
+      if (!handles) {
+        handles = new Set();
+        this.agentAborts.set(conversationId, handles);
+      }
+      handles.add(agentAbortHandle);
+    }
+
+    // 工具真实落盘的成品先攒在这里，最终写进消息 —— 事件是一次性的，消息才是可持久化的事实。
+    const runArtifacts: ProducedArtifact[] = [];
     const unsubscribe = this.agentEventRelay.subscribe((ev) => {
       if (ev.conversationId !== conversationId) return;
+      if (ev.type === 'tool_result' && ev.runId === runId) {
+        const arts = (ev.data as { artifacts?: ProducedArtifact[] })?.artifacts;
+        if (Array.isArray(arts)) runArtifacts.push(...arts);
+      }
       this.broadcastAgentEvent(conversationId, ev);
     });
 
@@ -1323,6 +1453,8 @@ export class ChatManager {
         /** 【M3-E】分项 token —— 此前只取 total,输入/输出混在一栏 */
         promptTokens?: number
         completionTokens?: number
+        /** 【P2】思考 token —— 来自 provider 的 reasoning_tokens，不是估算值 */
+        reasoningTokens?: number
         /** 【M4-H】来自兜底占位实现(未接入真实模型) */
         stub?: boolean
       };
@@ -1355,6 +1487,16 @@ export class ChatManager {
             outputTokens,
             conversationId,
           });
+
+          // 【NW】把真实 usage 广播到渲染层,驱动生命体 Orb 的精确 token 遥测。
+          // 与记账同源(同一份 payload),避免"账上一个数、界面另一个数"。
+          this.broadcastUsage(conversationId, {
+            promptTokens: inputTokens,
+            completionTokens: outputTokens,
+            totalTokens,
+            reasoningTokens: payload.reasoningTokens,
+            model: payload.llmModel || 'agent-loop',
+          });
         } catch (e) {
           this.log.warn('[ChatManager] dispatchToAgent: token 记账失败', e);
         }
@@ -1368,8 +1510,17 @@ export class ChatManager {
        * 让「这条是占位答复」成为**结构化事实**而不只是一段文字。
        */
       const msgStatus: MessageStatus = payload.stub === true ? 'stub' : 'sent';
-      this.config.updateMessage(conversationId, placeholderId, { content: text, status: msgStatus });
-      this.broadcastMessage(conversationId, { ...placeholder, content: text, status: msgStatus });
+      // 【P2】思考 token 落到消息本身 —— 这样刷新页面后 ThinkingBlock 的计数仍在,
+      // 不依赖一次性 IPC 广播的到达时机。provider 没回传时干脆不带这个字段。
+      const reasoningTokens = payload.reasoningTokens ?? 0;
+      const finalUpdate: Partial<ChatMessage> = {
+        content: text,
+        status: msgStatus,
+        ...(reasoningTokens > 0 ? { thinkingTokens: reasoningTokens } : {}),
+        ...(runArtifacts.length > 0 ? { artifacts: runArtifacts } : {}),
+      };
+      this.config.updateMessage(conversationId, placeholderId, finalUpdate);
+      this.broadcastMessage(conversationId, { ...placeholder, ...finalUpdate });
 
       this.log.info(
         `[ChatManager] [${traceId}] agent loop 完成: ${payload.iterations ?? 0} 轮, ` +
@@ -1398,6 +1549,7 @@ export class ChatManager {
     } finally {
       unsubscribe();
       this.agentEventRelay.releaseRun(runId);
+      if (agentAbortHandle) this.agentAborts.get(conversationId)?.delete(agentAbortHandle);
     }
   }
 

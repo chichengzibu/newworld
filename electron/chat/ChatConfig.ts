@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - 聊天配置管理器
+ * New World - 聊天配置管理器
  * 
  * 职责：
  * 1. 会话和消息的持久化存储
@@ -358,6 +358,26 @@ export class ChatConfig {
 
   public getSettings(): ChatSettings {
     return { ...this.settings };
+  }
+
+  /** 【本地备份】聊天设置快照。故意不含 conversations —— 备份的是配置，不是会话历史。 */
+  public exportSnapshot(): { settings: ChatSettings; lastProviderId: string | null; lastModelId: string | null } {
+    return {
+      settings: this.getSettings(),
+      lastProviderId: this.lastProviderId,
+      lastModelId: this.lastModelId,
+    };
+  }
+
+  /** 【本地备份】恢复聊天设置，保留当前会话历史不动 */
+  public importSnapshot(data: any): void {
+    if (!data || typeof data !== 'object' || !data.settings || typeof data.settings !== 'object') {
+      throw new Error('备份聊天设置格式错误：settings 必须是对象');
+    }
+    this.settings = { ...this.settings, ...data.settings };
+    this.lastProviderId = typeof data.lastProviderId === 'string' ? data.lastProviderId : null;
+    this.lastModelId = typeof data.lastModelId === 'string' ? data.lastModelId : null;
+    this.saveConfig();
   }
 
   public updateSettings(updates: Partial<ChatSettings>): ChatSettings {

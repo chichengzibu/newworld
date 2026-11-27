@@ -1,5 +1,5 @@
 /**
- * PiPiClaw — 裁判校准实跑（M4-J）
+ * New World — 裁判校准实跑（M4-J）
  * ═══════════════════════════════════════════════════════════════════════
  * 【这一批在测什么】
  * 不是"测试通过/失败",而是**跑一次校准并把结论落盘**。
@@ -10,7 +10,7 @@
  * 一次校准要打模型(每条样本跑两遍:换序)。普通测试电池里跑这个 =
  * 每次 npm test 都烧几分钟算力,还会让「测试是否通过」依赖本机有没有
  * ollama。因此:
- *   - 默认 SKIP(必须显式 PIPICLAW_CALIBRATION=1 才跑)
+ *   - 默认 SKIP(必须显式 NW_CALIBRATION=1 才跑)
  *   - 跑出来的结论落在 .tmp-calibration/out/ 下,不入仓
  *
  * 【怎么跑】
@@ -18,10 +18,10 @@
  *   python scripts/calibration/prepare_datasets.py
  *
  *   # 2) 校准默认裁判模型
- *   PIPICLAW_CALIBRATION=1 npx vitest run tests/integration/judge-calibration-live.test.ts
+ *   NW_CALIBRATION=1 npx vitest run tests/integration/judge-calibration-live.test.ts
  *
  *   # 3) 换一个裁判模型再跑一遍(量 judge drift)
- *   PIPICLAW_CALIBRATION=1 PIPICLAW_CALIBRATION_MODEL=qwen3.8:27b-q4km \
+ *   NW_CALIBRATION=1 NW_CALIBRATION_MODEL=qwen3.8:27b-q4km \
  *     npx vitest run tests/integration/judge-calibration-live.test.ts
  *
  * 【断点续跑】裁决落 verdicts-<model>.jsonl,已判过的样本跳过。
@@ -34,8 +34,8 @@ import { join } from 'node:path'
 
 vi.mock('electron', () => ({
   app: {
-    getPath: vi.fn((k: string) => `/tmp/pipiclaw-calibration-${k}`),
-    getName: () => 'pipiclaw',
+    getPath: vi.fn((k: string) => `/tmp/newworld-calibration-${k}`),
+    getName: () => 'newworld',
     getVersion: () => '4.5.0',
   },
   safeStorage: {
@@ -73,16 +73,16 @@ import {
   sampleStratified,
 } from '../helpers/calibration-dataset'
 
-const ENABLED = process.env.PIPICLAW_CALIBRATION === '1'
-const MODEL = process.env.PIPICLAW_CALIBRATION_MODEL || 'qwen3.5:9b'
+const ENABLED = process.env.NW_CALIBRATION === '1'
+const MODEL = process.env.NW_CALIBRATION_MODEL || 'qwen3.5:9b'
 /** 每个类别抽多少条 —— 想要统计显著性就调大(每条样本要打两遍模型) */
-const PER_CATEGORY = Number(process.env.PIPICLAW_CALIBRATION_PER_CATEGORY || 20)
+const PER_CATEGORY = Number(process.env.NW_CALIBRATION_PER_CATEGORY || 20)
 /** 用哪套标注集 */
-const DATASETS = (process.env.PIPICLAW_CALIBRATION_DATASET || 'panel').split(',').map(s => s.trim())
+const DATASETS = (process.env.NW_CALIBRATION_DATASET || 'panel').split(',').map(s => s.trim())
 const OLLAMA_BASE = 'http://localhost:11434/v1'
 const OLLAMA_HOST = 'http://localhost:11434'
 /** 并发度 —— ollama 自己会排队,太高只是把请求堆在服务端 */
-const CONCURRENCY = Number(process.env.PIPICLAW_CALIBRATION_CONCURRENCY || 4)
+const CONCURRENCY = Number(process.env.NW_CALIBRATION_CONCURRENCY || 4)
 
 const VERDICT_FILE = join(OUTPUT_DIR, `verdicts-${MODEL.replace(/[:/]/g, '_')}.jsonl`)
 
@@ -170,7 +170,7 @@ describe('M4-J 裁判校准实跑', () => {
 
   it('跑一轮校准并落盘结论', async (ctx) => {
     if (!ENABLED) {
-      return ctx.skip('[SKIP] 校准需显式开启：PIPICLAW_CALIBRATION=1（否则每次 npm test 都烧算力）')
+      return ctx.skip('[SKIP] 校准需显式开启：NW_CALIBRATION=1（否则每次 npm test 都烧算力）')
     }
 
     // ── 取标注集 ──

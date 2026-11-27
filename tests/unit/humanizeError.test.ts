@@ -39,8 +39,8 @@ describe('P4-T4.2: humanizeError 鉴权错误', () => {
     const r = humanizeError(new Error('401 Unauthorized'))
     expect(r.kind).toBe('auth')
     expect(r.userMessage).toContain('API Key')
-    expect(r.hint).toContain('Settings')
-    expect(r.action?.route).toBe('/settings/llm-config')
+    expect(r.hint).toContain('模型管理')
+    expect(r.action?.route).toBe('/models')
   })
 
   it('invalid api key → 鉴权错误', () => {
@@ -79,7 +79,7 @@ describe('P4-T4.2: humanizeError 业务错误', () => {
     const r = humanizeError(new Error('no LLM provider configured'))
     expect(r.kind).toBe('config')
     expect(r.userMessage).toContain('配置')
-    expect(r.action?.route).toBe('/settings/llm-config')
+    expect(r.action?.route).toBe('/models')
   })
 })
 

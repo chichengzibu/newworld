@@ -36,7 +36,7 @@ import type {
  */
 export const TEST_USER_DATA = pathNode.join(
   os.tmpdir(),
-  `pipiclaw-test-userdata-${process.pid}`,
+  `newworld-test-userdata-${process.pid}`,
 )
 
 export class TestHost implements PlatformHost {

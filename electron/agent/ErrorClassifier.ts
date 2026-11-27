@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - Agent / ErrorClassifier
+ * New World - Agent / ErrorClassifier
  *
  * 【设计依据:业界调研结论】
  * 2026 年的生产实践(12+ agent 系统的实测数据)给出了一致的结论:

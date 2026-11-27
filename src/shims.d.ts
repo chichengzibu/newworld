@@ -1,3 +1,5 @@
+/// <reference types="vite/client" />
+
 // Ambient module declarations for dependencies without bundled types.
 
 declare module 'vue-i18n' {

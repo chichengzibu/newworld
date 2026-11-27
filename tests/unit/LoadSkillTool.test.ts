@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - load_skill 工具测试 (M4-A)
+ * New World - load_skill 工具测试 (M4-A)
  *
  * 这是渐进披露的 L2 入口:模型看到 L1 摘要后自己决定加载哪个技能。
  * 工具行为出错的后果:

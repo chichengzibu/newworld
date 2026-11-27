@@ -1,12 +1,13 @@
 /**
- * PiPiClaw - OpenAI-compatible adapter (M1 v0.1)
+ * New World - OpenAI-compatible adapter (M1 v0.1)
  *
  * 复用 OpenAI 协议但 baseUrl + model 来自 LlmConfig.
  * 覆盖: deepseek / ollama (via /v1/chat/completions) / volc_ark / openrouter / custom.
  */
 import { LogManager } from '../../core/LogManager'
-import type { LlmConfig, LlmRequest, LlmResponse, LlmToolCall, LlmStreamChunk } from '../types'
+import type { LlmConfig, LlmRequest, LlmResponse, LlmToolCall, LlmStreamChunk, LlmUsage } from '../types'
 import { DEFAULT_API_BASE, DEFAULT_MODELS } from '../types'
+import { parseOpenAiUsage } from '../usage'
 
 /**
  * 判断 baseUrl 是否指向 ollama。
@@ -115,13 +116,7 @@ export class OpenAiCompatibleAdapter {
         content,
         model,
         durationMs: Date.now() - startMs,
-        usage: data.usage
-          ? {
-              promptTokens: data.usage.prompt_tokens,
-              completionTokens: data.usage.completion_tokens,
-              totalTokens: data.usage.total_tokens,
-            }
-          : undefined,
+        usage: parseOpenAiUsage(data.usage),
         ...(toolCalls && toolCalls.length > 0 ? { toolCalls } : {}),
         ...(reasoning ? { reasoning } : {}),
         ...(finishReason ? { finishReason } : {}),
@@ -182,7 +177,7 @@ export class OpenAiCompatibleAdapter {
     let accContent = ''
     let accReasoning = ''
     const toolAcc: Map<number, { id: string; name: string; args: string }> = new Map()
-    let finalUsage: { promptTokens: number; completionTokens: number; totalTokens: number } | undefined
+    let finalUsage: LlmUsage | undefined
     let finalFinish: string | undefined
     try {
       while (true) {
@@ -221,11 +216,7 @@ export class OpenAiCompatibleAdapter {
           }
           if (choice?.finish_reason) finalFinish = choice.finish_reason
           if (data.usage) {
-            finalUsage = {
-              promptTokens: data.usage.prompt_tokens,
-              completionTokens: data.usage.completion_tokens,
-              totalTokens: data.usage.total_tokens,
-            }
+            finalUsage = parseOpenAiUsage(data.usage)
           }
         }
       }

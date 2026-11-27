@@ -6,7 +6,6 @@ import { LogManager } from '../core/LogManager'
 import { ConfigStore } from '../core/ConfigStore'
 import type { HermesMemory as HermesMemoryInterface, Memory, RecallOptions, CuratorReport, EvolutionReport } from '../contracts/types'
 import type { EmbeddingModel } from './EmbeddingService'
-import { randomUUID } from 'node:crypto'
 
 export interface AdapterRecallOptions extends RecallOptions {
   useVector?: boolean
@@ -162,7 +161,30 @@ export class HermesAdapter implements HermesMemoryInterface {
       }
       const qVec = await this.embedder.embedText(query, { model })
       const raw = await this.vectorStore.search(qVec, topK * 2, minScore)
-      vecResults = raw.map(r => ({ memory: r.entry.memory, score: r.score }))
+      /**
+       * 【M4.9 修严重 bug：重启后纯向量召回返回空 content】
+       *
+       * 现象：MemoryVectorStore 持久化只存 id/vector/norm（不存 content），
+       * 进程重启 loadFromDisk 后 entry.memory.content 是 `''`。
+       * 而 ChatManager 的活跃链（:655）用的是 `useKeyword: false` —— 只走向量路，
+       * 于是重启后每一轮 memoryPrompt 都注入 `- ` 这种空条目。
+       *
+       * 修法：从文本真源（legacy）按 id 回填 content；回填不到的（孤儿向量）直接丢弃，
+       * 不把空条目喂给模型。
+       */
+      const hitIds = raw.map((r) => r.entry.id)
+      const backfill = this.legacy.getByIds(hitIds)
+      const collected: Array<{ memory: Memory; score: number }> = []
+      for (const r of raw) {
+        const source = backfill.get(r.entry.id)
+        const content = (r.entry.memory.content || source?.content || '').trim()
+        if (!content) continue
+        collected.push({
+          memory: { id: r.entry.id, content, score: r.score, createdAt: r.entry.ts },
+          score: r.score,
+        })
+      }
+      vecResults = collected
     }
 
     /**
@@ -242,24 +264,113 @@ export class HermesAdapter implements HermesMemoryInterface {
     return this.embedder.getActiveModelName()
   }
 
+  /**
+   * 记忆整理：真删除低价值条目 + 真晋升层级 + 压缩快照。
+   *
+   * 【M4.9 修空转】旧实现只 `removed += 1` 计数，一条都不删，
+   * `promoted` 恒为 0 —— 名为 curate 实为统计。
+   * 现在按三条规则真执行：
+   *   ① importance < 10 且超过 30 天 → 遗忘（删）
+   *   ② conversation 层 importance ≥ 70 → 晋升 experience
+   *   ③ 重写 MEMORY.md 快照（去重 + 截断）
+   */
   async curate(): Promise<CuratorReport> {
-    let removed = 0
-    const promoted = 0
     const all = this.legacy.getAllMemories()
-    for (const m of all) {
-      if ((m.importance ?? 0) < 10) {
-        removed += 1
+    const now = Date.now()
+    const THIRTY_DAYS = 30 * 86400000
+
+    // ① 遗忘：低重要性 + 陈旧
+    const toForget = all
+      .filter((m) => (m.importance ?? 0) < 10 && now - m.timestamp > THIRTY_DAYS)
+      .map((m) => m.id)
+    const removed = this.legacy.removeByIds(toForget)
+    for (const id of toForget) {
+      try {
+        await this.vectorStore.delete(id)
+      } catch {
+        /* 向量删除失败不影响文本层 */
       }
     }
+
+    // ② 层级晋升
+    const { promoted } = this.legacy.promoteMemories()
+
+    // ③ 压缩快照
+    this.legacy.compactExperience()
+
+    this.log.info('[HermesAdapter] curate 完成', { removed, promoted })
     return { removed, promoted }
   }
 
+  /**
+   * 记忆演化：从「高价值 + 近期」的真实候选里做归并，而不是随机拼字符串。
+   *
+   * 【M4.9 修空转】旧实现是 `随机取一条 + 拼 "(变体 xxxx)"` —— 纯占位。
+   * 现在做两件有语义的事：
+   *   ① 合并同主题碎片：找出词面高度重叠的两条，合成一条更完整的记忆（保留更高重要性）
+   *   ② 强化被反复召回的记忆：把近期高重要性条目的 importance 上调（边际递减）
+   */
   async evolve(): Promise<EvolutionReport> {
     const all = this.legacy.getAllMemories()
     if (all.length === 0) return { newMemories: 0, mutated: 0 }
-    const source = all[Math.floor(Math.random() * all.length)]
-    const variant = `${source.content} (变体 ${randomUUID().slice(0, 4)})`
-    this.legacy.addExperienceMemory(variant, ['evolved'])
-    return { newMemories: 1, mutated: 0 }
+
+    let newMemories = 0
+    let mutated = 0
+
+    // ① 合并词面重叠的短碎片（两条都很短且互相包含时合并）
+    const shortOnes = all
+      .filter((m) => m.type !== 'core' && m.content.length >= 8 && m.content.length <= 120)
+      .sort((a, b) => b.timestamp - a.timestamp)
+      .slice(0, 40)
+
+    const mergePairs: Array<{ keep: typeof all[number]; drop: typeof all[number] }> = []
+    const used = new Set<string>()
+    for (let i = 0; i < shortOnes.length; i++) {
+      const a = shortOnes[i]
+      if (used.has(a.id)) continue
+      for (let j = i + 1; j < shortOnes.length; j++) {
+        const b = shortOnes[j]
+        if (used.has(b.id)) continue
+        const ca = a.content.trim()
+        const cb = b.content.trim()
+        // 一条包含另一条且长度接近 → 视为同主题碎片
+        if (ca.includes(cb) || cb.includes(ca)) {
+          mergePairs.push({ keep: ca.length >= cb.length ? a : b, drop: ca.length >= cb.length ? b : a })
+          used.add(a.id)
+          used.add(b.id)
+          break
+        }
+      }
+      if (mergePairs.length >= 3) break
+    }
+
+    for (const { drop, keep } of mergePairs) {
+      this.legacy.updateMemory(keep.id, {
+        importance: Math.min(100, Math.max(keep.importance ?? 50, drop.importance ?? 50) + 5),
+        tags: [...new Set([...(keep.tags ?? []), ...(drop.tags ?? [])])],
+      })
+      this.legacy.removeByIds([drop.id])
+      try {
+        await this.vectorStore.delete(drop.id)
+      } catch {
+        /* 忽略 */
+      }
+      mutated += 1
+    }
+
+    // ② 强化近期高价值记忆（边际递减：每次 +2，上限 100）
+    const recentCut = Date.now() - 7 * 86400000
+    const toReinforce = all
+      .filter((m) => m.timestamp >= recentCut && (m.importance ?? 0) >= 60 && (m.importance ?? 0) < 100)
+      .slice(0, 10)
+    for (const m of toReinforce) {
+      this.legacy.updateMemory(m.id, { importance: Math.min(100, (m.importance ?? 60) + 2) })
+      mutated += 1
+    }
+
+    if (mutated > 0 || newMemories > 0) {
+      this.log.info('[HermesAdapter] evolve 完成', { newMemories, mutated })
+    }
+    return { newMemories, mutated }
   }
 }

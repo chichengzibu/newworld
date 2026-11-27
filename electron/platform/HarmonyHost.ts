@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - 鸿蒙 PC(HarmonyOS PC)平台实现
+ * New World - 鸿蒙 PC(HarmonyOS PC)平台实现
  *
  * 鸿蒙 PC 走华为提供的 Electron 适配运行时(ArkWeb 渲染,NAPI 原生扩展,HAP 包)。
  * 由于无 keytar / 无系统托盘 / 无标准 autoUpdater,相关能力返回 null 由调用方降级。
@@ -41,7 +41,7 @@ export class HarmonyHost implements PlatformHost {
   }
 
   private base(): string {
-    return process.env.PIPICLAW_USER_DATA ?? join(homedir(), '.pipiclaw-ohos')
+    return process.env.NW_USER_DATA ?? join(homedir(), '.nw-ohos')
   }
 
   getPath(name: AppPathName): string {
@@ -65,7 +65,7 @@ export class HarmonyHost implements PlatformHost {
   }
 
   getVersion(): string {
-    return process.env.PIPICLAW_VERSION ?? '0.0.0'
+    return process.env.NW_VERSION ?? '0.0.0'
   }
 
   isPackaged(): boolean {
@@ -73,7 +73,7 @@ export class HarmonyHost implements PlatformHost {
   }
 
   getAppPath(): string {
-    return process.env.PIPICLAW_APP_PATH ?? join(this.base(), 'app')
+    return process.env.NW_APP_PATH ?? join(this.base(), 'app')
   }
 
   // —— 生命周期 / 应用控制(鸿蒙用 EventEmitter + process) ——

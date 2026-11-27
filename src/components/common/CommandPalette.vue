@@ -80,7 +80,7 @@
             <span><kbd>↵</kbd> 打开</span>
             <span><kbd>esc</kbd> 关闭</span>
             <span class="palette-footer-spacer" />
-            <span class="palette-footer-tip">由 PiPiClaw 命令面板驱动</span>
+            <span class="palette-footer-tip">由 New World 命令面板驱动</span>
           </div>
         </div>
       </div>
@@ -128,7 +128,7 @@ const placeholder = computed(() => {
 
 const recentConversations = computed<CommandItem[]>(() => {
   try {
-    const all = JSON.parse(localStorage.getItem('pipiclaw_recent_commands') || '[]') as Array<{
+    const all = JSON.parse(localStorage.getItem('nw_recent_commands') || '[]') as Array<{
       id: string
       title: string
       ts: number
@@ -177,23 +177,13 @@ const navigationCommands = computed<CommandItem[]>(() => {
       action: () => router.push('/models'),
     },
     {
-      id: 'nav-model-compare', kind: 'nav', title: '模型对比', subtitle: '性价比 + 社区评分', icon: 'Lightning',
-      keywords: ['compare', '对比', '价格'],
-      action: () => router.push('/model-compare'),
-    },
-    {
       id: 'nav-im', kind: 'nav', title: 'IM 管理', subtitle: '11 个 IM 平台配置', icon: 'Message',
       keywords: ['im', 'feishu', 'telegram', 'discord', '钉钉', '飞书'],
       action: () => router.push('/im-management'),
     },
     {
-      id: 'nav-tasks', kind: 'nav', title: '自动化任务', subtitle: '查看运行中的任务', icon: 'Lightning',
-      keywords: ['tasks', '任务'],
-      action: () => router.push('/tasks'),
-    },
-    {
-      id: 'nav-schedule', kind: 'nav', title: '定时任务', subtitle: 'Cron 计划', icon: 'Clock',
-      keywords: ['schedule', 'cron', '定时', '计划'],
+      id: 'nav-schedule', kind: 'nav', title: '定时任务', subtitle: '计划任务与执行记录', icon: 'Clock',
+      keywords: ['schedule', 'tasks', 'cron', '定时', '计划', '任务'],
       action: () => router.push('/schedule'),
     },
     {
@@ -205,6 +195,27 @@ const navigationCommands = computed<CommandItem[]>(() => {
       id: 'nav-settings', kind: 'nav', title: '系统设置', subtitle: '主题 / 快捷键 / 自动更新', icon: 'Setting',
       keywords: ['settings', '设置', 'preferences', '偏好'],
       action: () => router.push('/settings'),
+    },
+    // v4.6 侧栏精简后，以下低频页面不再常驻 rail，命令面板必须能搜到它们
+    {
+      id: 'nav-search', kind: 'nav', title: '联网搜索', subtitle: '检索外部网页', icon: 'Search',
+      keywords: ['search', '搜索', '联网', 'web'],
+      action: () => router.push('/search'),
+    },
+    {
+      id: 'nav-voice', kind: 'nav', title: '语音', subtitle: '语音输入与朗读', icon: 'Microphone',
+      keywords: ['voice', '语音', 'tts', '朗读'],
+      action: () => router.push('/voice'),
+    },
+    {
+      id: 'nav-remote-control', kind: 'nav', title: '远程控制', subtitle: '通过 IM 远程下发指令', icon: 'Connection',
+      keywords: ['remote', '远程', '控制'],
+      action: () => router.push('/remote-control'),
+    },
+    {
+      id: 'nav-im-accounts', kind: 'nav', title: 'IM 账号', subtitle: 'IM 平台账号绑定', icon: 'User',
+      keywords: ['im accounts', '账号', '绑定'],
+      action: () => router.push('/settings/im-accounts'),
     },
   ]
   return items
@@ -389,14 +400,14 @@ async function commitItem(item: CommandItem): Promise<void> {
   // 记录最近使用
   if (item.kind === 'nav' || item.kind === 'prompt') {
     try {
-      const history = JSON.parse(localStorage.getItem('pipiclaw_recent_commands') || '[]') as Array<{
+      const history = JSON.parse(localStorage.getItem('nw_recent_commands') || '[]') as Array<{
         id: string
         title: string
         ts: number
       }>
       const filtered = history.filter((h) => h.id !== item.id)
       filtered.unshift({ id: item.id, title: item.title, ts: Date.now() })
-      localStorage.setItem('pipiclaw_recent_commands', JSON.stringify(filtered.slice(0, 20)))
+      localStorage.setItem('nw_recent_commands', JSON.stringify(filtered.slice(0, 20)))
     } catch {
       // ignore
     }

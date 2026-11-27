@@ -73,7 +73,7 @@ function loadOrCreateKey(log: ReturnType<typeof LogManager.getInstance>): string
 /**
  * SkillSigner: 给技能签名 (W6 强化版)
  *
- * 历史: 之前硬编码 `pipiclaw-local-stub-key-W6-do-not-use-in-prod` 在源码里,
+ * 历史: 之前硬编码 `newworld-local-stub-key-W6-do-not-use-in-prod` 在源码里,
  * 任何拿到包的人都能伪造任意 skill 签名。ClawHub 导入第三方 skill 时
  * 信任链等于崩塌。
  *

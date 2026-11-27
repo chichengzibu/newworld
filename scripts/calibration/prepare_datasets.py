@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-PiPiClaw — 裁判校准标注集准备脚本 (M4-J)
+New World — 裁判校准标注集准备脚本 (M4-J)
 ════════════════════════════════════════════════════════════════════
 【它做什么】
 把两份公开的人工标注数据集，下载并转成本项目统一的 pairwise JSONL 格式：
@@ -76,7 +76,7 @@ MTB_PARQUET = "data/human-00000-of-00001-25f4910818759289.parquet"
 MTB_LICENSE = "cc-by-4.0"
 MTB_URL = "https://huggingface.co/datasets/lmsys/mt_bench_human_judgments"
 
-USER_AGENT = "pipiclaw-calibration-prep/1.0 (+https://github.com/pipiclaw)"
+USER_AGENT = "newworld-calibration-prep/1.0 (+https://github.com/pipiclaw)"
 
 
 # ── 下载 ────────────────────────────────────────────────────────────────

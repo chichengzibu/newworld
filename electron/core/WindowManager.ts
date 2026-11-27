@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - 窗口管理器
+ * New World - 窗口管理器
  */
 
 import { BrowserWindow, screen, app } from 'electron';
@@ -111,12 +111,12 @@ export class WindowManager {
   public async createMainWindow(): Promise<BrowserWindow> {
     // isDev 三重判断:
     // 1) !app.isPackaged — 未打包(开发/Playwright)
-    // 2) 未设 PIPICLAW_E2E=1  — 不是 e2e 测试模式
+    // 2) 未设 NW_E2E=1  — 不是 e2e 测试模式
     // 3) 存在 dev server 端口 — dev 时 vite 起来了
     // e2e 测试时强制走 prod 路径(用 dist/index.html),避免 vite 没起导致 ERR_CONNECTION_REFUSED
     const isDev =
       !app.isPackaged &&
-      process.env.PIPICLAW_E2E !== '1' &&
+      process.env.NW_E2E !== '1' &&
       !process.env.CI;
     
     const primaryDisplay = screen.getPrimaryDisplay();

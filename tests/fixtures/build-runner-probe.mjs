@@ -17,7 +17,7 @@ import { moveAside, runStep, readTail, findArtifact } from '../../scripts/lib/bu
 const results = {};
 
 async function main() {
-  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pipiclaw-buildrunner-'));
+  const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'newworld-buildrunner-'));
   const logDir = path.join(tmpRoot, 'logs');
 
   // ① 正常执行:退出码 / 日志落盘 / 耗时

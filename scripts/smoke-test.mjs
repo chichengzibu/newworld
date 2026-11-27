@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * PiPiClaw end-to-end smoke test (Phase 4 Task 5)
+ * New World end-to-end smoke test (Phase 4 Task 5)
  *
  * Strategy A (lightweight): verify build artifacts + key code surface.
  * Does NOT spawn a real Electron process (no GUI, sub-second).
@@ -51,7 +51,7 @@ function fileSize(p) {
   return statSync(p).size
 }
 
-console.log('🔥 PiPiClaw smoke test')
+console.log('🔥 New World smoke test')
 console.log(`   root: ${ROOT}\n`)
 
 if (process.env.SMOKE_FULL === '1') {

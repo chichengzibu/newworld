@@ -6,7 +6,7 @@ export const fastapi: TemplateConfig = {
   description: 'FastAPI + uvicorn + Pydantic v2,RESTful API 项目',
   triggers: ['fastapi', 'python', 'api', '后端', '后端api', 'pydantic', 'uvicorn', 'restful'],
   devPort: 8000,
-  image: 'pipiclaw/sandbox-base:latest',
+  image: 'newworld/sandbox-base:latest',
   files: [
     {
       path: 'requirements.txt',
@@ -20,7 +20,7 @@ pydantic==2.9.2
       content: `from fastapi import FastAPI
 from pydantic import BaseModel
 
-app = FastAPI(title='PiPiClaw FastAPI Sandbox')
+app = FastAPI(title='New World FastAPI Sandbox')
 
 class Item(BaseModel):
     name: str
@@ -28,7 +28,7 @@ class Item(BaseModel):
 
 @app.get('/')
 async def root():
-    return {'message': 'Hello from FastAPI (PiPiClaw sandbox)'}
+    return {'message': 'Hello from FastAPI (New World sandbox)'}
 
 @app.get('/health')
 async def health():

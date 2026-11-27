@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - Sandbox 资源限额(W10.2)
+ * New World - Sandbox 资源限额(W10.2)
  *
  * 默认值:
  * - CPU:2 核

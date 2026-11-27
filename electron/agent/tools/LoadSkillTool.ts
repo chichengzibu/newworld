@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - load_skill 工具 (M4-A)
+ * New World - load_skill 工具 (M4-A)
  *
  * 【为什么需要这个工具】
  * Anthropic Agent Skills 的渐进披露模型:

@@ -1,11 +1,15 @@
 /**
- * PiPiClaw - IPC服务器
+ * New World - IPC服务器
  */
 
-import { ipcMain, app, dialog } from 'electron';
+import { ipcMain, app, dialog, shell, BrowserWindow } from 'electron';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { getHost } from '../platform/runtime';
 import { LogManager } from './LogManager';
 import { WindowManager } from './WindowManager';
 import { ConfigStore } from './ConfigStore';
+import { BackupManager } from './BackupManager';
 import { LlmConfigStore } from '../llm/LlmConfigStore';
 
 import { ModelManager } from '../models/ModelManager';
@@ -47,10 +51,9 @@ import { IMPermissionManager } from '../channel/IMPermissionManager';
 export interface NovaBootBridge {
   /** nova:renderer-ready → BootDirector.markRendererReady() */
   markRendererReady(): void;
-  /** nova:boot-skip → BootDirector.markSkipped() + SplashWindow.close() */
-  markSkipped(): void;
 }
 import { ChannelRouter } from '../channel/ChannelRouter';
+import { refreshChannels, getTelegramPollerStatus } from '../channel/bootstrap';
 import { ClawHubRegistry } from '../skill/ClawHubRegistry';
 import { ModelRatingManager } from '../models/ModelRatingManager';
 import { ModelUsageTracker } from '../models/ModelUsageTracker';
@@ -70,7 +73,7 @@ export class IpcServer {
   private constructor() {}
 
   // ========== NOVA #003-C · M2 — BootDirector bridge(第②笔) ==========
-  // 见 nova:renderer-ready / nova:boot-skip handler(本类 registerHandlers 内)
+  // 见 nova:renderer-ready handler(本类 registerHandlers 内)
   private novaBoot: NovaBootBridge | null = null;
   public setNovaBootBootBridge(bridge: NovaBootBridge | null): void { this.novaBoot = bridge; }
   get novaBootBridge(): NovaBootBridge | null { return this.novaBoot; }
@@ -112,6 +115,103 @@ export class IpcServer {
       } catch (error) {
         this.log.error('dialog:openFile 失败', error);
         return { canceled: true, filePaths: [] };
+      }
+    });
+
+    ipcMain.handle('dialog:saveFile', async (_, options: any) => {
+      try {
+        const result = await dialog.showSaveDialog({
+          title: options?.title || '保存文件',
+          defaultPath: options?.defaultPath,
+          filters: options?.filters || [{ name: '本地备份', extensions: ['zip'] }],
+          properties: ['createDirectory', 'showOverwriteConfirmation'],
+        });
+        return { canceled: result.canceled, filePath: result.filePath };
+      } catch (error) {
+        this.log.error('dialog:saveFile 失败', error);
+        return { canceled: true, filePath: undefined };
+      }
+    });
+
+    // ========== 本地备份：配置/技能导出导入（无服务器） ==========
+    ipcMain.handle('backup:create', async (_, options?: { includeApiKeys?: boolean }) => {
+      try {
+        return { success: true, data: await BackupManager.getInstance().create(options ?? {}) };
+      } catch (error) {
+        this.log.error('backup:create 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    ipcMain.handle('backup:list', async () => {
+      try {
+        return { success: true, data: await BackupManager.getInstance().list() };
+      } catch (error) {
+        this.log.error('backup:list 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    ipcMain.handle('backup:restore', async (_, filePath: string) => {
+      try {
+        const result = await BackupManager.getInstance().restore(filePath);
+        // 通知渲染层配置已变；监听方可自行刷新 store
+        BrowserWindow.getAllWindows().forEach(w => {
+          if (!w.isDestroyed()) w.webContents.send('backup:restored', result);
+        });
+        return { success: true, data: result };
+      } catch (error) {
+        this.log.error('backup:restore 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    ipcMain.handle('backup:exportToFile', async (_, filePath: string, options?: { includeApiKeys?: boolean }) => {
+      try {
+        return { success: true, data: await BackupManager.getInstance().exportToFile(filePath, options ?? {}) };
+      } catch (error) {
+        this.log.error('backup:exportToFile 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    ipcMain.handle('backup:exportSkills', async (_, filePath: string) => {
+      try {
+        return { success: true, data: await BackupManager.getInstance().exportSkills(filePath) };
+      } catch (error) {
+        this.log.error('backup:exportSkills 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    // 把已有的一份备份复制到用户指定位置（不是重新生成，内容必须与列表里那份一致）
+    ipcMain.handle('backup:copy', async (_, sourcePath: string, targetPath: string) => {
+      try {
+        const backupDir = path.join(getHost().getPath('userData'), 'backups');
+        const root = fs.realpathSync(backupDir);
+        const source = fs.realpathSync(sourcePath);
+        if (source !== root && !source.startsWith(root + path.sep)) {
+          return { success: false, error: '只能导出本地备份目录内的文件' };
+        }
+        if (!fs.statSync(source).isFile()) return { success: false, error: '源不是文件' };
+        fs.mkdirSync(path.dirname(targetPath), { recursive: true });
+        fs.copyFileSync(source, targetPath);
+        return { success: true, data: { filePath: targetPath, size: fs.statSync(targetPath).size } };
+      } catch (error) {
+        this.log.error('backup:copy 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    ipcMain.handle('backup:openFolder', async () => {
+      try {
+        const dir = path.join(getHost().getPath('userData'), 'backups');
+        fs.mkdirSync(dir, { recursive: true });
+        const failure = await shell.openPath(dir);
+        return failure ? { success: false, error: failure } : { success: true };
+      } catch (error) {
+        this.log.error('backup:openFolder 失败', error);
+        return { success: false, error: String(error) };
       }
     });
 
@@ -560,7 +660,7 @@ export class IpcServer {
      * 【离线也能用】索引落盘缓存 → 搜索/推荐是**纯本地**过滤,断网照常;
      * 只有"下载安装"需要网络。
      */
-    ipcMain.handle('skills:hub:search', async (_, payload: { q?: string; sourceId?: string; category?: string; limit?: number }) => {
+    ipcMain.handle('skills:hub:search', async (_, payload: { q?: string; sourceId?: string; category?: string; limit?: number; excludeInstalled?: boolean }) => {
       try {
         const { SkillHub } = await import('../skill/SkillHub');
         const hub = SkillHub.getInstance();
@@ -570,6 +670,7 @@ export class IpcServer {
           q: payload?.q,
           sourceId: payload?.sourceId,
           category: payload?.category,
+          excludeInstalled: payload?.excludeInstalled,
           limit: payload?.limit,
         }) };
       } catch (error) {
@@ -912,8 +1013,9 @@ export class IpcServer {
     // ========== NOVA #003-C · M2 — BootDirector handshake (第②笔) ==========
     // 命名空间 nova:* (与既有 webcontainer:renderer-ready 命名空间分属, 不冲突)
     //   交叉引用: electron/preload.ts:1228 webcontainer.notifyRendererReady → 'webcontainer:renderer-ready'
-    //   本处只追加 nova:renderer-ready / nova:boot-skip, 零改动既有语义
-    //   nova:boot-event 走 main→splash 推(SplashWindow.pushEvent), 不经 ipcMain
+    //   本处只追加 nova:renderer-ready(真就绪握手), 零改动既有语义
+    //   nova:boot-event 走 main→splash 推(SplashWindow.pushBootLog), 不经 ipcMain
+    //   旧 nova:boot-skip 已随"跳过"入口一并移除
     //
     ipcMain.handle('nova:renderer-ready', async () => {
       try {
@@ -924,16 +1026,8 @@ export class IpcServer {
       }
     });
 
-    ipcMain.on('nova:boot-skip', () => {
-      try {
-        this.novaBoot?.markSkipped();
-      } catch (error) {
-        this.log.warn(`NOVA: nova:boot-skip 回调异常: ${String(error as Error)}`);
-      }
-    });
-
     // ========== NOVA #004-B · M3 — 联网搜索 (第②笔, 追加式; NovaBootBridge 零改) ==========
-    // 命名空间 nova:* 续段; 与 nova:renderer-ready / nova:boot-skip (M2) 同命名空间分属。
+    // 命名空间 nova:* 续段; 与 nova:renderer-ready (M2) 同命名空间分属。
     // 红线: 不进 commandDecide / 安全确认链(稿 F3 §2 结论); 端点域名硬编码在 provider 内。
     // 动态 import(对齐本文件 llm-config:test / llm:chat 段的 await import 既有惯例)。
     // 单例注册只发生一次(static 标志); 单测隔离由 vitest pool:forks 天然保证。
@@ -973,8 +1067,28 @@ export class IpcServer {
       }
     });
 
+    // ========== v4.8 — 联网搜索开关(get/set) ==========
+    // 静态 import webSearchSettings(纯 ConfigStore 读写,零 electron 依赖)。
+    ipcMain.handle('nova:search:get-settings', async () => {
+      try {
+        const { getWebSearchSettings } = await import('../llm/webSearchSettings')
+        return { success: true, data: getWebSearchSettings() }
+      } catch (error) {
+        return { success: false, error: String(error) }
+      }
+    })
+    ipcMain.handle('nova:search:set-settings', async (_: unknown, patch: { enabled?: boolean }) => {
+      try {
+        const { setWebSearchEnabled, getWebSearchSettings } = await import('../llm/webSearchSettings')
+        if (typeof patch?.enabled === 'boolean') setWebSearchEnabled(patch.enabled)
+        return { success: true, data: getWebSearchSettings() }
+      } catch (error) {
+        return { success: false, error: String(error) }
+      }
+    })
+
     // ========== NOVA #005-B · M4 — nova:voice 接线 (第②笔, 追加式; NovaBootBridge/NovaSearchBridge 零改) ==========
-    // 命名空间 nova:voice:* 与 nova:* 续段; 与 nova:renderer-ready / nova:boot-skip (M2) / nova:search (M3) 同命名空间分属。
+    // 命名空间 nova:voice:* 与 nova:* 续段; 与 nova:renderer-ready (M2) / nova:search (M3) 同命名空间分属。
     // 红线: 不进 commandDecide / 安全确认链(稿 F3 §2); settings 持久化走既有 ConfigStore(不在本单新增 fs 通道)。
     // 单例注册只发生一次(static 标志); 单测隔离由 vitest pool:forks 天然保证。
     // settings 真值 key = 'nova.voice.settings'(ConfigStore 嵌套 key, 沿用 L137 路径解析);
@@ -1890,6 +2004,60 @@ export class IpcServer {
       }
     });
 
+    // ========== 成品文件打开 / 定位 ==========
+    // 渲染层只能传路径字符串；这里做真实路径解析 + 目录白名单 + 文件类型校验。
+    // 白名单只放 agent 产物目录与下载目录，符号链接也会先 realpath 再校验，逃不出去。
+    const resolveArtifact = (filePath: unknown): string | null => {
+      if (typeof filePath !== 'string' || !filePath.trim()) return null;
+      let real: string;
+      try {
+        real = fs.realpathSync(path.resolve(filePath));
+      } catch {
+        return null;
+      }
+      let roots: string[];
+      try {
+        const userData = getHost().getPath('userData');
+        roots = [
+          path.resolve(userData, 'workspace'),
+          path.resolve(userData, 'sandbox'),
+          path.resolve(getHost().getPath('downloads')),
+        ];
+      } catch {
+        return null;
+      }
+      if (!roots.some(root => real === root || real.startsWith(root + path.sep))) return null;
+      try {
+        return fs.statSync(real).isFile() ? real : null;
+      } catch {
+        return null;
+      }
+    };
+
+    ipcMain.handle('file:open', async (_, filePath: string) => {
+      const resolved = resolveArtifact(filePath);
+      if (!resolved) return { success: false, error: '路径不在允许的成品目录内或文件不存在' };
+      try {
+        const failure = await shell.openPath(resolved);
+        return failure
+          ? { success: false, error: failure }
+          : { success: true, data: { path: resolved } };
+      } catch (e) {
+        return { success: false, error: String(e) };
+      }
+    });
+
+    ipcMain.handle('file:showInFolder', async (_, filePath: string) => {
+      const resolved = resolveArtifact(filePath);
+      if (!resolved) return { success: false, error: '路径不在允许的成品目录内或文件不存在' };
+      try {
+        shell.showItemInFolder(resolved);
+        return { success: true, data: { path: resolved } };
+      } catch (e) {
+        return { success: false, error: String(e) };
+      }
+    });
+
     // ========== 对话导出 ==========
 
     ipcMain.handle('conversation:export', async (_, conversation: any, format: 'markdown' | 'pdf' | 'word', outputPath?: string) => {
@@ -1899,7 +2067,16 @@ export class IpcServer {
           format,
           outputPath: outputPath || ''
         });
-        return { success: result.success, data: { filePath: result.filePath }, error: result.error, guidance: result.guidance };
+        return {
+          success: result.success,
+          data: {
+            filePath: result.filePath,
+            actualFormat: result.actualFormat,
+            degraded: result.degraded,
+          },
+          error: result.error,
+          guidance: result.guidance,
+        };
       } catch (error) {
         this.log.error('conversation:export 失败', error);
         return { success: false, error: String(error) };
@@ -2542,25 +2719,57 @@ export class IpcServer {
       }
     });
 
-    // ========== Channel 能力域 (W3 新增) ==========
+    // ========== Channel 能力域 (W3 新增 / IM 真连通:去掉恒假桩) ==========
     ipcMain.handle('channel:list', async () => {
       try {
-        // W7 才实现 ChannelRouter,本期先返回空数组
-        return { success: true, data: [] as Array<{ id: string; name: string; healthy: boolean }> };
+        const router = ChannelRouter.getInstance()
+        const metas = router.listMetadata()
+        // 真健康检查；并行 + 8s 截止，避免不可达端点拖死 UI
+        const health = await Promise.all(
+          metas.map((m) =>
+            Promise.race([
+              router.healthCheck(m.id),
+              new Promise<{ healthy: boolean; error?: string }>((resolve) =>
+                setTimeout(() => resolve({ healthy: false, error: '健康检查超时' }), 8000),
+              ),
+            ]),
+          ),
+        )
+        return {
+          success: true,
+          data: metas.map((m, i) => ({
+            id: m.id,
+            name: m.displayName,
+            kind: m.kind,
+            enabled: m.enabled,
+            healthy: health[i]?.healthy ?? false,
+            ...(health[i]?.error ? { healthError: health[i].error } : {}),
+          })),
+        }
       } catch (error) {
-        this.log.error('channel:list 失败', error);
-        return { success: false, error: String(error) };
+        this.log.error('channel:list 失败', error)
+        return { success: false, error: String(error) }
       }
-    });
+    })
 
     ipcMain.handle('channel:health', async (_, channelId: string) => {
       try {
-        return { success: true, data: { healthy: true, latencyMs: 0, stub: true, channelId } };
+        const health = await ChannelRouter.getInstance().healthCheck(channelId)
+        return { success: true, data: { ...health, channelId } }
       } catch (error) {
-        this.log.error('channel:health 失败', error);
-        return { success: false, error: String(error) };
+        this.log.error('channel:health 失败', error)
+        return { success: false, error: String(error) }
       }
-    });
+    })
+
+    // IM 真连通:入站长轮询状态(状态页可观测,测试可断言)
+    ipcMain.handle('channel:poller-status', () => {
+      try {
+        return { success: true, data: getTelegramPollerStatus() }
+      } catch (error) {
+        return { success: false, error: String(error) }
+      }
+    })
 
     // P0-02 状态仪表板:今日消息统计
     ipcMain.handle('channel:message-stats', () => {
@@ -2652,14 +2861,47 @@ export class IpcServer {
       }
     })
 
-    // P0-05 权限 CRUD(IMPermissionManager 已有 isAllowed;补 list/add/remove)
+    // P0-05 权限 CRUD(IM 真连通:此前调不存在的 listRules → 恒返回 [])
     ipcMain.handle('permission:list', () => {
       try {
-        const mgr = IMPermissionManager.getInstance() as any
-        const list = typeof mgr.listRules === 'function' ? mgr.listRules() : []
+        const all = IMPermissionManager.getInstance().listAll()
+        // IMPermissionManager 存 channelKind → userId[]，转成 UI 表格的行结构
+        const list = Object.entries(all).flatMap(([channel, users]) =>
+          users.map((userId) => ({
+            id: `${channel}:${userId}`,
+            subject: userId,
+            level: 'member',
+            scope: channel,
+          })),
+        )
         return { success: true, data: list }
       } catch (error) {
         this.log.error('permission:list 失败', error)
+        return { success: false, error: String(error) }
+      }
+    })
+
+    // 真授权 / 撤权：直接影响 IMPermissionManager.isAllowed 的入站判定
+    ipcMain.handle('permission:grant', (_, args: { channelKind: string; userId: string }) => {
+      try {
+        if (!args?.channelKind || !args?.userId) {
+          return { success: false, error: 'channelKind 和 userId 必填' }
+        }
+        IMPermissionManager.getInstance().grant(args.channelKind as any, args.userId)
+        return { success: true }
+      } catch (error) {
+        return { success: false, error: String(error) }
+      }
+    })
+
+    ipcMain.handle('permission:revoke', (_, args: { channelKind: string; userId: string }) => {
+      try {
+        if (!args?.channelKind || !args?.userId) {
+          return { success: false, error: 'channelKind 和 userId 必填' }
+        }
+        const ok = IMPermissionManager.getInstance().revoke(args.channelKind as any, args.userId)
+        return { success: true, data: { revoked: ok } }
+      } catch (error) {
         return { success: false, error: String(error) }
       }
     })
@@ -2796,7 +3038,8 @@ export class IpcServer {
         if (!result.ok) {
           return { success: false, error: result.error || 'send failed' }
         }
-        return { success: true, data: { messageId: `msg-${Date.now()}` } }
+        // 不编造 messageId：各通道 send() 未回报平台消息 id，只回真实已发送的目标
+        return { success: true, data: { channelId: msg.channelId, to: msg.to } }
       } catch (error) {
         this.log.error('channel:send 失败', error)
         return { success: false, error: String(error) }
@@ -2804,6 +3047,66 @@ export class IpcServer {
     })
 
     // ========== P7 Sandbox 能力域 (W3 新增) ==========
+    /**
+     * 【M4.9】沙箱档位 / 自动审查 读写。
+     * Codex 式双闸门的用户面：档位决定"能碰什么"，自动审查决定"何时打扰"。
+     */
+    ipcMain.handle('sandbox:get-approval-config', async () => {
+      try {
+        const { ApprovalGate } = require('../sandbox/ApprovalGate');
+        const gate = ApprovalGate.getInstance();
+        const { ProcessLimiter } = require('../sandbox/ProcessLimiter');
+        return {
+          success: true,
+          data: {
+            tier: gate.getSandboxTier(),
+            autoReview: gate.isAutoReviewEnabled(),
+            limits: ProcessLimiter.getInstance().getLimits(),
+          },
+        };
+      } catch (error) {
+        this.log.error('sandbox:get-approval-config 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    ipcMain.handle('sandbox:set-approval-config', async (_, patch: { tier?: string; autoReview?: boolean; limits?: any }) => {
+      try {
+        const { ApprovalGate } = require('../sandbox/ApprovalGate');
+        const gate = ApprovalGate.getInstance();
+        if (patch?.tier && ['read-only', 'workspace', 'full'].includes(patch.tier)) {
+          gate.setSandboxTier(patch.tier as any);
+        }
+        if (typeof patch?.autoReview === 'boolean') {
+          gate.setAutoReview(patch.autoReview);
+        }
+        if (patch?.limits && typeof patch.limits === 'object') {
+          const { ProcessLimiter } = require('../sandbox/ProcessLimiter');
+          ProcessLimiter.getInstance().setLimits(patch.limits);
+        }
+        return {
+          success: true,
+          data: {
+            tier: gate.getSandboxTier(),
+            autoReview: gate.isAutoReviewEnabled(),
+          },
+        };
+      } catch (error) {
+        this.log.error('sandbox:set-approval-config 失败', error);
+        return { success: false, error: String(error) };
+      }
+    });
+
+    /** 各通道入站真实状态（供 IM 管理页显示"已连通"而不是假装） */
+    ipcMain.handle('channel:inbound-status', async () => {
+      try {
+        const { getInboundStatus } = require('../channel/bootstrap');
+        return { success: true, data: getInboundStatus() };
+      } catch (error) {
+        return { success: false, error: String(error) };
+      }
+    });
+
     ipcMain.handle('sandbox:detect', async () => {
       try {
         // W9 才实现 SandboxBuilder,本期先 stub:返回 host 平台 + docker 是否可用(用 which 探测)
@@ -2819,7 +3122,7 @@ export class IpcServer {
             platform: process.platform,
             arch: process.arch,
             dockerAvailable,
-            sandboxRoot: require('node:os').homedir() + '/.pipiclaw/sandbox',
+            sandboxRoot: require('node:os').homedir() + '/.newworld/sandbox',
             stub: true
           }
         };
@@ -2943,9 +3246,24 @@ export class IpcServer {
       try {
         const { IMConfigStore } = require('../channel/IMConfigStore')
         IMConfigStore.getInstance().set(args.platform as any, args.config)
+        // 热重载:配置保存后立刻重新注册通道 / 重启入站轮询，无需重启 App
+        await refreshChannels()
         return { success: true }
       } catch (error) {
         this.log.error('channel-config:save 失败', error)
+        return { success: false, error: String(error) }
+      }
+    })
+
+    // IM 真连通:真删除(此前 UI 只是把 enabled 置 false 的假删除)
+    ipcMain.handle('channel-config:delete', async (_: any, args: { platform: string }) => {
+      try {
+        const { IMConfigStore } = require('../channel/IMConfigStore')
+        const removed = IMConfigStore.getInstance().remove(args.platform as any)
+        await refreshChannels()
+        return { success: true, data: { removed } }
+      } catch (error) {
+        this.log.error('channel-config:delete 失败', error)
         return { success: false, error: String(error) }
       }
     })
@@ -2959,15 +3277,17 @@ export class IpcServer {
         try {
           channel = createChannelByKind(args.platform as any, 'test-' + Date.now())
         } catch {
-          return { success: false, message: 'unknown platform' }
+          return { success: false, message: 'unknown platform', data: { message: 'unknown platform' } }
         }
         const health = await channel.healthCheck()
-        return {
-          success: health.healthy,
-          message: health.healthy ? `连接成功 (${health.latencyMs}ms)` : `连接失败: ${health.error}`,
-        }
+        const message = health.healthy
+          ? `连接成功 (${health.latencyMs}ms)`
+          : `连接失败: ${health.error}`
+        // 顶层 message 供 UI 读取，data.message 兼容旧 UI 的 result.data?.message 写法
+        return { success: health.healthy, message, error: health.healthy ? undefined : message, data: { message } }
       } catch (error) {
-        return { success: false, message: String(error) }
+        const message = String(error)
+        return { success: false, message, error: message, data: { message } }
       }
     })
 

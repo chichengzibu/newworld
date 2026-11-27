@@ -1,4 +1,4 @@
-# PiPiClaw Release Process
+# New World Release Process
 
 > v4.3.1+ 真实发布流程 — 从代码到 GitHub Release
 
@@ -22,12 +22,12 @@ git push origin v4.3.1
 # 4. 创建 GitHub Release
 #    https://github.com/chichengzibu/pipiclaw/releases/new
 #    - Tag: v4.3.1
-#    - Title: PiPiClaw v4.3.1 — Ship-Ready 真用户测试套件
+#    - Title: New World v4.3.1 — Ship-Ready 真用户测试套件
 #    - Description: 见下方模板
 #    - 上传文件(从 release/):
-#      * PiPiClaw-4.3.1-Setup.exe
+#      * New World-4.3.1-Setup.exe
 #      * latest.yml
-#      * PiPiClaw-4.3.1-Setup.exe.blockmap
+#      * New World-4.3.1-Setup.exe.blockmap
 
 # 5. 验证 auto-update
 #    已安装用户启动 app → 5s 后自动 checkForUpdates
@@ -65,7 +65,7 @@ git push origin v4.3.1
 7. test selector 全部用稳定 class + :visible 伪类
 
 ### 📦 完整下载
-- **Windows**: PiPiClaw-4.3.1-Setup.exe (NSIS installer)
+- **Windows**: New World-4.3.1-Setup.exe (NSIS installer)
 - **macOS** (待构建): .dmg
 - **Linux** (待构建): .AppImage
 ```
@@ -114,6 +114,7 @@ git push origin v4.3.1
 "publish": {
   "provider": "github",
   "repo": "pipiclaw",
+
   "owner": "chichengzibu",
   "releaseType": "release",
   "channel": "latest"
@@ -124,7 +125,7 @@ git push origin v4.3.1
 - 5s 启动 check
 - `autoDownload: false`(用户主动下载)
 - `autoInstallOnAppQuit: true`(退出时自动装)
-- `PIPICLAW_SKIP_UPDATE_CHECK=1` 可关闭 dev 环境的检查
+- `NW_SKIP_UPDATE_CHECK=1` 可关闭 dev 环境的检查
 
 ## 已知 ship 缺口(已记录)
 

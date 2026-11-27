@@ -9,7 +9,7 @@
  * 超时: 消费侧 AbortController 8000ms(F5 默认; 本 provider 透传 signal)
  * 零新依赖: 解析器 = 手写纯函数 parseLiteHtml(2 套 pattern 容错) + 6 码实体解码
  *
- * e2e:  PIPICLAW_E2E=1 第一行 stub 零网络(F7 §1)
+ * e2e:  NW_E2E=1 第一行 stub 零网络(F7 §1)
  * DI:   search(q, fetchImpl?) 第二参注入 mock fetch(F7 §2, 免疫 vi.stubGlobal 时序坑)
  *
  * 安全边界(稿 F8): 请求域名硬编码(无任意 URL 入口);
@@ -220,7 +220,7 @@ export class DuckDuckGoHtmlProvider implements SearchProvider {
   ];
 
   static isE2eStubbed(): boolean {
-    return process.env.PIPICLAW_E2E === '1';
+    return process.env.NW_E2E === '1';
   }
 
   /**

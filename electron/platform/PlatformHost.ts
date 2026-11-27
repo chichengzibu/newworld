@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - 平台能力抽象层(纯 TS,不依赖 Electron)
+ * New World - 平台能力抽象层(纯 TS,不依赖 Electron)
  *
  * 目的:把 core/ 对 electron `app` 的只读调用(getPath/getVersion/isPackaged/getAppPath)
  * 与生命周期调用(on/once/quit/whenReady/...)收敛到统一接口,使 core 层零 Electron 依赖

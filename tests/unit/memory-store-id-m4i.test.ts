@@ -1,5 +1,5 @@
 /**
- * PiPiClaw — 记忆库/向量库 id 对齐测试（M4-I）
+ * New World — 记忆库/向量库 id 对齐测试（M4-I）
  * ═══════════════════════════════════════════════════════════════
  * 【这个 bug 的形状】
  * `HermesMemory.addExperienceMemory` **内部**生成 id(`mem_<ts>_<rand>`),
@@ -36,7 +36,7 @@ const uniq = (base: string) => `${base} #${process.pid}-${seq++}`
 const countOf = (needle: string) => embedCalls.filter(t => t === needle).length
 
 vi.mock('electron', () => ({
-  app: { getPath: vi.fn((k: string) => `/tmp/pipiclaw-m4i-${k}`) },
+  app: { getPath: vi.fn((k: string) => `/tmp/newworld-m4i-${k}`) },
   ipcMain: { handle: () => {}, on: () => {}, removeHandler: () => {} },
   BrowserWindow: class {},
   dialog: { showMessageBox: () => {}, showOpenDialog: () => {} },

@@ -4,7 +4,7 @@ import { test, expect, shouldRunElectronE2E, gotoRoute, addProviderAndReload } f
  * P5-UX T+0: 新用户首次启动 — 完整真实用户旅程
  *
  * 模拟一个真实用户的第一次启动:
- * 1. 打开 PiPiClaw → 看首页 (Dashboard)
+ * 1. 打开 New World → 看首页 (Dashboard)
  * 2. 看到什么?有引导吗?
  * 3. 怎么找到 AI 对话?
  * 4. 进 Chat 后看到什么?空状态友好吗?
@@ -18,12 +18,12 @@ import { test, expect, shouldRunElectronE2E, gotoRoute, addProviderAndReload } f
 test.describe('T+0 新用户首次启动旅程', () => {
   test.skip(!shouldRunElectronE2E, 'requires E2E_ELECTRON=1')
 
-  test('J1: 首页加载 — 看到 PiPiClaw 品牌', async ({ window }) => {
+  test('J1: 首页加载 — 看到 New World 品牌', async ({ window }) => {
     // 【v4.4 起】默认路由已从 /dashboard 改成 /chat —— 「移除 Dashboard 主页」
     // (91a9093)。旧 spec 等 /#/dashboard → 永远等不到 → 超时。
     await window.waitForURL(/#\/chat/, { timeout: 10_000 })
     // 验证品牌可见(标题栏)
-    await expect(window.locator('.title-bar .app-name')).toHaveText(/PiPiClaw/i)
+    await expect(window.locator('.title-bar .app-name')).toHaveText(/New World/i)
   })
 
   test('J2: 首页 — 看到 gateway 状态(没配置会引导)', async ({ window }) => {
@@ -43,11 +43,9 @@ test.describe('T+0 新用户首次启动旅程', () => {
     expect(window.url()).toContain('/chat')
   })
 
-  test('J4: Chat 空状态 — 看到 prompt 模板', async ({ window }) => {
-    // 【实测约束】`QuickPrompts` 的渲染条件是 `v-if="enabledProvidersCount > 0"` ——
-    // **没有可用 provider 就不给模板**(没模型可调,给模板也没用)。
-    // 干净 profile 里一个 provider 都没有 → 模板数为 0 → 旧断言必然红。
-    // 故:先注入一个 provider,再验模板。
+  test('J4: Chat 空状态 — 建议 chips + 模型选择器(新空态契约)', async ({ window }) => {
+    // 【设计审计后新空态】QuickPrompts 模板卡已移除; 现为 3 条建议 chips + 卡片式输入区(含模型 pill)。
+    // 有可用 provider 才渲染 chips(没模型可调,给建议也没用)。
     await addProviderAndReload(window, {
       name: 'Mock (J4)',
       baseUrl: 'http://127.0.0.1:9/v1',
@@ -56,13 +54,12 @@ test.describe('T+0 新用户首次启动旅程', () => {
     await window.click('nav.sidenav a.nav-icon[href$="#/chat"]').catch(() => {})
     await window.waitForTimeout(1200)
 
-    const promptCards = window.locator('.empty-prompt-card')
-    const cardCount = await promptCards.count()
-    expect(cardCount, '有 provider 时应出现 prompt 模板').toBeGreaterThanOrEqual(4)
+    const chips = window.locator('.nova-chip')
+    const chipCount = await chips.count()
+    expect(chipCount, '有 provider 时应出现建议 chips').toBeGreaterThanOrEqual(3)
 
-    // 图标(模板卡用的是 .empty-prompt-icon;旧的 .empty-prompt-emoji 已无对应元素)
-    const icons = window.locator('.empty-prompt-icon')
-    expect(await icons.count()).toBeGreaterThan(0)
+    // 卡片式输入区内的模型选择器
+    await expect(window.locator('.model-pill').first()).toBeVisible()
   })
 
   test('J5: Chat 空状态 — 有时间感知问候', async ({ window }) => {
@@ -153,24 +150,23 @@ test.describe('T+0 新用户首次启动旅程', () => {
     await expect(settingsLink).toBeVisible({ timeout: 5_000 })
   })
 
-  test('J13: 找 IM 管理入口(v4.1 核心功能)', async ({ window }) => {
-    // IM 管理**在侧栏里**(icon-only,文案走 aria-label)
-    const imLink = window.locator('nav.sidenav a.nav-icon[href$="#/im-management"]').first()
+  test('J13: 找 IM 管理入口(v4.7 收进设置页配置中心)', async ({ window }) => {
+    // v4.7: IM 管理属于「配置容器」,不再占 rail 一级导航。
+    // 真实路径是 设置 → 配置中心 → IM 通道接入。
+    await gotoRoute(window, '/settings')
+    const configNav = window.locator('[data-testid="settings-config-nav"]')
+    await expect(configNav).toBeVisible({ timeout: 8_000 })
+    const imLink = configNav.locator('a.settings-link[href$="#/im-management"]').first()
     await expect(imLink).toHaveCount(1)
     await expect(imLink).toBeVisible()
+    // rail 上不该再有它
+    await expect(window.locator('nav.sidenav a.nav-icon[href$="#/im-management"]')).toHaveCount(0)
   })
 
   test('J14: ClawHub 技能市场可达(v4.1 核心功能)', async ({ window }) => {
-    // 【注意】ClawHub **没有侧栏入口** —— v4.4 把侧栏收成 7 个固定 icon 时丢了它,
-    // 现在只能从命令面板(Ctrl+K →「技能市场」)或 ModelCompare 页的链接进入。
+    // 【注意】私有技能仓库在「更多」面板与命令面板(Ctrl+K →「技能市场」)里有入口。
     // 这里验的是「路由可达 + 页面能渲染」,而不是「侧栏有图标」。
     await gotoRoute(window, '/clawhub')
-    await expect(window.locator('h1').first()).toBeVisible({ timeout: 10_000 })
-  })
-
-  test('J15: 模型对比可达(v4.1 核心功能)', async ({ window }) => {
-    // 同上:模型对比**没有侧栏入口**,走路由验可达性
-    await gotoRoute(window, '/model-compare')
     await expect(window.locator('h1').first()).toBeVisible({ timeout: 10_000 })
   })
 

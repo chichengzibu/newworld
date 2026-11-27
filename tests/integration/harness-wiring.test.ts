@@ -1,5 +1,5 @@
 /**
- * PiPiClaw — M1 北极星验证:W5 接线全链贯通测试
+ * New World — M1 北极星验证:W5 接线全链贯通测试
  *
  * 【本测试存在的唯一理由】
  * 审计发现: LlmAgentBrain.run() 是完整可用的 tool-call 循环,但
@@ -288,6 +288,11 @@ describe('M2-B 工具权限门接线', () => {
   })
 
   it('G2: 提供确认桥且用户同意 → EditTool 放行', async () => {
+    // v4.8：RBAC 是确认桥之前的前置门。本用例验证的是 ToolGate 确认桥「同意→放行」，
+    // 需先把 RBAC 层放行（模拟用户已授权 filesystem write），否则确认桥根本不会被调用。
+    // 不违反护栏：本用例不验证 RBAC 拒绝，G1/G3 才验证拒绝且保持默认 safe。
+    const { activatePermissiveForTest } = await import('../unit/auto-confirm')
+    activatePermissiveForTest()
     const target = path.join(SANDBOX_DIR, 'notes.txt')
     fsSync.writeFileSync(target, 'original content', 'utf-8')
 

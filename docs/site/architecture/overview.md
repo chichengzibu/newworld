@@ -1,6 +1,6 @@
-# PiPiClaw 架构总览
+# New World 架构总览
 
-> 适合想理解 PiPiClaw 内部如何组织的开发者 / 集成方。
+> 适合想理解 New World 内部如何组织的开发者 / 集成方。
 
 ## 技术栈
 

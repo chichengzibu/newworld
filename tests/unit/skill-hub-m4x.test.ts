@@ -1,5 +1,5 @@
 /**
- * PiPiClaw — 开源技能库的离线逻辑（M4-X）
+ * New World — 开源技能库的离线逻辑（M4-X）
  * ═══════════════════════════════════════════════════════════════════════
  * 【这一批在测什么】
  * SkillHub 里**不联网**的那部分：索引解析、搜索、推荐、frontmatter 归一化。
@@ -19,7 +19,7 @@ import { TEST_USER_DATA } from '../unit/test-host'
 vi.mock('electron', () => ({
   app: {
     getPath: vi.fn((k: string) => `${TEST_USER_DATA}/${k}`),
-    getName: () => 'pipiclaw',
+    getName: () => 'newworld',
     getVersion: () => '4.5.0',
   },
   safeStorage: {
@@ -106,6 +106,32 @@ describe('M4-X 开源技能库 · 离线逻辑', () => {
 
   it('推荐:可限量', () => {
     expect(hub.recommend({ limit: 2 }).length).toBe(2)
+  })
+
+  it('【P1 生态入口】推荐:评分作为质量信号参与排序(官方优先不变, 缺失当 0)', () => {
+    ;(hub as any).cached = {
+      fetchedAt: Date.now(),
+      entries: [
+        entry({ id: 'b:hot', sourceId: 'b', slug: 'hot', name: '高分社区技能', description: '有评分', rating: 4.8, date: '2026-01-01' }),
+        entry({ id: 'b:cold', sourceId: 'b', slug: 'cold', name: '低分社区技能', description: '有评分', rating: 2.1, date: '2026-11-01' }),
+        // 用真实官方源 id(officialFirst 集合来自 BUILTIN_SKILL_HUB_SOURCES)
+        entry({ id: 'anthropic-skills:official', sourceId: 'anthropic-skills', slug: 'official', name: '官方技能', description: '无评分' }),
+      ],
+      sources: [],
+    }
+    const recos = hub.recommend()
+    expect(recos[0].sourceId).toBe('anthropic-skills')  // 官方源仍优先
+    expect(recos[1].slug).toBe('hot')          // 社区源内:4.8 压过 2.1(即使日期更旧)
+    expect(recos[2].slug).toBe('cold')
+  })
+
+  it('【P1 生态入口】元数据缺失不编造: entry 只有真实评分字段时才带数字', () => {
+    const withRating = entry({ rating: 4.5, downloads: 1200 })
+    expect(withRating.rating).toBe(4.5)
+    expect(withRating.downloads).toBe(1200)
+    const without = entry()
+    expect(without.rating).toBeUndefined()
+    expect(without.downloads).toBeUndefined()
   })
 
   it('缓存:没有索引时搜索返回空(而不是抛错)', async () => {

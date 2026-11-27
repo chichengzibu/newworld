@@ -203,10 +203,34 @@ if (residual.length > 0) {
   );
 }
 
+// 隐患4: CSP 防回退 — 产物中禁止 new Function。
+// 背景(2026-11-23): index.html CSP 收紧为 script-src 'self'(无 unsafe-eval),
+// i18n 走「构建期 AST 预编译 + vue-i18n runtime bundle JIT」管线(build/precompile-i18n.ts
+// + __INTLIFY_JIT_COMPILATION__ define,三处配置缺一即静默坏掉或退化成 eval)。
+// 若有人引入运行时编译字符串消息的依赖/写法,产物会重新出现 new Function →
+// 在收紧的 CSP 下直接 EvalError 白屏。这里把安全基线变成机器守的规则。
+const evalHits = [];
+for (const f of files.filter((x) => x.name.endsWith('.js'))) {
+  let content;
+  try {
+    content = fs.readFileSync(path.join(ASSETS, f.name), 'utf8');
+  } catch {
+    continue;
+  }
+  const m = content.match(/new\s+Function\s*\(/);
+  if (m) evalHits.push(f.name);
+}
+if (evalHits.length > 0) {
+  hardFailures.push(
+    `产物含 new Function(违反 CSP script-src 'self' 基线,运行时会 EvalError): ${evalHits.slice(0, 5).join('; ')}` +
+      ` — 检查是否新增了运行时字符串编译(如 vue-i18n 字符串消息/full bundle 回退)`
+  );
+}
+
 lines.push('## 回归防护门禁 (always)');
 lines.push('');
 if (hardFailures.length === 0) {
-  lines.push('- ✅ EP 全量 CSS 体积正常,ElementPlusResolver 生效');
+  lines.push('- ✅ EP 全量 CSS 体积正常,ElementPlusResolver 生效,产物零 new Function(CSP 基线)');
 } else {
   lines.push('- ❌ 回归防护失败:');
   for (const h of hardFailures) lines.push(`  - ${h}`);

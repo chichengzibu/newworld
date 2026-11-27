@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * PiPiClaw 性能基准 (Phase 5 Task 2)
+ * New World 性能基准 (Phase 5 Task 2)
  *
  * 4 个维度(全部基于已 build 产物,不打 spawn):
  * A. Build 性能 — vite build 耗时(可跳过,如不需要)
@@ -56,7 +56,7 @@ function fmtThreshold(t) {
   return `${t}`
 }
 
-console.log('📊 PiPiClaw Performance Benchmark')
+console.log('📊 New World Performance Benchmark')
 console.log('==================================\n')
 
 // 维度 A — build 性能(可选,默认跳过)
@@ -159,7 +159,7 @@ console.table(tableRows)
 
 // 写报告
 const md = [
-  '# PiPiClaw 性能基准报告',
+  '# New World 性能基准报告',
   '',
   `生成时间: ${new Date().toISOString()}`,
   `commit: ${process.env.GIT_COMMIT || 'local'}`,

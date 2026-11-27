@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - Skill / D3RemoteCommand (W7.4)
+ * New World - Skill / D3RemoteCommand (W7.4)
  *
  * 飞书"帮我查今天日程" → 调 CalendarConnector → 回复飞书。
  * W7 阶段:demo 用 AgentBrain stub。W8+ 接真实 AgentBrain think + LLM。

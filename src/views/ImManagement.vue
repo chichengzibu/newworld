@@ -1,6 +1,6 @@
 <template>
-  <div class="im-management">
-    <header class="page-header">
+  <div class="im-management" :class="{ 'is-embedded': embedded }">
+    <header v-if="!embedded" class="page-header">
       <h1>IM 管理</h1>
       <p class="subtitle">配置 / 监控 / 消息 / 规则 — 一站式管理所有 IM 通道</p>
     </header>
@@ -20,7 +20,12 @@
         </div>
 
         <div v-else-if="channels.length === 0" class="empty-state">
-          <el-empty description="还没有配置任何 IM 通道,点上面「添加通道」开始" />
+          <!-- 视觉打磨: 空态给可操作主按钮, 不必让用户回到页首找入口 -->
+          <el-empty description="还没有配置任何 IM 通道，接入后即可在应用内收发消息">
+            <el-button type="primary" @click="openAddDialog">
+              <el-icon><Plus /></el-icon>添加通道
+            </el-button>
+          </el-empty>
         </div>
 
         <div v-else class="channel-grid">
@@ -39,10 +44,7 @@
             <div class="card-name">{{ ch.displayName }}</div>
             <div class="card-kind">{{ ch.kind }}</div>
             <div class="card-summary">
-              <span v-if="ch.config?.appId">App ID: {{ ch.config.appId.slice(0, 8) }}…</span>
-              <span v-else-if="ch.config?.botToken">Token: {{ ch.config.botToken.slice(0, 6) }}…</span>
-              <span v-else-if="ch.config?.corpId">Corp: {{ ch.config.corpId }}</span>
-              <span v-else class="muted">未配置</span>
+              <span :class="{ muted: !configSummary(ch) }">{{ configSummary(ch) || '未配置' }}</span>
             </div>
             <div v-if="ch.testError" class="card-error">
               <el-icon :size="14"><Warning /></el-icon> {{ ch.testError }}
@@ -67,7 +69,10 @@
           <el-statistic title="今日消息" :value="statusSummary.todayMessages" />
         </div>
         <div class="status-list">
-          <h3>通道状态</h3>
+          <div class="status-list-head">
+            <h3>通道状态</h3>
+            <el-button size="small" :loading="healthLoading" @click="refreshHealth">刷新健康检查</el-button>
+          </div>
           <el-table :data="channels" stripe empty-text="暂无数据">
             <el-table-column label="通道" prop="displayName" />
             <el-table-column label="状态" width="100">
@@ -77,10 +82,12 @@
                 </el-tag>
               </template>
             </el-table-column>
-            <el-table-column label="健康" width="100">
+            <el-table-column label="健康" width="140">
               <template #default="scope">
-                <el-icon v-if="scope.row.testError" :size="14" color="var(--el-color-danger)"><CircleClose /></el-icon>
-                <el-icon v-else-if="scope.row.enabled" :size="14" color="var(--el-color-success)"><CircleCheck /></el-icon>
+                <el-tag v-if="scope.row.healthy === true" type="success" size="small">健康</el-tag>
+                <el-tag v-else-if="scope.row.healthy === false" type="danger" size="small">
+                  {{ scope.row.healthError || '异常' }}
+                </el-tag>
                 <span v-else>—</span>
               </template>
             </el-table-column>
@@ -111,10 +118,10 @@
           <el-table-column label="通道" prop="channel" width="120" />
           <el-table-column label="发送方" prop="sender" width="120" />
           <el-table-column label="内容" prop="content" show-overflow-tooltip />
-          <el-table-column label="状态" width="80">
+          <el-table-column label="方向" width="80">
             <template #default="scope">
-              <el-tag :type="scope.row.status === 'ok' ? 'success' : 'danger'" size="small">
-                {{ scope.row.status }}
+              <el-tag :type="scope.row.direction === 'in' ? 'success' : 'primary'" size="small">
+                {{ scope.row.direction === 'in' ? '入站' : '出站' }}
               </el-tag>
             </template>
           </el-table-column>
@@ -177,7 +184,7 @@
           <el-table-column label="目标通道" prop="targetChannel" width="120" />
           <el-table-column label="启用" width="80">
             <template #default="scope">
-              <el-switch v-model="scope.row.enabled" />
+              <el-switch v-model="scope.row.enabled" @change="syncRule(scope.row)" />
             </template>
           </el-table-column>
           <el-table-column label="操作" width="180">
@@ -229,18 +236,21 @@
         <template v-if="formData.kind === 'im-feishu' || formData.kind === 'im-lark'">
           <el-form-item label="App ID"><el-input v-model="formData.appId" placeholder="cli_xxx" /></el-form-item>
           <el-form-item label="App Secret"><el-input v-model="formData.appSecret" type="password" show-password /></el-form-item>
+          <el-form-item v-if="formData.kind === 'im-lark'" label="API Base URL">
+            <el-input v-model="formData.apiBaseUrl" placeholder="https://open.larksuite.com（可选）" />
+          </el-form-item>
         </template>
 
-        <!-- 钉钉字段 -->
+        <!-- 钉钉字段：appKey / appSecret 已被通道按平台原名字段读取 -->
         <template v-if="formData.kind === 'im-dingtalk'">
           <el-form-item label="App Key"><el-input v-model="formData.appKey" /></el-form-item>
           <el-form-item label="App Secret"><el-input v-model="formData.appSecret" type="password" show-password /></el-form-item>
           <el-form-item label="Webhook URL">
-            <el-input v-model="formData.webhookUrl" placeholder="https://oapi.dingtalk.com/robot/send?access_token=xxx" />
+            <el-input v-model="formData.webhookUrl" placeholder="https://oapi.dingtalk.com/robot/send?access_token=xxx（可选）" />
           </el-form-item>
         </template>
 
-        <!-- 企微字段 -->
+        <!-- 企微字段：corpId / corpSecret / agentId 分别落盘、分别被读取 -->
         <template v-if="formData.kind === 'im-wechat-work'">
           <el-form-item label="Corp ID"><el-input v-model="formData.corpId" placeholder="wwxxx" /></el-form-item>
           <el-form-item label="Corp Secret"><el-input v-model="formData.corpSecret" type="password" show-password /></el-form-item>
@@ -249,20 +259,38 @@
 
         <!-- 微信个人号字段 -->
         <template v-if="formData.kind === 'im-wechat'">
-          <el-form-item label="WxID"><el-input v-model="formData.wxId" /></el-form-item>
+          <el-form-item label="App ID / WxID"><el-input v-model="formData.appId" /></el-form-item>
+          <el-form-item label="App Secret"><el-input v-model="formData.appSecret" type="password" show-password /></el-form-item>
         </template>
 
-        <!-- QQ 字段 -->
+        <!-- QQ 字段（通道读 appId + appSecret，不再是 botToken） -->
         <template v-if="formData.kind === 'im-qq'">
           <el-form-item label="App ID"><el-input v-model="formData.appId" /></el-form-item>
-          <el-form-item label="App Token"><el-input v-model="formData.botToken" type="password" show-password /></el-form-item>
+          <el-form-item label="App Secret"><el-input v-model="formData.appSecret" type="password" show-password /></el-form-item>
         </template>
 
-        <!-- Telegram / Discord 字段 -->
-        <template v-if="formData.kind === 'im-telegram' || formData.kind === 'im-discord' || formData.kind === 'im-rocket'">
+        <!-- Telegram：apiBaseUrl 可指向自托管 / 本机 mock server，入站长轮询同样生效 -->
+        <template v-if="formData.kind === 'im-telegram'">
           <el-form-item label="Bot Token">
             <el-input v-model="formData.botToken" type="password" show-password placeholder="123456:ABC-DEF..." />
           </el-form-item>
+          <el-form-item label="API Base URL">
+            <el-input v-model="formData.apiBaseUrl" placeholder="https://api.telegram.org（自托管 / 本机 mock 可填）" />
+          </el-form-item>
+        </template>
+
+        <!-- Discord 字段 -->
+        <template v-if="formData.kind === 'im-discord'">
+          <el-form-item label="Bot Token">
+            <el-input v-model="formData.botToken" type="password" show-password />
+          </el-form-item>
+        </template>
+
+        <!-- Rocket.Chat：通道需要 apiBaseUrl + appId(X-User-Id) + botToken(X-Auth-Token) -->
+        <template v-if="formData.kind === 'im-rocket'">
+          <el-form-item label="Server URL"><el-input v-model="formData.apiBaseUrl" placeholder="https://chat.example.com" /></el-form-item>
+          <el-form-item label="User ID"><el-input v-model="formData.appId" placeholder="X-User-Id" /></el-form-item>
+          <el-form-item label="Auth Token"><el-input v-model="formData.botToken" type="password" show-password placeholder="X-Auth-Token" /></el-form-item>
         </template>
 
         <!-- Slack 字段 -->
@@ -342,8 +370,14 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { ElMessage } from "element-plus/es/components/message/index"
 import { ElMessageBox } from "element-plus/es/components/message-box/index"
-import { Plus, Warning, CircleCheck, CircleClose, ChatDotRound, Connection, Promotion, OfficeBuilding } from '@element-plus/icons-vue'
+import { Plus, Warning } from '@element-plus/icons-vue'
 import Skeleton from '@/components/common/Skeleton.vue'
+
+/**
+ * v4.9：内嵌进「设置 → 配置中心」右侧面板时传 embedded=true，
+ * 隐藏自带页头（避免与设置页标题重复），并让外层滚动接管。
+ */
+defineProps<{ embedded?: boolean }>()
 
 interface ChannelInfo {
   kind: string
@@ -351,6 +385,8 @@ interface ChannelInfo {
   enabled: boolean
   config?: Record<string, any>
   testError?: string
+  healthy?: boolean
+  healthError?: string
   lastTested?: string
   updatedAt?: string
 }
@@ -448,7 +484,8 @@ async function sendQuickReply(): Promise<void> {
     const m = selectedMessage.value
     const r = await (window as any).electronAPI.channel.send({
       channelId: m.channelId || m.channel,
-      to: m.sender,
+      // 回复目标是原会话 chat_id(to)，不是发送者 —— 此前误用 sender 导致回复发错人
+      to: m.to || m.sender,
       text: replyText.value.trim(),
       replyToId: m.id,
     })
@@ -483,6 +520,39 @@ async function loadPermissions(): Promise<void> {
   }
 }
 
+// IM 真连通：状态页「健康」列取 channel:list 的真实健康检查结果，不再恒绿
+const healthLoading = ref(false)
+async function refreshHealth(): Promise<void> {
+  healthLoading.value = true
+  try {
+    const result = await (window as any).electronAPI.channel.list()
+    const rows: any[] = result?.success && Array.isArray(result.data) ? result.data : []
+    const byKind = new Map(rows.map((r) => [r.kind, r]))
+    channels.value = channels.value.map((ch) => {
+      const h: any = byKind.get(ch.kind)
+      if (!h) return { ...ch, healthy: undefined, healthError: undefined }
+      return {
+        ...ch,
+        healthy: h.healthy,
+        healthError: h.healthError,
+        testError: h.healthy ? undefined : (h.healthError || 'unhealthy'),
+        lastTested: new Date().toLocaleString(),
+      }
+    })
+  } catch (e) {
+    ElMessage.error('健康检查失败:' + String(e))
+  } finally {
+    healthLoading.value = false
+  }
+}
+
+/** 路由规则启用开关 → 真同步到 IMMessageRouter（addRule 现在是 upsert） */
+function syncRule(rule: any): void {
+  ;(window as any).electronAPI.channel.routingAdd({ ...rule }).catch((e: any) => {
+    console.warn('routingAdd(sync) failed', e)
+  })
+}
+
 // P0-03 消息
 const messageFilter = reactive({ channel: '', keyword: '' })
 const allMessages = ref<any[]>([])
@@ -503,6 +573,16 @@ const filteredMessages = computed(() => {
 
 function channelIcon(kind: string): string {
   return ALL_KINDS.find((k) => k.value === kind)?.icon ?? 'Connection'
+}
+
+/** 各平台字段名不同，按优先级挑一个可展示的凭据摘要（只显示前缀，不暴露密钥） */
+function configSummary(ch: ChannelInfo): string {
+  const c = ch.config || {}
+  const id = c.appId || c.appKey || c.corpId || c.phoneNumberId
+  if (id) return `ID: ${String(id).slice(0, 8)}…`
+  if (c.botToken) return `Token: ${String(c.botToken).slice(0, 6)}…`
+  if (c.apiBaseUrl) return `Server: ${String(c.apiBaseUrl).slice(0, 24)}…`
+  return ''
 }
 
 async function loadChannels(): Promise<void> {
@@ -574,10 +654,11 @@ async function handleTestInDialog(): Promise<void> {
     delete cfg.kind
     delete cfg.displayName
     const result = await (window as any).electronAPI.channelConfig.test({ platform: formData.kind, config: cfg })
+    // handler 返回顶层 { success, message }，此前只读 result.data?.message → 永远空
     if (result?.success) {
-      ElMessage.success('连接成功:' + (result.data?.message || ''))
+      ElMessage.success('连接成功:' + (result.message || result.data?.message || ''))
     } else {
-      ElMessage.error('连接失败:' + (result.error || ''))
+      ElMessage.error('连接失败:' + (result.message || result.error || result.data?.message || ''))
     }
   } catch (e) {
     ElMessage.error('连接失败:' + String(e))
@@ -590,7 +671,7 @@ async function handleTestChannel(ch: ChannelInfo): Promise<void> {
   testing.value = ch.kind
   try {
     const result = await (window as any).electronAPI.channelConfig.test({ platform: ch.kind, config: ch.config || {} })
-    ch.testError = result?.success ? undefined : result?.error || 'unknown'
+    ch.testError = result?.success ? undefined : (result?.message || result?.error || 'unknown')
     ch.lastTested = new Date().toLocaleString()
   } catch (e) {
     ch.testError = String(e)
@@ -605,9 +686,13 @@ async function handleDelete(ch: ChannelInfo): Promise<void> {
   } catch {
     return
   }
-  // 复用 save 把 enabled=false 兜底(无独立 delete IPC)
-  await (window as any).electronAPI.channelConfig.save({ platform: ch.kind, config: { ...(ch.config || {}), enabled: false, _deleted: true } })
-  ElMessage.success('已删除')
+  // 真删除：IMConfigStore.remove + 热重载，不再是把 enabled 置 false 的假操作
+  const result = await (window as any).electronAPI.channelConfig.delete({ platform: ch.kind })
+  if (result?.success) {
+    ElMessage.success('已删除')
+  } else {
+    ElMessage.error('删除失败:' + (result?.error || '未知错误'))
+  }
   await loadChannels()
 }
 
@@ -656,18 +741,44 @@ function openPermissionDialog(): void {
   permissionDialogVisible.value = true
 }
 
-function handleSavePermission(): void {
+async function handleSavePermission(): Promise<void> {
   if (!permissionForm.subject) {
     ElMessage.warning('用户/群组必填')
     return
   }
-  permissions.value.push({ id: `perm-${Date.now()}`, ...permissionForm })
-  permissionDialogVisible.value = false
-  ElMessage.success('权限已添加')
+  const scopes: string[] = permissionForm.scope || []
+  if (scopes.length === 0) {
+    ElMessage.warning('请至少选择一个作用范围通道')
+    return
+  }
+  try {
+    // 真授权：直接写 IMPermissionManager 白名单，入站判定立即生效
+    for (const channelKind of scopes) {
+      await (window as any).electronAPI.channel.permissionGrant({
+        channelKind,
+        userId: permissionForm.subject,
+      })
+    }
+    await loadPermissions()
+    permissionDialogVisible.value = false
+    ElMessage.success('权限已添加')
+  } catch (e) {
+    ElMessage.error('权限添加失败:' + String(e))
+  }
 }
 
-function deletePermission(p: any): void {
-  permissions.value = permissions.value.filter((x) => x.id !== p.id)
+async function deletePermission(p: any): Promise<void> {
+  const channelKind = Array.isArray(p.scope) ? p.scope[0] : p.scope
+  if (!channelKind) {
+    permissions.value = permissions.value.filter((x) => x.id !== p.id)
+    return
+  }
+  try {
+    await (window as any).electronAPI.channel.permissionRevoke({ channelKind, userId: p.subject })
+    await loadPermissions()
+  } catch (e) {
+    ElMessage.error('权限删除失败:' + String(e))
+  }
 }
 
 // P0-03 消息
@@ -676,7 +787,22 @@ async function reloadMessages(): Promise<void> {
     const opts: { channelId?: string; limit?: number } = { limit: 200 }
     if (messageFilter.channel) opts.channelId = messageFilter.channel
     const result = await (window as any).electronAPI.channel.messageHistory(opts)
-    allMessages.value = result?.success ? result.data : []
+    const rows: any[] = result?.success && Array.isArray(result.data) ? result.data : []
+    // StoredMessage → UI 行：此前表格列用 timestamp/channel/sender/content，
+    // 而后端返回 { ts, channelId, message:{to,from,text} } —— 四列全空。
+    allMessages.value = rows.map((m) => {
+      const body = m.message || {}
+      return {
+        ...m,
+        timestamp: new Date(m.ts || Date.now()).toLocaleString(),
+        channel: m.channelId,
+        sender: body.from || body.to || '—',
+        content: body.text || body.subject || '',
+        to: body.to,
+        from: body.from,
+        direction: m.direction || 'in',
+      }
+    })
   } catch (e) {
     console.warn('reloadMessages failed', e)
   }
@@ -699,6 +825,7 @@ onMounted(async () => {
     loadMessageStats(),
     loadRoutingRules(),
     loadPermissions(),
+    reloadMessages(),
   ])
   initialLoading.value = false
 })
@@ -709,6 +836,12 @@ onMounted(async () => {
   padding: var(--content-padding, 16px);
   max-width: 1200px;
   margin: 0 auto;
+}
+/* v4.9 内嵌态：设置页已提供留白与滚动容器，这里去掉外层内边距与宽度限制 */
+.im-management.is-embedded {
+  padding: 0;
+  max-width: none;
+  margin: 0;
 }
 .page-header {
   margin-bottom: 16px;
@@ -803,6 +936,13 @@ onMounted(async () => {
     flex: 1;
   }
 }
+.status-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  h3 { margin: 0; font-size: 15px; font-weight: 600; }
+}
 .message-filters {
   display: flex;
   gap: 12px;
@@ -867,7 +1007,7 @@ onMounted(async () => {
   justify-content: flex-end;
 }
 :deep(.message-row-selected) {
-  background-color: var(--el-color-primary-light-9, #ecf5ff) !important;
+  background-color: var(--el-color-primary-light-9, rgba(124, 141, 181, 0.18)) !important;
 }
 .empty-state {
   padding: 40px;

@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - Channel / IMMessageStore (W7.1)
+ * New World - Channel / IMMessageStore (W7.1)
  *
  * 内存消息存储(FIFO 上限 1000)。W7 阶段:内存 Map,W8+ 接 SQLite。
  */

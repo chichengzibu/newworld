@@ -1,5 +1,5 @@
 /**
- * PiPiClaw — 开源技能库（联网寻找 + 推荐 + 下载安装）（M4-X）
+ * New World — 开源技能库（联网寻找 + 推荐 + 下载安装）（M4-X）
  * ═══════════════════════════════════════════════════════════════════════
  * 【它补的是哪一环】
  * 用户要求：「技能部分不要集成，联网环境下自动去开源技能库寻找以及推荐用户
@@ -55,6 +55,8 @@ export interface SkillHubSourceDef {
   indexUrl: string
   /** 索引解析方式 */
   kind: 'anthropic-marketplace' | 'shelf-index'
+  /** 【P1 生态入口】官方源标记(列表里显示"官方"徽标,推荐优先级最高) */
+  official?: boolean
   /** 许可证(展示用) */
   license?: string
   /** 主页 */
@@ -81,6 +83,7 @@ export const BUILTIN_SKILL_HUB_SOURCES: SkillHubSourceDef[] = [
     branch: 'main',
     indexUrl: 'https://raw.githubusercontent.com/anthropics/skills/main/.claude-plugin/marketplace.json',
     kind: 'anthropic-marketplace',
+    official: true,
     license: '见各技能目录内的 LICENSE',
     homepage: 'https://github.com/anthropics/skills',
   },
@@ -120,6 +123,15 @@ export interface SkillHubEntry {
   license?: string
   /** 日期(索引里有就带) */
   date?: string
+  /**
+   * 【P1 生态入口】可选热度/评分元数据 —— 只在索引真实提供时填入,
+   * **绝不编造**: 当前两个内置源都不提供评分, UI 命中缺失时显示"暂无评分"。
+   * 字段命名兼容常见 registry 习惯(downloads / rating / stars)。
+   */
+  official?: boolean
+  downloads?: number
+  rating?: number
+  stars?: number
   /**
    * 安装形态:
    * - `dir`  —— 源仓库里的一个**目录**（含 SKILL.md + references/ + scripts/）
@@ -356,7 +368,8 @@ export class SkillHub {
    * 【推荐什么、怎么排】
    * ① 已装的**不重复**推荐(用户不需要再下一个已有的)
    * ② 官方源优先于社区源(前者质量与维护更有保障)
-   * ③ 同分时新日期优先(技能库更新快,新的更值得试)
+   * ③ 评分高的优先(只在源真提供了 rating/stars 时; 缺失一律当 0, 不编造)
+   * ④ 同分时新日期优先(技能库更新快,新的更值得试)
    *
    * 【不推荐什么】不含描述的条目 —— 那说明索引里没写清它干什么,
    * 推荐了用户也不知道该不该装。
@@ -377,6 +390,9 @@ export class SkillHub {
       .sort((a, b) => {
         const off = Number(officialFirst.has(b.sourceId)) - Number(officialFirst.has(a.sourceId))
         if (off !== 0) return off
+        // 评分只在源真实提供时参与排序; 两个内置源都没有评分 → 退化为原逻辑(日期>名称)
+        const score = (b.rating ?? b.stars ?? 0) - (a.rating ?? a.stars ?? 0)
+        if (score !== 0) return score
         const date = (b.date ?? '').localeCompare(a.date ?? '')
         if (date !== 0) return date
         return b.name.localeCompare(a.name)
@@ -504,6 +520,7 @@ export class SkillHub {
     return list.map(s => ({
       id: `${src.id}:${s.slug}`,
       sourceId: src.id,
+      official: !!src.official,
       slug: String(s.slug ?? s.name ?? ''),
       name: String(s.name ?? s.slug ?? ''),
       description: String(s.description ?? ''),
@@ -512,6 +529,10 @@ export class SkillHub {
       version: s.version ? String(s.version) : undefined,
       date: s.date ? String(s.date) : undefined,
       license: s.license ? String(s.license) : undefined,
+      // 只在索引给出有效数字时才带评分/热度, 缺失就是缺失(UI 显示"暂无评分")
+      downloads: numberOrUndefined(s.downloads),
+      rating: numberOrUndefined(s.rating),
+      stars: numberOrUndefined(s.stars),
       installKind: 'file' as const,
       sourcePath: String(s.path ?? ''),
       homepage: src.homepage,
@@ -549,6 +570,7 @@ export class SkillHub {
         return {
           id: `${src.id}:${slug}`,
           sourceId: src.id,
+          official: !!src.official,
           slug,
           name: fm.name || slug,
           description: fm.description || '',
@@ -722,9 +744,18 @@ export function classifyExecutables(files: string[]): string[] {
   return files.filter(f => EXEC_EXT.test(f))
 }
 
+/** 只有有限数字才保留为元数据; 字符串/NaN/缺失一律 undefined(不编造评分) */
+function numberOrUndefined(v: unknown): number | undefined {
+  if (typeof v === 'number' && Number.isFinite(v)) return v
+  if (typeof v === 'string' && v.trim() !== '') {
+    const n = Number(v)
+    if (Number.isFinite(n)) return n
+  }
+  return undefined
+}
+
 /** 标签可能是数组、可能是逗号串 */
-function normalizeTags(tags: unknown): string[] {
-  if (Array.isArray(tags)) return tags.map(t => String(t).trim()).filter(Boolean)
+function normalizeTags(tags: unknown): string[] {  if (Array.isArray(tags)) return tags.map(t => String(t).trim()).filter(Boolean)
   if (typeof tags === 'string') {
     const s = tags.trim()
     if (s.startsWith('[')) {
@@ -751,7 +782,7 @@ async function httpBuffer(url: string, headers: Record<string, string> = {}): Pr
       const client = u.startsWith('https') ? https : http
       const req = client.get(u, {
         headers: {
-          'User-Agent': 'PiPiClaw-SkillHub/1.0',
+          'User-Agent': 'New World-SkillHub/1.0',
           ...headers,
         },
       }, res => {

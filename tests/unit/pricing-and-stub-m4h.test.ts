@@ -1,5 +1,5 @@
 /**
- * PiPiClaw — M4-H 定价可维护 + 兜底诚实性测试
+ * New World — M4-H 定价可维护 + 兜底诚实性测试
  * ═══════════════════════════════════════════════════════════════
  * 【定价这一块在测什么】
  * `CostTracker.setPricing` 此前是**双重死代码**:
@@ -17,7 +17,7 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 
 vi.mock('electron', () => ({
-  app: { getPath: vi.fn((k: string) => `/tmp/pipiclaw-price-${k}`) },
+  app: { getPath: vi.fn((k: string) => `/tmp/newworld-price-${k}`) },
   ipcMain: { handle: () => {}, on: () => {}, removeHandler: () => {} },
   BrowserWindow: class {},
   dialog: { showMessageBox: () => {}, showOpenDialog: () => {} },

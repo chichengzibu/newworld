@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - 预加载脚本
+ * New World - 预加载脚本
  * 
  * 职责：
  * 1. 暴露安全的contextBridge API
@@ -23,17 +23,19 @@ import '@sentry/electron/preload';
 const IpcChannels = {
   // ========== NOVA #003-C · M2 — BootDirector handshake(第②笔, 纯追加) ==========
   //   命名空间 nova:* 与既有 webcontainer:* / runtime:* 不冲突
-  //   交叉引用: IpcServer.ts L386-397 的 nova:renderer-ready / nova:boot-skip handler
-  //   splash.html(第③笔) 在 window.nova 命名空间下消费
+  //   交叉引用: IpcServer.ts 的 nova:renderer-ready handler
+  //   splash.html 在 window.electronAPI.nova 下消费 onBootEvent 真实日志流
   NOVA_RENDERER_READY: 'nova:renderer-ready',
-  NOVA_BOOT_SKIP: 'nova:boot-skip',
   NOVA_BOOT_EVENT: 'nova:boot-event',
   NOVA_SEARCH: 'nova:search',
+  NOVA_SEARCH_GET_SETTINGS: 'nova:search:get-settings',
+  NOVA_SEARCH_SET_SETTINGS: 'nova:search:set-settings',
   NOVA_VOICE_GET_SETTINGS: 'nova:voice:get-settings',
   NOVA_VOICE_SET_SETTINGS: 'nova:voice:set-settings',
 
   // 文件选择器
   DIALOG_OPEN_FILE: 'dialog:openFile',
+  DIALOG_SAVE_FILE: 'dialog:saveFile',
 
   // 窗口管理
   WINDOW_MINIMIZE: 'window:minimize',
@@ -65,6 +67,15 @@ const IpcChannels = {
   CONFIG_GET: 'config:get',
   CONFIG_SET: 'config:set',
   CONFIG_GET_ALL: 'config:getAll',
+
+  // 本地备份（无服务器方案的导出导入通道）
+  BACKUP_CREATE: 'backup:create',
+  BACKUP_LIST: 'backup:list',
+  BACKUP_RESTORE: 'backup:restore',
+  BACKUP_EXPORT: 'backup:exportToFile',
+  BACKUP_EXPORT_SKILLS: 'backup:exportSkills',
+  BACKUP_COPY: 'backup:copy',
+  BACKUP_OPEN_FOLDER: 'backup:openFolder',
 
   // 模型管理
   MODELS_LIST: 'models:list',
@@ -108,9 +119,15 @@ const IpcChannels = {
   CHAT_ON_MESSAGE: 'chat:onMessage',
   CHAT_ON_CONVERSATION_UPDATE: 'chat:onConversationUpdate',
   CHAT_ON_STREAM_UPDATE: 'chat:streamUpdate',
+  // 【NW】真实 token usage → 生命体 Orb 精确遥测
+  CHAT_ON_USAGE: 'chat:usage',
 
   // 应用信息
   APP_VERSION: 'app:version',
+
+  // 错误台账(渲染端 → 主进程, 见 electron/core/ErrorLedger.ts)
+  ERROR_REPORT: 'error:report',
+  ERROR_SUMMARY: 'error:summary',
 
   // 任务执行
   TASK_EXECUTE: 'task:execute',
@@ -156,6 +173,8 @@ const IpcChannels = {
   FILE_READ_CLIPBOARD_IMAGE: 'file:readClipboardImage',
   FILE_GET_INFO: 'file:getInfo',
   FILE_GET_ALLOWED_EXTENSIONS: 'file:getAllowedExtensions',
+  FILE_OPEN: 'file:open',
+  FILE_SHOW_IN_FOLDER: 'file:showInFolder',
   FILE_UPLOAD_TO_IM: 'file:upload-to-im',
   FILE_LIST_SUPPORTED_PLATFORMS: 'file:list-supported-platforms',
 
@@ -261,6 +280,7 @@ const IpcChannels = {
   CHANNEL_SEND: 'channel:send',
   CHANNEL_MESSAGE_STATS: 'channel:message-stats',
   CHANNEL_MESSAGE_HISTORY: 'channel:message-history',
+  CHANNEL_POLLER_STATUS: 'channel:poller-status',
 
   // 路由规则
   ROUTING_LIST: 'routing:list',
@@ -271,6 +291,8 @@ const IpcChannels = {
   PERMISSION_LIST: 'permission:list',
   PERMISSION_EXPORT: 'permission:export',
   PERMISSION_IMPORT: 'permission:import',
+  PERMISSION_GRANT: 'permission:grant',
+  PERMISSION_REVOKE: 'permission:revoke',
 
   // ClawHub 技能市场
 
@@ -309,6 +331,7 @@ const IpcChannels = {
   CHANNEL_CONFIG_GET: 'channel-config:get',
   CHANNEL_CONFIG_SAVE: 'channel-config:save',
   CHANNEL_CONFIG_TEST: 'channel-config:test',
+  CHANNEL_CONFIG_DELETE: 'channel-config:delete',
 
   // ========== W13.A: 5 demo IPC ==========
   D1_DEMO_RUN: 'd1-demo:run',
@@ -651,7 +674,8 @@ interface ToolDefinition {
 const electronAPI = {
   // ========== 文件选择器 ==========
   dialog: {
-    openFile: (options: any) => ipcRenderer.invoke(IpcChannels.DIALOG_OPEN_FILE, options)
+    openFile: (options: any) => ipcRenderer.invoke(IpcChannels.DIALOG_OPEN_FILE, options),
+    saveFile: (options: any) => ipcRenderer.invoke(IpcChannels.DIALOG_SAVE_FILE, options)
   },
 
   // ========== 窗口管理 ==========
@@ -680,12 +704,43 @@ const electronAPI = {
     getVersion: () => ipcRenderer.invoke(IpcChannels.APP_VERSION),
     getPlatform: () => process.platform
   },
+
+  // ========== 错误台账(渲染端错误上报, P0 工程规范可观测性) ==========
+  errors: {
+    report: (record: { kind?: string; message: string; source?: string; stack?: string }) =>
+      ipcRenderer.invoke(IpcChannels.ERROR_REPORT, record),
+    summary: () => ipcRenderer.invoke(IpcChannels.ERROR_SUMMARY)
+  },
   
   // ========== 全局配置 ==========
   config: {
     get: (key: string) => ipcRenderer.invoke(IpcChannels.CONFIG_GET, key),
     set: (key: string, value: any) => ipcRenderer.invoke(IpcChannels.CONFIG_SET, key, value),
     getAll: () => ipcRenderer.invoke(IpcChannels.CONFIG_GET_ALL)
+  },
+
+  // ========== 本地备份：配置/技能导出导入，无账号云同步 ==========
+  backup: {
+    create: (options?: { includeApiKeys?: boolean }): Promise<IpcResponse<{
+      filePath: string; size: number; manifest: Record<string, unknown>
+    }>> => ipcRenderer.invoke(IpcChannels.BACKUP_CREATE, options),
+    list: (): Promise<IpcResponse<Array<{
+      fileName: string; filePath: string; createdAt: number; size: number;
+      appVersion: string; apiKeysIncluded: boolean
+    }>>> => ipcRenderer.invoke(IpcChannels.BACKUP_LIST),
+    restore: (filePath: string): Promise<IpcResponse<{
+      manifest: Record<string, unknown>; safetyBackupPath: string; restored: string[];
+      redactedKeys: number; skillCount: number
+    }>> => ipcRenderer.invoke(IpcChannels.BACKUP_RESTORE, filePath),
+    exportToFile: (filePath: string, options?: { includeApiKeys?: boolean }): Promise<IpcResponse<{
+      filePath: string; size: number; manifest: Record<string, unknown>
+    }>> => ipcRenderer.invoke(IpcChannels.BACKUP_EXPORT, filePath, options),
+    exportSkills: (filePath: string): Promise<IpcResponse<{
+      filePath: string; size: number; skillCount: number
+    }>> => ipcRenderer.invoke(IpcChannels.BACKUP_EXPORT_SKILLS, filePath),
+    copy: (sourcePath: string, targetPath: string): Promise<IpcResponse<{ filePath: string; size: number }>> =>
+      ipcRenderer.invoke(IpcChannels.BACKUP_COPY, sourcePath, targetPath),
+    openFolder: (): Promise<IpcResponse<void>> => ipcRenderer.invoke(IpcChannels.BACKUP_OPEN_FOLDER)
   },
   
   // ========== 网关管理 ==========
@@ -892,6 +947,16 @@ const electronAPI = {
       const handler: IpcCallback = (_, data) => callback(data);
       ipcRenderer.on(IpcChannels.CHAT_ON_STREAM_UPDATE, handler);
       return () => ipcRenderer.removeListener(IpcChannels.CHAT_ON_STREAM_UPDATE, handler);
+    },
+
+    // 【NW】真实 token usage (prompt/completion/total) — 来自主进程 CostTracker 同源
+    onUsage: (callback: (data: {
+      conversationId: string;
+      usage: { promptTokens: number; completionTokens: number; totalTokens: number; reasoningTokens?: number; model: string };
+    }) => void) => {
+      const handler: IpcCallback = (_, data) => callback(data);
+      ipcRenderer.on(IpcChannels.CHAT_ON_USAGE, handler);
+      return () => ipcRenderer.removeListener(IpcChannels.CHAT_ON_USAGE, handler);
     }
   },
 
@@ -993,6 +1058,12 @@ const electronAPI = {
     getAllowedExtensions: (): Promise<IpcResponse<string[]>> =>
       ipcRenderer.invoke(IpcChannels.FILE_GET_ALLOWED_EXTENSIONS),
 
+    // 成品交付：只接受主进程白名单目录内的真实文件，路径由主进程再次校验
+    open: (filePath: string): Promise<IpcResponse<{ path: string }>> =>
+      ipcRenderer.invoke(IpcChannels.FILE_OPEN, filePath),
+    showInFolder: (filePath: string): Promise<IpcResponse<{ path: string }>> =>
+      ipcRenderer.invoke(IpcChannels.FILE_SHOW_IN_FOLDER, filePath),
+
     // P0-06: 文件上传到 IM 平台
     uploadToIM: (args: { platform: string; filePath: string; channelId: string; targetUserId: string; accessToken?: string }): Promise<IpcResponse<any>> =>
       ipcRenderer.invoke(IpcChannels.FILE_UPLOAD_TO_IM, args),
@@ -1002,7 +1073,9 @@ const electronAPI = {
 
   // ========== 对话导出 ==========
   conversation: {
-    export: (conversation: any, format: 'markdown' | 'pdf' | 'word', outputPath?: string): Promise<IpcResponse<{ filePath: string }>> =>
+    export: (conversation: any, format: 'markdown' | 'pdf' | 'word', outputPath?: string): Promise<IpcResponse<{
+      filePath: string; actualFormat?: string; degraded?: boolean
+    }>> =>
       ipcRenderer.invoke(IpcChannels.CONVERSATION_EXPORT, conversation, format, outputPath)
   },
 
@@ -1272,8 +1345,14 @@ const electronAPI = {
 
   // ========== Channel 能力域 (W3 新增) ==========
   channel: {
-    list: (): Promise<IpcResponse<Array<{ id: string; name: string; healthy: boolean }>>> =>
-      ipcRenderer.invoke(IpcChannels.CHANNEL_LIST),
+    list: (): Promise<IpcResponse<Array<{
+      id: string
+      name: string
+      kind: string
+      enabled: boolean
+      healthy: boolean
+      healthError?: string
+    }>>> => ipcRenderer.invoke(IpcChannels.CHANNEL_LIST),
     messageStats: (): Promise<IpcResponse<{
       total: number
       byChannel: Record<string, { in: number; out: number; total: number }>
@@ -1313,10 +1392,16 @@ const electronAPI = {
     modelUsageTop: (opts?: { n?: number; sortBy?: 'tokens' | 'cost' | 'calls' }): Promise<IpcResponse<any[]>> =>
       ipcRenderer.invoke(IpcChannels.MODEL_USAGE_TOP, opts || {}),
     modelUsageTotal: (): Promise<IpcResponse<any>> => ipcRenderer.invoke(IpcChannels.MODEL_USAGE_TOTAL),
-    health: (channelId: string): Promise<IpcResponse<{ healthy: boolean; latencyMs: number; stub: boolean; channelId: string }>> =>
+    health: (channelId: string): Promise<IpcResponse<{ healthy: boolean; latencyMs?: number; error?: string; channelId: string }>> =>
       ipcRenderer.invoke(IpcChannels.CHANNEL_HEALTH, channelId),
-    send: (msg: { channelId: string; to: string; text?: string }): Promise<IpcResponse<{ messageId: string; stub: boolean }>> =>
-      ipcRenderer.invoke(IpcChannels.CHANNEL_SEND, msg)
+    send: (msg: { channelId: string; to: string; text?: string }): Promise<IpcResponse<{ channelId: string; to: string }>> =>
+      ipcRenderer.invoke(IpcChannels.CHANNEL_SEND, msg),
+    pollerStatus: (): Promise<IpcResponse<{ running: boolean; offset: number; polls: number }>> =>
+      ipcRenderer.invoke(IpcChannels.CHANNEL_POLLER_STATUS),
+    permissionGrant: (args: { channelKind: string; userId: string }): Promise<IpcResponse<void>> =>
+      ipcRenderer.invoke(IpcChannels.PERMISSION_GRANT, args),
+    permissionRevoke: (args: { channelKind: string; userId: string }): Promise<IpcResponse<{ revoked: boolean }>> =>
+      ipcRenderer.invoke(IpcChannels.PERMISSION_REVOKE, args)
   },
 
   // ========== P7 Sandbox 能力域 (W3 新增) ==========
@@ -1328,7 +1413,19 @@ const electronAPI = {
     preview: (): Promise<IpcResponse<{ url: string; port: number; expiresAt: number; stub: boolean }>> =>
       ipcRenderer.invoke(IpcChannels.SANDBOX_PREVIEW),
     stop: (): Promise<IpcResponse<{ stub: boolean }>> =>
-      ipcRenderer.invoke(IpcChannels.SANDBOX_STOP)
+      ipcRenderer.invoke(IpcChannels.SANDBOX_STOP),
+    /** M4.9：Codex 式砂箱档位 / 自动审查配置 */
+    getApprovalConfig: (): Promise<IpcResponse<{
+      tier: 'read-only' | 'workspace' | 'full'
+      autoReview: boolean
+      limits: { maxConcurrent: number; maxMemoryMB: number; maxChildProcesses: number; sampleIntervalMs: number }
+    }>> => ipcRenderer.invoke('sandbox:get-approval-config'),
+    setApprovalConfig: (patch: {
+      tier?: 'read-only' | 'workspace' | 'full'
+      autoReview?: boolean
+      limits?: Partial<{ maxConcurrent: number; maxMemoryMB: number; maxChildProcesses: number }>
+    }): Promise<IpcResponse<{ tier: string; autoReview: boolean }>> =>
+      ipcRenderer.invoke('sandbox:set-approval-config', patch)
   },
 
   // ========== Insight 能力域 (W3 新增) ==========
@@ -1371,7 +1468,8 @@ const electronAPI = {
   channelConfig: {
     get: (): Promise<IpcResponse<any[]>> => ipcRenderer.invoke(IpcChannels.CHANNEL_CONFIG_GET),
     save: (args: { platform: string; config: any }): Promise<IpcResponse<void>> => ipcRenderer.invoke(IpcChannels.CHANNEL_CONFIG_SAVE, args),
-    test: (args: { platform: string; config: any }): Promise<IpcResponse<{ message: string }>> => ipcRenderer.invoke(IpcChannels.CHANNEL_CONFIG_TEST, args)
+    test: (args: { platform: string; config: any }): Promise<IpcResponse<{ message: string }> & { message?: string }> => ipcRenderer.invoke(IpcChannels.CHANNEL_CONFIG_TEST, args),
+    delete: (args: { platform: string }): Promise<IpcResponse<{ removed: boolean }>> => ipcRenderer.invoke(IpcChannels.CHANNEL_CONFIG_DELETE, args)
   },
 
   // ========== W13.A: 5 demo IPC ==========
@@ -1407,10 +1505,9 @@ const electronAPI = {
 
   // ========== NOVA #003-C · M2 — Boot handshake(第②笔, 纯追加) ==========
   //   渲染端 Chat 壳首帧后 → window.electronAPI.nova.notifyRendererReady()
-  //   splash 内 click/keydown → window.electronAPI.nova.skip()
+  //   splash 只消费 nova:boot-event 真实日志流; 跳过入口已移除
   nova: {
     notifyRendererReady: () => ipcRenderer.invoke(IpcChannels.NOVA_RENDERER_READY),
-    skip: () => ipcRenderer.send(IpcChannels.NOVA_BOOT_SKIP),
     onBootEvent: (handler: (ev: Record<string, unknown>) => void) => {
       const wrapped = (_e: IpcRendererEvent, payload: Record<string, unknown>) => handler(payload);
       ipcRenderer.on(IpcChannels.NOVA_BOOT_EVENT, wrapped);
@@ -1421,6 +1518,12 @@ const electronAPI = {
     // 出参: { success: boolean, data?: SearchResult[], error?: string, code?: string, elapsedMs?: number }
     search: (q: { query: string; count?: number; locale?: string }) =>
       ipcRenderer.invoke(IpcChannels.NOVA_SEARCH, q),
+    // ========== v4.8 — 联网搜索「给模型用」的开关(第②笔, 纯追加) ==========
+    // 语义: 开启后模型可在回答时自主调用 web_search；关闭时工具不进入 LLM schema。
+    searchGetSettings: (): Promise<IpcResponse<{ enabled: boolean }>> =>
+      ipcRenderer.invoke(IpcChannels.NOVA_SEARCH_GET_SETTINGS),
+    searchSetSettings: (patch: { enabled: boolean }): Promise<IpcResponse<{ enabled: boolean }>> =>
+      ipcRenderer.invoke(IpcChannels.NOVA_SEARCH_SET_SETTINGS, patch),
     // ========== NOVA #005-B · M4 — 语音设置(第②笔, 纯追加) ==========
     // 入参: getSettings 无; setSettings(patch) patch = Partial<{ enabled / autoRead / rate / pitch / volume }>
     // 出参: { success: boolean, data?: VoiceSettings, error?: string }

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * PiPiClaw 7 个 sandbox runtime 验证脚本 (P1-T1.2)
+ * New World 7 个 sandbox runtime 验证脚本 (P1-T1.2)
  *
  * 4 个 SandboxBuilder 模板 + WebContainerRunner + JupyterRunner + PortForwarder
  * 用法:
@@ -92,7 +92,7 @@ function tryDockerHello() {
   }
 }
 
-console.log('📦 PiPiClaw Sandbox Validation (P1-T1.2)')
+console.log('📦 New World Sandbox Validation (P1-T1.2)')
 console.log('==========================================')
 console.log()
 
@@ -125,7 +125,7 @@ console.log()
 
 // 写报告
 const md = [
-  '# PiPiClaw Sandbox 验证报告',
+  '# New World Sandbox 验证报告',
   '',
   `生成时间: ${now.toISOString()}`,
   `commit: ${process.env.GIT_COMMIT || 'local'}`,

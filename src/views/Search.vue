@@ -61,6 +61,34 @@
         </ol>
       </footer>
     </section>
+
+    <!-- idle 初始空态: 之前 state='idle' 时模板没有任何分支渲染 → 整页空白,
+         用户不知道这一页能做什么、结果会显示在哪。补引导 + 可点击示例查询。
+         注意: .search-page 挂 nova-tech-surface(深底玻璃面 + 白字),
+         此处文字一律不显式设 color, 继承白字, 避免浅色主题下深底深字。 -->
+    <div v-else class="search-idle" role="note">
+      <div class="search-idle-icon" aria-hidden="true">
+        <svg viewBox="0 0 48 48" width="48" height="48" fill="none">
+          <circle cx="21" cy="21" r="12" stroke="currentColor" stroke-width="2.5" />
+          <path d="M30 30l9 9" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" />
+          <path d="M15 21h12M21 15v12" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" opacity="0.45" />
+        </svg>
+      </div>
+      <h3 class="search-idle-title">{{ t('nova.search.idle.title') }}</h3>
+      <p class="search-idle-desc">{{ t('nova.search.idle.desc') }}</p>
+      <div class="search-idle-examples">
+        <span class="search-idle-examples-label">{{ t('nova.search.idle.examples') }}</span>
+        <button
+          v-for="ex in exampleQueries"
+          :key="ex"
+          type="button"
+          class="search-example-chip"
+          @click="useExample(ex)"
+        >
+          {{ ex }}
+        </button>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -78,7 +106,7 @@
  *
  * 不可信标注: t('nova.search.untrusted') 置于结果列表上方(稿 F4 §1 标注在数据之前)。
  */
-import { ref } from 'vue';
+import { ref, computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 
 const { t } = useI18n();
@@ -115,6 +143,18 @@ const state = ref<'idle' | 'empty' | 'error'>('idle');
 const lastErrorText = ref('');
 const copying = ref(false);
 const copied = ref(false);
+
+/** idle 空态的示例查询 —— 点击即填入并搜索, 让用户第一次进来就有可走的路径 */
+const exampleQueries = computed<string[]>(() => [
+  t('nova.search.idle.ex1'),
+  t('nova.search.idle.ex2'),
+  t('nova.search.idle.ex3'),
+]);
+
+function useExample(q: string): void {
+  query.value = q;
+  void doSearch(q);
+}
 
 function bridge(): ((q: { query: string; count?: number; locale?: string }) => Promise<NovaSearchRes>) | null {
   const w = window as unknown as { electronAPI?: NovaApi };
@@ -205,18 +245,16 @@ async function onCopy(): Promise<void> {
 .search-title {
   margin: 0;
   font-size: 22px;
-  background: var(--nova-gradient, linear-gradient(135deg, #22d3ee, #a78bfa));
-  -webkit-background-clip: text;
-  background-clip: text;
-  color: transparent;
-  letter-spacing: 0.02em;
+  /* v4.9：去掉渐变文字（AI 味最重的一处），回归正常前景色标题 */
+  color: var(--fg-primary);
+  letter-spacing: 0.01em;
 }
 
 .search-untrusted {
   margin: 6px 0 0;
   font-size: 12px;
   opacity: 0.75;
-  border-left: 2px solid var(--nova-cyan, #22d3ee);
+  border-left: 2px solid var(--nova-cyan, #7c8db5);
   padding-left: 8px;
 }
 
@@ -231,14 +269,14 @@ async function onCopy(): Promise<void> {
   font-size: 14px;
   border-radius: 8px;
   border: 1px solid var(--el-border-color, #333);
-  background: rgba(34, 211, 238, 0.04);
+  background: rgba(160, 168, 186, 0.04);
   color: inherit;
   outline: none;
   transition: border-color var(--nova-dur-fast, 180ms);
 }
 .search-input:focus {
-  border-color: var(--nova-cyan, #22d3ee);
-  box-shadow: var(--nova-glow-cyan, none);
+  border-color: var(--nova-cyan, #7c8db5);
+  
 }
 .search-input:disabled {
   opacity: 0.6;
@@ -250,7 +288,7 @@ async function onCopy(): Promise<void> {
   border-radius: 8px;
   border: none;
   cursor: pointer;
-  background: var(--nova-gradient, linear-gradient(135deg, #22d3ee, #a78bfa));
+  background: var(--accent-base, #7c8db5);
   color: #050508;
   font-weight: 600;
   transition: opacity var(--nova-dur-fast, 180ms), transform var(--nova-dur-fast, 180ms);
@@ -278,20 +316,77 @@ async function onCopy(): Promise<void> {
 .spinner {
   width: 14px;
   height: 14px;
-  border: 2px solid var(--nova-cyan, #22d3ee);
+  border: 2px solid var(--nova-cyan, #7c8db5);
   border-top-color: transparent;
   border-radius: 50%;
-  animation: nova-search-spin 0.8s linear infinite;
-}
-@keyframes nova-search-spin {
-  to {
-    transform: rotate(360deg);
-  }
+  animation: nw-spin 0.8s linear infinite;
 }
 @media (prefers-reduced-motion: reduce) {
   .spinner {
     animation: none;
   }
+}
+
+/* idle 初始空态 —— 填满原先的大片空白, 给出能力说明与可点击示例 */
+.search-idle {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 10px;
+  padding: 40px 16px 64px;
+}
+.search-idle-icon {
+  color: var(--nova-cyan, #7c8db5);
+  opacity: 0.8;
+  margin-bottom: 2px;
+}
+.search-idle-title {
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+.search-idle-desc {
+  margin: 0;
+  max-width: 540px;
+  font-size: 13px;
+  line-height: 1.7;
+  opacity: 0.78;
+}
+.search-idle-examples {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  margin-top: 14px;
+}
+.search-idle-examples-label {
+  font-size: 12px;
+  opacity: 0.6;
+}
+.search-example-chip {
+  appearance: none;
+  font-family: inherit;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 6px 13px;
+  border-radius: 9999px;
+  cursor: pointer;
+  color: inherit;
+  background: rgba(160, 168, 186, 0.08);
+  border: 1px solid rgba(160, 168, 186, 0.24);
+  transition: border-color var(--nova-dur-fast, 180ms), transform var(--nova-dur-fast, 180ms);
+}
+.search-example-chip:hover {
+  border-color: var(--nova-cyan, #7c8db5);
+  transform: translateY(-1px);
+}
+.search-example-chip:focus-visible {
+  outline: 2px solid var(--nova-cyan, #7c8db5);
+  outline-offset: 2px;
 }
 
 .search-resultbar {
@@ -314,7 +409,7 @@ async function onCopy(): Promise<void> {
   transition: border-color var(--nova-dur-fast, 180ms);
 }
 .copy-btn:hover:not(:disabled) {
-  border-color: var(--nova-cyan, #22d3ee);
+  border-color: var(--nova-cyan, #7c8db5);
 }
 .copy-btn:disabled {
   cursor: default;
@@ -329,10 +424,10 @@ async function onCopy(): Promise<void> {
   gap: 12px;
 }
 .result-card {
-  border: 1px solid rgba(34, 211, 238, 0.12);
+  border: 1px solid rgba(160, 168, 186, 0.12);
   border-radius: 10px;
   padding: 12px 16px;
-  background: rgba(34, 211, 238, 0.03);
+  background: rgba(160, 168, 186, 0.03);
 }
 .result-head {
   display: flex;
@@ -341,7 +436,7 @@ async function onCopy(): Promise<void> {
 }
 .result-num {
   font-size: 12px;
-  color: var(--nova-cyan, #22d3ee);
+  color: var(--nova-cyan, #7c8db5);
   font-family: ui-monospace, monospace;
 }
 .result-title {
@@ -351,7 +446,7 @@ async function onCopy(): Promise<void> {
   text-decoration: none;
 }
 .result-title:hover {
-  color: var(--nova-cyan, #22d3ee);
+  color: var(--nova-cyan, #7c8db5);
 }
 .result-snippet {
   margin: 6px 0 0;
@@ -370,7 +465,7 @@ async function onCopy(): Promise<void> {
 .search-footnotes {
   margin-top: 18px;
   padding-top: 12px;
-  border-top: 1px dashed rgba(167, 139, 250, 0.25);
+  border-top: 1px dashed rgba(160, 168, 186, 0.25);
   font-size: 12px;
 }
 .footnote-list {
@@ -386,6 +481,6 @@ async function onCopy(): Promise<void> {
   text-decoration: none;
 }
 .footnote-list a:hover {
-  color: var(--nova-cyan, #22d3ee);
+  color: var(--nova-cyan, #7c8db5);
 }
 </style>

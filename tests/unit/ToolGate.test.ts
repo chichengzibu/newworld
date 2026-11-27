@@ -1,5 +1,6 @@
+// @vitest-environment node
 /**
- * PiPiClaw - ToolGate 权限门测试 (M2-B)
+ * New World - ToolGate 权限门测试 (M2-B)
  *
  * 【安全边界,密集覆盖】
  * 这个门挡住的是"本地模型静默改掉用户文件"。任何一条断言变红,
@@ -206,6 +207,49 @@ describe('ToolGate 权限门', () => {
       expect(ds[0].allowed).toBe(true)
       expect(ds[1].allowed).toBe(false)
       expect(ds[2].allowed).toBe(true)
+    })
+  })
+
+  describe('7. RBAC 能力级拦截（v4.8，用户权限集真正生效）', () => {
+    it('RBAC 拒绝时，即使工具档位是 auto 也拦下（安全模式 shell=none）', async () => {
+      // Bash 档位是 auto + DELEGATED，但用户在权限管理里关了 shell → 必须拒绝
+      const d = await ToolGate.check(mkTool('Bash'), { command: 'echo hi' }, UI, {
+        rbacCheck: () => ({ allowed: false, reason: 'shell 操作已被禁用' }),
+        requestConfirmation: async () => true,
+      })
+      expect(d.allowed).toBe(false)
+      expect(d.permission).toBe('deny')
+      expect(d.reason).toContain('权限集已禁止')
+    })
+
+    it('RBAC 拒绝只读工具也生效', async () => {
+      const d = await ToolGate.check(mkTool('Read'), { file_path: '/tmp/x' }, UI, {
+        rbacCheck: () => ({ allowed: false, reason: 'filesystem 操作已被禁用' }),
+      })
+      expect(d.allowed).toBe(false)
+      expect(d.permission).toBe('deny')
+    })
+
+    it('RBAC 返回 null（未配置/配置不可用）→ 交回原档位判定', async () => {
+      const d = await ToolGate.check(mkTool('Read'), {}, UI, { rbacCheck: () => null })
+      expect(d.allowed).toBe(true)
+      expect(d.permission).toBe('auto')
+    })
+
+    it('RBAC 允许 → 走原档位判定（Edit 仍需确认）', async () => {
+      const d = await ToolGate.check(mkTool('Edit', true), { file_path: '/tmp/x' }, UI, {
+        rbacCheck: () => ({ allowed: true, reason: 'RBAC 通过' }),
+        requestConfirmation: async () => true,
+      })
+      expect(d.allowed).toBe(true)
+    })
+
+    it('rbacCheck 抛异常 → fail-safe 拒绝', async () => {
+      const d = await ToolGate.check(mkTool('Bash'), {}, UI, {
+        rbacCheck: () => { throw new Error('rbac down') },
+      })
+      expect(d.allowed).toBe(false)
+      expect(d.reason).toContain('权限判定异常')
     })
   })
 })

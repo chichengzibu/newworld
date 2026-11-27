@@ -1,7 +1,7 @@
 import { test, expect, shouldRunElectronE2E } from './helpers/electron-app'
 
 /**
- * PiPiClaw UI 烟雾测试 - 模拟用户交互
+ * New World UI 烟雾测试 - 模拟用户交互
  *
  * 用 E2E_ELECTRON=1 启动 Electron 真实进程,
  * 模拟用户导航、点击、输入等操作,验证 UI 完整性。
@@ -33,17 +33,13 @@ test.describe('UI interaction smoke test', () => {
   })
 
   test('navigate through main pages', async ({ window }) => {
-    // 【v4.4 起】侧栏是 icon-only rail:`nav.sidenav > a.nav-icon`,
-    // 没有可见文字 —— 旧的 `a.nav-item` × 14 断言永远不成立。
-    // 改按**入口是否齐 + 每个入口有没有文案**来断(后者是 M4-G 实跑抓到的真实缺陷)。
+    // 【v4.7】四层信息架构:rail 只常驻 3 个工作对象(对话/技能/定时任务)
+    // + 底部设置,共 4 个。配置页收进设置页,输入能力下沉到输入区,
+    // 内容浏览收进「更多」面板 —— 不再是平铺的 8 个图标。
     const navItems = window.locator('nav.sidenav a.nav-icon')
-    await expect(navItems).toHaveCount(8, { timeout: 10_000 })
+    await expect(navItems).toHaveCount(4, { timeout: 10_000 })
 
-    // 2. 逐个入口都在 + 都有非空文案(aria-label 走 i18n)
-    const expectedPaths = [
-      '#/chat', '#/models', '#/skills', '#/im-management', '#/schedule',
-      '#/search', '#/voice', '#/settings',
-    ]
+    const expectedPaths = ['#/chat', '#/skills', '#/schedule', '#/settings']
     for (const p of expectedPaths) {
       const item = window.locator(`nav.sidenav a.nav-icon[href$="${p}"]`)
       await expect(item, `侧栏缺入口 ${p}`).toHaveCount(1)
@@ -51,22 +47,45 @@ test.describe('UI interaction smoke test', () => {
       await expect(item).toHaveAttribute('aria-label', /\S+/)
     }
 
-    // 截图 SideNav
+    // 配置页不得再平铺在 rail 上
+    for (const p of ['#/models', '#/im-management', '#/permissions', '#/remote-control']) {
+      await expect(window.locator(`nav.sidenav a.nav-icon[href$="${p}"]`), `${p} 不该在 rail`).toHaveCount(0)
+    }
+
+    // 「更多」面板承载 1 个内容浏览项（模型对比/帮助中心 v4.9 已下线）
+    const trigger = window.locator('[data-testid="nav-more-trigger"]')
+    await expect(trigger).toBeVisible()
+    await trigger.click()
+    const panel = window.locator('[data-testid="nav-more-panel"]')
+    await expect(panel).toBeVisible({ timeout: 8_000 })
+    for (const p of ['#/clawhub']) {
+      const item = panel.locator(`a.nav-more-item[href$="${p}"]`)
+      await expect(item, `更多菜单缺入口 ${p}`).toHaveCount(1)
+      await expect(item.locator('.nav-more-item-title')).toHaveText(/\S+/)
+    }
+    await window.keyboard.press('Escape')
+    await expect(panel).toHaveCount(0)
+
     await window.screenshot({ path: 'test-results/ui-smoke-sidenav.png' })
 
-    // 3. 点击"Models",验证跳转
-    await window.click('nav.sidenav a.nav-icon[href$="#/models"]')
-    await window.waitForURL(/#\/models/, { timeout: 5_000 })
-    await expect(window.locator('.models-page').first()).toBeVisible({ timeout: 5_000 })
-
-    // 4. 点击"Settings"
+    // 设置页「配置中心」集中 4 个配置入口；模型管理是内建 tab，不重复列出
     await window.click('nav.sidenav a.nav-icon[href$="#/settings"]')
     await window.waitForURL(/#\/settings/, { timeout: 5_000 })
     await expect(window.locator('.settings-page, [class*="settings-view"]').first()).toBeVisible({ timeout: 5_000 })
+    const configNav = window.locator('[data-testid="settings-config-nav"]')
+    await expect(configNav).toBeVisible({ timeout: 5_000 })
+    await expect(configNav.locator('a.settings-link')).toHaveCount(4)
+    await expect(configNav.locator('a.settings-link[href$="#/models"]')).toHaveCount(0)
 
-    // 5. 回到 AI Chat
+    // 模型管理入口唯一：设置页内建 tab
+    await window.locator('.settings-nav__btn:has-text("模型管理"), .settings-nav__btn:has-text("Models")').first().click()
+    await expect(window.locator('#settings-panel-models')).toBeVisible({ timeout: 5_000 })
+
+    // 回到 AI Chat,输入能力工具条应有搜索 / 语音两个按钮
     await window.click('nav.sidenav a.nav-icon[href$="#/chat"]')
     await window.waitForURL(/#\/chat/, { timeout: 5_000 })
+    await expect(window.locator('.input-tool-btn[data-path="/search"]')).toBeVisible({ timeout: 5_000 })
+    await expect(window.locator('.input-tool-btn[data-path="/voice"]')).toBeVisible({ timeout: 5_000 })
   })
 
   test('chat flow: new conversation + type message', async ({ window }) => {
@@ -74,13 +93,15 @@ test.describe('UI interaction smoke test', () => {
     await window.click('nav.sidenav a.nav-icon[href$="#/chat"]')
     await window.waitForURL(/#\/chat/, { timeout: 5_000 })
 
-    // 找到"New Chat"按钮并点击
-    const newChatBtn = window.locator('button:has-text("New Chat"), button:has-text("新建对话")').first()
+    // 找到「新建」按钮并点击(实际按钮是 button.new-chat-btn,文案为「新建」;
+    // 旧写法找 "New Chat" / "新建对话" 都匹配不到 → click 超时)
+    const newChatBtn = window.locator('button.new-chat-btn').first()
+    await expect(newChatBtn).toBeVisible({ timeout: 10_000 })
     await newChatBtn.click()
     await window.waitForTimeout(500)
 
     // 找到输入框
-    const textarea = window.locator('.input-row textarea, textarea[placeholder*="消息"], textarea[placeholder*="message"]').first()
+    const textarea = window.locator('.input-area textarea').first()
     await expect(textarea).toBeVisible({ timeout: 5_000 })
 
     // 模拟用户输入

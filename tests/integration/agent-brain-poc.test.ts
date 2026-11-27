@@ -1,5 +1,6 @@
+// @vitest-environment node
 /**
- * PiPiClaw - LlmAgentBrain v0.1 端到端 PoC (M1 v0.1)
+ * New World - LlmAgentBrain v0.1 端到端 PoC (M1 v0.1)
  *
  * 验证 LlmAgentBrain.run() + LlmClient.streamChat() + 5 工具 端到端集成
  *
@@ -28,7 +29,7 @@ const WORKSPACE_DIR = path.join(TEST_ROOT, 'workspace')
 function seedSandboxFiles(): void {
   fsSync.mkdirSync(SANDBOX_DIR, { recursive: true })
   fsSync.mkdirSync(WORKSPACE_DIR, { recursive: true })
-  fsSync.writeFileSync(path.join(SANDBOX_DIR, 'hello.txt'), 'PiPiClaw is great\n', 'utf-8')
+  fsSync.writeFileSync(path.join(SANDBOX_DIR, 'hello.txt'), 'New World is great\n', 'utf-8')
   fsSync.writeFileSync(path.join(SANDBOX_DIR, 'app.ts'), 'export const version = "1.0"\n', 'utf-8')
   fsSync.writeFileSync(path.join(SANDBOX_DIR, 'readme.md'), '# Notes\nversion 1.0 draft\n', 'utf-8')
 }
@@ -46,12 +47,13 @@ function seedSandboxFiles(): void {
 import { LlmAgentBrain, LlmAgentBrainEvents, type LlmAgentEvent } from '../../electron/agent/LlmAgentBrain'
 import { LlmClient } from '../../electron/llm/LlmClient'
 import type { LlmStreamChunk, LlmToolCall } from '../../electron/llm/types'
-import { installToolConfirmation } from '../unit/auto-confirm'
+import { installToolConfirmation, activatePermissiveForTest } from '../unit/auto-confirm'
 
 /** 【M2-B】确认桥 —— 显式传入 run(),不写全局。护栏见 auto-confirm.ts。 */
 const CONFIRM_ALL = installToolConfirmation();
 
 beforeEach(() => {
+  activatePermissiveForTest() // v4.8: 本文件验证脑编排，非权限主题，显式放行 RBAC
   seedSandboxFiles()
 })
 
@@ -73,7 +75,7 @@ describe('LlmAgentBrain v0.1 端到端 (mock LLM)', () => {
         yield { type: 'tool_call', toolCall: tc, provider: 'openai-compatible', model: 'qwen3.5:9b' } as LlmStreamChunk
         yield { type: 'done', provider: 'openai-compatible', model: 'qwen3.5:9b' } as LlmStreamChunk
       } else {
-        const text = '在 sandbox 找到 1 个 .txt 文件: hello.txt (内容: "PiPiClaw is great")'
+        const text = '在 sandbox 找到 1 个 .txt 文件: hello.txt (内容: "New World is great")'
         yield { type: 'content', delta: text, accumulated: text, provider: 'openai-compatible', model: 'qwen3.5:9b' } as LlmStreamChunk
         yield { type: 'done', provider: 'openai-compatible', model: 'qwen3.5:9b' } as LlmStreamChunk
       }
@@ -137,7 +139,7 @@ describe('LlmAgentBrain v0.1 端到端 (mock LLM)', () => {
         yield { type: 'tool_call', toolCall: tc, provider: 'openai-compatible', model: 'qwen3.5:9b' } as LlmStreamChunk
         yield { type: 'done', provider: 'openai-compatible', model: 'qwen3.5:9b' } as LlmStreamChunk
       } else {
-        const text = 'hello.txt 内容: "PiPiClaw is great"'
+        const text = 'hello.txt 内容: "New World is great"'
         yield { type: 'content', delta: text, accumulated: text, provider: 'openai-compatible', model: 'qwen3.5:9b' } as LlmStreamChunk
         yield { type: 'done', provider: 'openai-compatible', model: 'qwen3.5:9b' } as LlmStreamChunk
       }
@@ -158,7 +160,7 @@ describe('LlmAgentBrain v0.1 端到端 (mock LLM)', () => {
       expect(result.iterations).toBe(2)
       expect(result.toolCalls[0].name).toBe('Read')
       expect(result.toolCalls[0].ok).toBe(true)
-      expect(result.content).toContain('PiPiClaw is great')
+      expect(result.content).toContain('New World is great')
     } finally {
       // @ts-ignore
       LlmClient.prototype.streamChat = origStream
@@ -229,7 +231,7 @@ describe('LlmAgentBrain v0.1 端到端 (mock LLM)', () => {
 
   it('run → mock LLM 立即 final → 0 tool calls, 1 iter', async () => {
     const mockStream = async function* (this: LlmClient) {
-      const text = '你好, 我是 PiPiClaw 代码助手.'
+      const text = '你好, 我是 New World 代码助手.'
       yield { type: 'content', delta: text, accumulated: text, provider: 'openai-compatible', model: 'qwen3.5:9b' } as LlmStreamChunk
       yield { type: 'done', provider: 'openai-compatible', model: 'qwen3.5:9b' } as LlmStreamChunk
     }
@@ -247,7 +249,7 @@ describe('LlmAgentBrain v0.1 端到端 (mock LLM)', () => {
 
       expect(result.iterations).toBe(1)
       expect(result.toolCalls).toHaveLength(0)
-      expect(result.content).toContain('PiPiClaw')
+      expect(result.content).toContain('New World')
     } finally {
       // @ts-ignore
       LlmClient.prototype.streamChat = origStream
@@ -293,14 +295,15 @@ describe('LlmAgentBrain v0.1 端到端 (mock LLM)', () => {
   }, 30000)
 })
 
-describe('LlmAgentBrain v0.1 工具列表 (5 工具)', () => {
-  it('listTools 返 6 工具 metadata (Read/Edit/Bash/Glob/Grep/load_skill)', () => {
+describe('LlmAgentBrain v0.1 工具列表', () => {
+  it('listTools 返 9 工具 metadata (Read/Edit/Bash/Glob/Grep/load_skill/parallel_subtasks/create_artifact/web_search)', () => {
     const brain = LlmAgentBrain.getInstance()
     const tools = brain.listTools()
-    // 【M4-A】新增 load_skill —— 渐进披露的 L2 加载入口
-    expect(tools).toHaveLength(6)
+    // 【M4-A】load_skill 渐进披露；【P3】parallel_subtasks 多 agent 编排；
+    // create_artifact 成品交付；【v4.8】web_search 联网搜索（受输入区开关控制是否进 LLM tools）
+    expect(tools).toHaveLength(9)
     const names = tools.map(t => t.name).sort()
-    expect(names).toEqual(['Bash', 'Edit', 'Glob', 'Grep', 'Read', 'load_skill'])
+    expect(names).toEqual(['Bash', 'Edit', 'Glob', 'Grep', 'Read', 'create_artifact', 'load_skill', 'parallel_subtasks', 'web_search'])
     // 验证每个有 description + parameters
     for (const t of tools) {
       expect(t.description).toBeTruthy()

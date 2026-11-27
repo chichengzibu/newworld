@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - ModelUsageTracker (P2-02)
+ * New World - ModelUsageTracker (P2-02)
  *
  * 模型使用量排行:
  * - 每次 LLM 调用完,record(modelId, provider, tokens, cost)

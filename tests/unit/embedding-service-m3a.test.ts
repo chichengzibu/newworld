@@ -1,5 +1,5 @@
 /**
- * PiPiClaw — M3-A 嵌入后端测试
+ * New World — M3-A 嵌入后端测试
  * ═══════════════════════════════════════════════════════════════
  * 【这一批在测什么】
  * 知识库的「真向量」此前是【只有代码、没有入口】:
@@ -18,7 +18,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 vi.mock('electron', () => ({
-  app: { getPath: vi.fn((k: string) => `/tmp/pipiclaw-m3a-${k}`) },
+  app: { getPath: vi.fn((k: string) => `/tmp/newworld-m3a-${k}`) },
 }))
 
 vi.mock('electron-log', () => ({

@@ -1,5 +1,5 @@
 /**
- * PiPiClaw — M1-C 工具调用可视化测试
+ * New World — M1-C 工具调用可视化测试
  *
  * 【为什么要测组件】
  * ToolCallCard 的核心逻辑是"把 call/result 事件流配对成时间线"。

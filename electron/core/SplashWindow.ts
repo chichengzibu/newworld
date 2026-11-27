@@ -13,9 +13,7 @@ export interface SplashOptions {
   onFailed?(reason?: string): void;
   /** 事件推给 splash 窗(nova:boot-event) */
   onEvent?(payload: Record<string, unknown>): void;
-  /** 跳过请求 → 主进程侧立即放行 */
-  onSkip?(): void;
-  /** 用户点击 splash 外部/关闭 → 同跳过语义 */
+  /** 窗口被关闭 → 兜底收口(非用户跳过; 跳过入口已移除) */
   onClose?(): void;
 }
 
@@ -27,7 +25,8 @@ export interface SplashOptions {
  *   - 420×600 · show:false → ready-to-show 才 show
  *   - loadFile 静态 resources/splash.html(不进 Vite 管线)
  *   - loadFile 失败 / 文件缺失 → onFailed 回调 → 主进程降级直开主窗(设计稿 F7, 本类不做静默吞错)
- *   - 渲染端 splash 内 click/keydown 经 nova:boot-skip 转发 → onSkip
+ *   - splash 只展示主进程真实 boot 日志流(pushBootLog); 跳过入口已全部移除
+ *   - 页面未加载完成前的日志先缓冲, did-finish-load 后按序回放, 不丢行
  *
  * 命名/事件流交叉引用(只读不改): electron/preload.ts:1228 / IpcServer.ts:2463
  *   既有 webcontainer:renderer-ready 与本组件 nova:* 命名空间分属, 不冲突。
@@ -37,6 +36,9 @@ export class SplashWindow {
   private log = LogManager.getInstance();
   private win: BrowserWindow | null = null;
   private opts: SplashOptions;
+  /** splash 页面是否已 finish-load; 未就绪时日志先入缓冲 */
+  private pageReady = false;
+  private logBuffer: Array<Record<string, unknown>> = [];
 
   // 尺寸硬规格(设计稿 F2)
   private static readonly W = 420;
@@ -56,7 +58,7 @@ export class SplashWindow {
   }
 
   /**
-   * 在 create() 之前注入回调(跳过 onFailed / onSkip / onClose)。
+   * 在 create() 之前注入回调(onFailed / onClose)。
    * 用于"先 getInstance 再装配 opts"的调用序列(BootOrchestrator 降级链)。
    */
   setOptions(opts: SplashOptions): void {
@@ -130,25 +132,18 @@ export class SplashWindow {
       this.win?.show();
     });
 
+    // 页面加载完成后,把加载期间缓冲的真实日志按序回放给渲染端
+    this.win.webContents.once('did-finish-load', () => {
+      this.pageReady = true;
+      const pending = this.logBuffer.splice(0);
+      for (const payload of pending) this.send(payload);
+    });
+
     try {
       this.win.loadFile(filePath).catch((err) => {
         this.log.warn(`Splash: loadFile 异步失败, 降级: ${String(err)}`);
         this.opts.onFailed?.();
       });
-
-      // ---- 跳过(设计稿 F5/F6) ----
-      // 主进程级点击跳过:splash 任意位置点击即跳过(不依赖渲染层)
-      // 【M3-F】'mouse-down' 不是 webContents 的事件名(类型系统一直报错)。
-      // 主进程侧要感知"用户在 splash 上点了鼠标",正确的 API 是
-      // `before-input-event` —— 它把渲染侧收到的输入事件回传主进程,
-      // 正好对应设计稿 F5/F6 的"主进程级点击跳过"。
-      this.win.webContents.on('before-input-event', (_e, input) => {
-        if (input.type === 'mouseDown') {
-          this.opts.onSkip?.();
-        }
-      });
-      // 键盘跳过走渲染端 splash.html keydown → window.nova?.skip()
-      //   → preload nova.skip() → IpcServer nova:boot-skip → onSkip(同一链路, preload 双窗共用)
       return true;
     } catch (err) {
       this.log.warn(`Splash: loadFile 同步异常, 降级: ${String(err)}`);
@@ -160,14 +155,33 @@ export class SplashWindow {
   /** 推一条 nova:boot-event 给 splash 渲染端(F4; splash 内 window.nova?.onBootEvent 消费) */
   pushEvent(payload: Record<string, unknown>): void {
     if (!this.win || this.win.isDestroyed()) return;
+    if (!this.pageReady) {
+      // 页面尚未加载: 先缓冲, did-finish-load 时按序回放, 避免丢行
+      this.logBuffer.push(payload);
+      return;
+    }
+    this.send(payload);
+  }
+
+  private send(payload: Record<string, unknown>): void {
     try {
-      this.win.webContents.send('nova:boot-event', payload);
+      this.win?.webContents.send('nova:boot-event', payload);
     } catch { /* 窗口已销毁等瞬时态, 忽略 */ }
+  }
+
+  /**
+   * 推一条真实 boot 日志行给 splash(终端日志流)。
+   * 载荷形如 { log: { level, message, timestamp, stage? } }, 与 BootOrchestrator.pushBootLog 对接。
+   */
+  pushBootLog(log: { level: string; message: string; timestamp: number; stage?: string }): void {
+    this.pushEvent({ log });
   }
 
   close(): void {
     const win = this.win;
     this.win = null;
+    this.pageReady = false;
+    this.logBuffer = [];
     if (win && !win.isDestroyed()) {
       try { win.destroy(); } catch { /* ignore */ }
     }

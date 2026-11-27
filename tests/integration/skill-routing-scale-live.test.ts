@@ -1,5 +1,5 @@
 /**
- * PiPiClaw — 技能规模档实跑基准（M4-AB）
+ * New World — 技能规模档实跑基准（M4-AB）
  * ═══════════════════════════════════════════════════════════════════════
  * 【这一批在测什么】
  * M4-W 量出「AI 选对率 100%」—— 但那是在 **4 个技能**上量的。
@@ -20,9 +20,9 @@
  * 唯一的变量是**技能数量**（4 → 24）。
  *
  * 【怎么跑】
- *   PIPICLAW_SKILL_SCALE=1 npx vitest run tests/integration/skill-routing-scale-live.test.ts
+ *   NW_SKILL_SCALE=1 npx vitest run tests/integration/skill-routing-scale-live.test.ts
  *   # 换模型:
- *   PIPICLAW_SKILL_SCALE=1 PIPICLAW_SKILL_ROUTING_MODEL=qwen3.8-27b-q4km:latest \
+ *   NW_SKILL_SCALE=1 NW_SKILL_ROUTING_MODEL=qwen3.8-27b-q4km:latest \
  *     npx vitest run tests/integration/skill-routing-scale-live.test.ts
  *
  * 【默认不跑】要打真模型（慢且烧算力）。
@@ -36,7 +36,7 @@ import { TEST_USER_DATA } from '../unit/test-host'
 vi.mock('electron', () => ({
   app: {
     getPath: vi.fn((k: string) => `${TEST_USER_DATA}/${k}`),
-    getName: () => 'pipiclaw',
+    getName: () => 'newworld',
     getVersion: () => '4.5.0',
   },
   safeStorage: {
@@ -57,8 +57,8 @@ import { LlmAgentBrain } from '../../electron/agent/LlmAgentBrain'
 import { SkillLoader } from '../../electron/skill/SkillLoader'
 import { LlmConfigStore } from '../../electron/llm/LlmConfigStore'
 
-const ENABLED = process.env.PIPICLAW_SKILL_SCALE === '1'
-const MODEL = process.env.PIPICLAW_SKILL_ROUTING_MODEL || 'qwen3.5:9b'
+const ENABLED = process.env.NW_SKILL_SCALE === '1'
+const MODEL = process.env.NW_SKILL_ROUTING_MODEL || 'qwen3.5:9b'
 const OLLAMA_BASE = 'http://localhost:11434/v1'
 const OLLAMA_HOST = 'http://localhost:11434'
 const SKILLS_DIR = join(TEST_USER_DATA, 'skills')
@@ -183,7 +183,7 @@ describe('M4-AB 技能规模档实跑基准', () => {
 
   it('量出 24 技能规模下的选对率 / 漏选 / 误选 / 多选 / 负样本', async (ctx) => {
     if (!ENABLED) {
-      return ctx.skip('[SKIP] 规模档基准需显式开启: PIPICLAW_SKILL_SCALE=1（要打真模型）')
+      return ctx.skip('[SKIP] 规模档基准需显式开启: NW_SKILL_SCALE=1（要打真模型）')
     }
 
     const results: ScaleResult[] = []

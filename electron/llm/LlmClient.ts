@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - LLM 统一客户端 (M1 v0.1 合并 ModelManager 后)
+ * New World - LLM 统一客户端 (M1 v0.1 合并 ModelManager 后)
  *
  * 统一接口: chat / streamChat / complete (兼容 LlmAgentBrain 老调用).
  * 4 个 provider: openai / anthropic / zhipu / openai-compatible (deepseek/ollama/volc/openrouter/custom/azure-via-openai).

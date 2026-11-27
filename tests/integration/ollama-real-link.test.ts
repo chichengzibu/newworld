@@ -1,4 +1,4 @@
-// PiPiClaw + Ollama 真链路集成测试
+// New World + Ollama 真链路集成测试
 // 跑 6 个真实场景,验证 LlmClient 在 Ollama 上的表现
 // 环境预检(NOVA #003-A / DEV-029): 指定模型 tag 不在本机 → S1-S6 显式 SKIP + [SKIP] 日志, 不污染电池信号;
 // 模型在位时 S1-S6 断言一字不动(非放宽, 仅前置条件显式化)。
@@ -8,8 +8,8 @@ import { vi } from 'vitest'
 
 vi.mock('electron', () => ({
   app: {
-    getPath: vi.fn((k: string) => `/tmp/pipiclaw-ollama-test-${k}`),
-    getName: () => 'pipiclaw',
+    getPath: vi.fn((k: string) => `/tmp/newworld-ollama-test-${k}`),
+    getName: () => 'newworld',
     getVersion: () => '4.2.0',
   },
   safeStorage: {
@@ -69,7 +69,7 @@ function maybeSkipModel(ctx: { skip: (msg?: string) => void }): void {
   }
 }
 
-describe('P5-UX: PiPiClaw + Ollama 真链路 e2e', () => {
+describe('P5-UX: New World + Ollama 真链路 e2e', () => {
   beforeAll(async () => {
     // 既有硬失败语义保持: host 不可达时 beforeAll 硬断言失败 → 用例根本不跑, 显式暴露(A 分支)
     const r = await fetch(`${OLLAMA_HOST}/api/version`)
@@ -88,7 +88,7 @@ describe('P5-UX: PiPiClaw + Ollama 真链路 e2e', () => {
     const client = LlmClient.getInstance()
     const r = await client.chat({
       model: MODEL,
-      messages: [{ role: 'user', content: '用一句话(不超过 50 字)解释 PiPiClaw' }],
+      messages: [{ role: 'user', content: '用一句话(不超过 50 字)解释 New World' }],
       maxTokens: 200,
       temperature: 0.7,
     })
@@ -144,7 +144,7 @@ describe('P5-UX: PiPiClaw + Ollama 真链路 e2e', () => {
     const r = await client.chat({
       model: MODEL,
       messages: [
-        { role: 'system', content: '你是 PiPiClaw,简洁桌面 AI 助手' },
+        { role: 'system', content: '你是 New World,简洁桌面 AI 助手' },
         { role: 'user', content: '帮我写 200 字 PR 描述,主题:统一 5 套主题为 light/dark' },
       ],
       maxTokens: 400,
@@ -158,7 +158,7 @@ describe('P5-UX: PiPiClaw + Ollama 真链路 e2e', () => {
     maybeSkipModel(ctx)
     const client = LlmClient.getInstance()
     const ctx_2: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
-      { role: 'system', content: '你是 PiPiClaw' },
+      { role: 'system', content: '你是 New World' },
       { role: 'user', content: '我叫什么?' },
     ]
     const r1 = await client.chat({ model: MODEL, messages: ctx_2, maxTokens: 80 })

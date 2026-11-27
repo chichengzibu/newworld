@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - MCP (Model Context Protocol) 类型定义
+ * New World - MCP (Model Context Protocol) 类型定义
  *
  * 参考: https://modelcontextprotocol.io/specification/2025-06-18
  * 实现子集: JSON-RPC 2.0 over stdio + tools/* 核心方法

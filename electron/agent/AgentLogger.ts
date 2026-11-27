@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - Agent / AgentLogger (W5.2.1)
+ * New World - Agent / AgentLogger (W5.2.1)
  *
  * Agent-scoped logger. Mirrors entries to LogManager + EventBus so the UI
  * (and tests) can subscribe to agent:* logs without coupling to electron-log.

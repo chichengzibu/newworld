@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - SandboxLifecycle (W11.4)
+ * New World - SandboxLifecycle (W11.4)
  *
  * 自动 stop idle / cleanup 老的 sandbox
  *

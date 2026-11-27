@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - GrepTool (M1 v0.1)
+ * New World - GrepTool (M1 v0.1)
  *
  * 内容搜索, 跟 ClaudeCode Grep tool 协议对齐:
  *   args: { pattern: string, cwd?: string, include?: string, max_results?: number }

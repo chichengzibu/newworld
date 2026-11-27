@@ -1,10 +1,10 @@
-# PiPiClaw 扩展开发
+# New World 扩展开发
 
-> 如何扩展 PiPiClaw:添加新 LLM provider / 新 IM channel / 新权限规则 / 新视图。
+> 如何扩展 New World:添加新 LLM provider / 新 IM channel / 新权限规则 / 新视图。
 
 ## 总览
 
-扩展 PiPiClaw 主要有 4 类入口:
+扩展 New World 主要有 4 类入口:
 
 1. **LLM provider** — `electron/llm/adapters/`
 2. **IM channel** — `electron/channel/`

@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - M3-A 接线验证:MCP 工具真的进了 LLM 的 function calling 工具表
+ * New World - M3-A 接线验证:MCP 工具真的进了 LLM 的 function calling 工具表
  *
  * 此前 MCP 能力只在 IPC 层 —— LLM 的 tools 数组里没有任何 MCP 工具,
  * 用户装了 MCP server 也白装。这是生态扩展性的分水岭,必须有端到端证明。

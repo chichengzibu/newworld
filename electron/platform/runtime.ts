@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - 平台宿主运行时容器(纯 TS,不依赖 Electron)
+ * New World - 平台宿主运行时容器(纯 TS,不依赖 Electron)
  *
  * 依赖注入容器:主进程启动时调用 setHost(initHost()) 注入具体实现,
  * core 层通过 getHost() 取用,从而 core 不直接 import electron。

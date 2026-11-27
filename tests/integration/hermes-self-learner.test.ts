@@ -4,13 +4,13 @@ import * as path from 'node:path'
 
 vi.mock('electron', () => ({
   app: {
-    getPath: vi.fn(() => '/tmp/pipiclaw-selflearner-test'),
+    getPath: vi.fn(() => '/tmp/newworld-selflearner-test'),
     // 【M4-X】技能目录改为「应用自身结构目录的 skills」→ 开发态是 `<appPath>/skills`
     // (真实 electron 以 "." 启动,appPath = 仓库根)。这里同理:
-    // appPath = /tmp/pipiclaw-selflearner-test → <appPath>/skills = .../skills
+    // appPath = /tmp/newworld-selflearner-test → <appPath>/skills = .../skills
     // = 与 getPath('userData') + '/skills' 同一个目录(读写同源)。
-    getAppPath: vi.fn(() => '/tmp/pipiclaw-selflearner-test'),
-    getName: () => 'pipiclaw',
+    getAppPath: vi.fn(() => '/tmp/newworld-selflearner-test'),
+    getName: () => 'newworld',
     getVersion: () => '0.0.0',
   },
 }))

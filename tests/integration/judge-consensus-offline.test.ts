@@ -1,5 +1,5 @@
 /**
- * PiPiClaw — 顺序一致性 / 长度基线 离线复算（M4-V）
+ * New World — 顺序一致性 / 长度基线 离线复算（M4-V）
  * ═══════════════════════════════════════════════════════════════════════
  * 【这一批在测什么】
  * 把 M4-J 那次校准**已经落盘**的裁决重新算一遍,补上 M4-V 新增的两项分析:
@@ -19,7 +19,7 @@
  * 【怎么跑】
  *   npx vitest run tests/integration/judge-consensus-offline.test.ts
  *   # 想换别的模型目录:
- *   PIPICLAW_CALIBRATION_VERDICTS=verdicts-qwen3.8-27b-q4km_latest.jsonl \
+ *   NW_CALIBRATION_VERDICTS=verdicts-qwen3.8-27b-q4km_latest.jsonl \
  *     npx vitest run tests/integration/judge-consensus-offline.test.ts
  */
 import { describe, it, expect, vi } from 'vitest'
@@ -28,8 +28,8 @@ import { join } from 'node:path'
 
 vi.mock('electron', () => ({
   app: {
-    getPath: vi.fn((k: string) => `/tmp/pipiclaw-calibration-${k}`),
-    getName: () => 'pipiclaw',
+    getPath: vi.fn((k: string) => `/tmp/newworld-calibration-${k}`),
+    getName: () => 'newworld',
     getVersion: () => '4.5.0',
   },
   safeStorage: {
@@ -62,7 +62,7 @@ import {
 const DATASETS = ['panel', 'mt_bench']
 
 /** 复算哪一份裁决(默认全部) */
-const VERDICTS_ENV = process.env.PIPICLAW_CALIBRATION_VERDICTS
+const VERDICTS_ENV = process.env.NW_CALIBRATION_VERDICTS
 
 function loadItems(): CalibrationItem[] {
   const all: CalibrationItem[] = []
@@ -102,7 +102,7 @@ describe('M4-V 顺序一致性 / 长度基线 离线复算', () => {
       return ctx.skip(
         '[SKIP] 需要 .tmp-calibration/ 下的标注集与裁决文件 —— '
         + '先跑 python scripts/calibration/prepare_datasets.py,'
-        + '再跑 PIPICLAW_CALIBRATION=1 npx vitest run tests/integration/judge-calibration-live.test.ts',
+        + '再跑 NW_CALIBRATION=1 npx vitest run tests/integration/judge-calibration-live.test.ts',
       )
     }
 

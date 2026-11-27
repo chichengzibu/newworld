@@ -8,7 +8,7 @@
  *     --id my-skill \
  *     --name "My Skill" \
  *     --desc "一句话说明" \
- *     --author "PiPiClaw Team" \
+ *     --author "New World Team" \
  *     --category ai \
  *     --tags "web,summary" \
  *     --version 1.0.0 \
@@ -22,7 +22,7 @@
  * zipUrl 默认相对路径 "<id>-<version>.zip"; 发布到远端后把整个 registry 目录
  * 托管到 GitHub Release / raw / 任意 CDN, 用户端填基址即可拉取。
  *
- * 生产: 用自己的 Ed25519 私钥替换 --key, 并确保 App 端 PIPICLAW_CLAWHUB_PUBKEY
+ * 生产: 用自己的 Ed25519 私钥替换 --key, 并确保 App 端 NW_CLAWHUB_PUBKEY
  * (或 userData/clawhub-pubkey.txt) 持有对应公钥。内置开发密钥仅用于联调。
  */
 import fs from 'node:fs'
@@ -57,16 +57,16 @@ const skillDir = args.skill
 const id = args.id
 const name = args.name
 const desc = args.desc || ''
-const author = args.author || 'PiPiClaw Team'
+const author = args.author || 'New World Team'
 const category = args.category || 'ai'
 const tags = (args.tags || '').split(',').map((t) => t.trim()).filter(Boolean)
 const version = args.version || '1.0.0'
 const registryRoot = path.resolve(args.registry || './registry-out')
-// 私钥顺序: --key 参数 > PIPICLAW_CLAWHUB_KEY 环境变量 > 旧位置(scripts/)。
-// 私钥已移出工作区到 C:\Users\Administrator\.pipiclaw-secrets\,
-// 由用户级环境变量 PIPICLAW_CLAWHUB_KEY 指向(见 setx,新 shell 生效)。
+// 私钥顺序: --key 参数 > NW_CLAWHUB_KEY 环境变量 > 旧位置(scripts/)。
+// 私钥已移出工作区到 C:\Users\Administrator\.newworld-secrets\,
+// 由用户级环境变量 NW_CLAWHUB_KEY 指向(见 setx,新 shell 生效)。
 const keyPath = path.resolve(
-  args.key || process.env.PIPICLAW_CLAWHUB_KEY || path.join(__dirname, 'clawhub-dev-ed25519.key'),
+  args.key || process.env.NW_CLAWHUB_KEY || path.join(__dirname, 'clawhub-dev-ed25519.key'),
 )
 
 if (!skillDir || !id || !name) {
@@ -78,8 +78,8 @@ if (!fs.existsSync(skillDir) || !fs.statSync(skillDir).isDirectory()) {
 if (!fs.existsSync(keyPath)) {
   fail(
     `私钥不存在: ${keyPath}\n` +
-      `  优先传 --key <路径>,或设置环境变量 PIPICLAW_CLAWHUB_KEY 指向私钥文件 ` +
-      `(本机已移出工作区: C:\\Users\\Administrator\\.pipiclaw-secrets\\clawhub-dev-ed25519.key)`,
+      `  优先传 --key <路径>,或设置环境变量 NW_CLAWHUB_KEY 指向私钥文件 ` +
+      `(本机已移出工作区: C:\\Users\\Administrator\\.newworld-secrets\\clawhub-dev-ed25519.key)`,
   )
 }
 
@@ -106,7 +106,7 @@ const zipName = `${id}-${version}.zip`
 fs.writeFileSync(path.join(registryRoot, zipName), zipBuf)
 
 const indexPath = path.join(registryRoot, 'index.json')
-let index = { registry: 'pipiclaw-clawhub', version: 1, updatedAt: Date.now(), skills: [] }
+let index = { registry: 'nw-clawhub', version: 1, updatedAt: Date.now(), skills: [] }
 if (fs.existsSync(indexPath)) {
   try {
     index = JSON.parse(fs.readFileSync(indexPath, 'utf-8'))

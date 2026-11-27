@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - Channel / DingTalkChannel (W7.2)
+ * New World - Channel / DingTalkChannel (W7.2)
  *
  * 钉钉 IM 通道(真实 fetch 实现)。
  * API: https://oapi.dingtalk.com/gettoken (appKey + appSecret)
@@ -103,7 +103,10 @@ export class DingTalkChannel implements Channel {
     if (this.accessToken && this.accessTokenExpiresAt > Date.now() + 60_000) {
       return this.accessToken
     }
-    const url = `https://oapi.dingtalk.com/gettoken?appkey=${encodeURIComponent(config.appId)}&appsecret=${encodeURIComponent(config.appSecret)}`
+    // IM 真连通:UI 表单保存的是 appKey(钉钉术语)，老配置用 appId —— 双向兼容
+    const appKey = config.appKey ?? config.appId ?? ''
+    const appSecret = config.appSecret ?? config.corpSecret ?? ''
+    const url = `https://oapi.dingtalk.com/gettoken?appkey=${encodeURIComponent(appKey)}&appsecret=${encodeURIComponent(appSecret)}`
     const res = await fetch(url, { method: 'GET' })
     if (!res.ok) return null
     const data = (await res.json()) as { errcode?: number; errmsg?: string; access_token?: string; expires_in?: number }

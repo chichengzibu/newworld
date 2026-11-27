@@ -1,6 +1,6 @@
-# PiPiClaw Retro & Plan 索引
+# New World Retro & Plan 索引
 
-> 本文件统一索引 PiPiClaw 项目所有的 retro(阶段回顾)、plan(实施计划)、spec(设计文档),方便快速定位历史决策和实现路径。
+> 本文件统一索引 New World 项目所有的 retro(阶段回顾)、plan(实施计划)、spec(设计文档),方便快速定位历史决策和实现路径。
 
 ## Retros(阶段回顾)
 
@@ -22,7 +22,7 @@
 
 ## Plans(实施计划)
 
-- [v2 plan](superpowers/plans/2026-07-10-pipiclaw-v2-plan.md) — v2 总体路线图
+- [v2 plan](superpowers/plans/2026-07-10-newworld-v2-plan.md) — v2 总体路线图
 - [W2-W12 subagent plans](superpowers/plans/2026-07-10-w*-subagent-task.md) — 各周子任务分解
 - [real-env-validation 3 plans](superpowers/plans/2026-07-16-real-env-validation-3-plans.md) — A/B/C 三计划合集
 - [v2.0.0 real-env validation guide](superpowers/plans/2026-07-16-v2.0.0-real-env-validation-guide.md) — 真实环境验证操作手册
@@ -34,7 +34,7 @@
 
 ## Specs(设计文档)
 
-- [v2 design](superpowers/specs/2026-07-10-pipiclaw-v2-design.md) — v2 总体设计
+- [v2 design](superpowers/specs/2026-07-10-newworld-v2-design.md) — v2 总体设计
 - [A demo validation design](superpowers/specs/2026-07-16-a-5demo-real-env-validation-design.md) — A 5 demo 设计
 - [B IM integration design](superpowers/specs/2026-07-16-b-real-im-account-integration-design.md) — B IM 集成设计
 - [C sandbox validation design](superpowers/specs/2026-07-16-c-sandbox-validation-design.md) — C 沙盒验证设计

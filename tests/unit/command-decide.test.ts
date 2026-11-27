@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - #002-v3 命令咽喉 + 四钉子 + MCP 窄项 (T1-T12)
+ * New World - #002-v3 命令咽喉 + 四钉子 + MCP 窄项 (T1-T12)
  *
  * 策略:
  *   - T1-T5  纯逻辑级 (constants: 集合迭代 / 归一化 / find/secrets 例外 / context 规则)
@@ -138,6 +138,8 @@ describe('T4: secrets 段感知 (禁裸子串)', () => {
   it('命中: 任一路径段 == 表项 → deny', () => {
     expect(decideCommand('cat', ['/home/user/.ssh/id_rsa']).kind).toBe('deny')
     expect(decideCommand('head', ['C:\\Users\\admin\\.aws\\credentials']).kind).toBe('deny')
+    expect(decideCommand('cat', ['/home/user/.newworld-secrets']).kind).toBe('deny')
+    // 旧目录名在本机仍存在(真实私钥),guard 必须继续覆盖
     expect(decideCommand('cat', ['/home/user/.pipiclaw-secrets']).kind).toBe('deny')
     expect(decideCommand('cat', ['clawhub-dev-ed25519.key']).kind).toBe('deny')
   })

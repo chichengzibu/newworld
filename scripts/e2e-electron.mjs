@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * PiPiClaw — Electron e2e 启动器（跨平台）
+ * New World — Electron e2e 启动器（跨平台）
  * ═══════════════════════════════════════════════════════════════════════
  * 【为什么需要这个文件】
  * 原脚本是 `"test:e2e:electron": "E2E_ELECTRON=1 playwright test --reporter=line"`。

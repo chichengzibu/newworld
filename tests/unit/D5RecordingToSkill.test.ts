@@ -5,7 +5,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 vi.mock('electron', () => ({
-  app: { getPath: vi.fn(() => '/tmp/pipiclaw-d5-test') },
+  app: { getPath: vi.fn(() => '/tmp/newworld-d5-test') },
 }))
 
 const mockVision = {

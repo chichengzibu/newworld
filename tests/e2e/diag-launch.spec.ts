@@ -23,7 +23,7 @@ test('diagnose electron launch', () => {
     const app = await electron.launch({
       args: [mainEntry, '--no-sandbox'],
       cwd: repoRoot,
-      env: { ...process.env, PIPICLAW_E2E: '1' },
+      env: { ...process.env, NW_E2E: '1' },
       timeout: 30_000,
     })
 

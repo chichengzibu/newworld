@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - RetryPolicy / ErrorClassifier / CircuitBreaker 测试 (M3-B)
+ * New World - RetryPolicy / ErrorClassifier / CircuitBreaker 测试 (M3-B)
  *
  * 【设计依据】业界调研:3 次重试捕获 97.3% 瞬时故障;full jitter 是并发
  * 场景下的最优退避(AWS 架构博客);熔断器三态 closed→open→half_open。

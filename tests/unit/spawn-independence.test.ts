@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - #005 spawn 章 (R1 独立实例 + R2 深度封顶 + R3 单例保留 + 预算隔离 + 快照溯源)
+ * New World - #005 spawn 章 (R1 独立实例 + R2 深度封顶 + R3 单例保留 + 预算隔离 + 快照溯源)
  *
  * ═══ 被测机制（LlmAgentBrain.spawn 重写 + run 预算/快照扩展）═══
  *   R1: spawn 返回【新 LlmAgentBrain 实例】(独立 tools/runs), 禁 `brain: this` 自引用 (旧 stub 债已删)
@@ -56,7 +56,7 @@ vi.mock('../../electron/llm/LlmClient', () => ({
 
 import { LlmAgentBrain, LlmAgentBrainEvents } from '../../electron/agent/LlmAgentBrain'
 import { BUILTIN_TOOLS } from '../../electron/agent/tools'
-import { installToolConfirmation } from '../unit/auto-confirm'
+import { installToolConfirmation, activatePermissiveForTest } from '../unit/auto-confirm'
 
 /**
  * 【M2-B】工具权限门测试桥 —— 本文件的验证主题不是权限,只是顺带调了
@@ -71,6 +71,10 @@ const CONFIRM_ALL = installToolConfirmation();
 
 
 describe('#005 spawn 章 (R1 独立 + R2 深度 + 预算 + 快照溯源)', () => {
+  beforeEach(() => {
+    activatePermissiveForTest() // v4.8: 本文件验证 spawn 隔离，非权限主题，显式放行 RBAC
+  })
+
   it('SP-1 独立性: spawn 返回新实例 (非 brain:this); 子/父 tools 同源 BUILTIN_TOOLS; runs Map 各自独立', async () => {
     const parent = LlmAgentBrain.getInstance()
     const child = await parent.spawn({ instruction: 'sub task' }, { parentRunId: 'run-p1' })
@@ -136,7 +140,7 @@ describe('#005 spawn 章 (R1 独立 + R2 深度 + 预算 + 快照溯源)', () =>
     unsub = LlmAgentBrainEvents.subscribe((e) => {
       if (e && (e as { type: string }).type === 'run_error' && /budget/i.test((e as { error?: string }).error ?? '')) gotBudgetErr = true
     })!
-    let iterations = 0
+    const iterations = 0
     try {
       const r = await (parent as LlmAgentBrain).run('p', { maxTokens: 5, conversationId: 'c' } as never)
       expect(r.content).not.toBe('') // 降级到 final (最后 assistant content)

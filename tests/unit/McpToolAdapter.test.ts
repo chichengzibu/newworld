@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - MCP 工具适配器测试 (M3-A)
+ * New World - MCP 工具适配器测试 (M3-A)
  *
  * 【为什么这些断言重要】
  * MCP 工具接进 LLM 工具表,意味着第三方 server 提供的 schema 会直接

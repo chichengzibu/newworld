@@ -179,22 +179,13 @@ describe('P5-UX: AppStore 主题系统 (light/dark/system)', () => {
     expect(store.initStatus).toBe('初始化失败')
   })
 
-  it('markFirstLaunchComplete → isFirstLaunch=false + showGuide=false', async () => {
+  // v4.8：首次引导已移除，showGuide/openGuide/closeGuide 一并删除；
+  // 仅保留 isFirstLaunch + markFirstLaunchComplete 供未来空态/提示使用。
+  it('markFirstLaunchComplete → isFirstLaunch=false', async () => {
     const store = useAppStore()
     store.isFirstLaunch = true
-    store.showGuide = true
     await store.markFirstLaunchComplete()
     expect(store.isFirstLaunch).toBe(false)
-    expect(store.showGuide).toBe(false)
-  })
-
-  it('openGuide / closeGuide', () => {
-    const store = useAppStore()
-    store.showGuide = false
-    store.openGuide()
-    expect(store.showGuide).toBe(true)
-    store.closeGuide()
-    expect(store.showGuide).toBe(false)
   })
 
   it('setLanguage', () => {

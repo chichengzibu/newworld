@@ -1,5 +1,5 @@
 /**
- * PiPiClaw — 测试辅助:自动确认执行计划 (M1-D)
+ * New World — 测试辅助:自动确认执行计划 (M1-D)
  *
  * 【为什么需要】
  * M1-D 给 TaskExecutor 链路加了执行确认闸门:LLM 生成步骤后不再立即执行,
@@ -18,6 +18,7 @@
  */
 import { vi } from 'vitest'
 import { BrowserWindow } from 'electron'
+import { PermissionManager } from '../../electron/permissions/PermissionManager'
 
 let restore: (() => void) | null = null
 
@@ -70,7 +71,7 @@ export function uninstallAutoConfirm(): void {
  * 贯穿、spawn-independence 验证快照溯源)关心的是自己的主题,不是权限。
  *
  * 【设计约束:纯函数,不写全局】
- * 早期版本用 globalThis.__pipiclawToolConfirm 让 run() 自动拾取 ——
+ * 早期版本用 globalThis.__newworldToolConfirm 让 run() 自动拾取 ——
  * 那等于在生产代码里留了一个可被误用的旁路(与
  * LlmAgentBrain 的 preApprovedToolConfirm 不同,那个是显式入参)。
  * 已废弃。确认桥只能由调用方在 run({ requestToolConfirmation }) 显式传入,
@@ -99,7 +100,7 @@ export function installToolConfirmation(
  * 否则验证不到目标逻辑。
  *
  * 【为什么是函数返回值而不是全局开关】
- * 曾实现为 globalThis.__pipiclawHeadlessExempt —— 那是把安全边界
+ * 曾实现为 globalThis.__newworldHeadlessExempt —— 那是把安全边界
  * 建立在"没人会写这行代码"的约定上,任何人加一行赋值就能绕过 fail-safe。
  * 已废弃。改为显式注入,与 requestToolConfirmation 同构:
  * 生产代码路径上不存在任何可被误用的全局旁路。
@@ -111,4 +112,28 @@ export function installToolConfirmation(
  */
 export function headlessPreApproval(): { preApprovedToolConfirm: true } {
   return { preApprovedToolConfirm: true as const }
+}
+
+/**
+ * 【v4.8 RBAC】为非权限主题的测试激活「无限制模式」权限集。
+ *
+ * 背景：v4.8 起 Agent 工具主链路（LlmAgentBrain → ToolGate）注入了 RBAC，
+ * 用户在「设置 → 权限管理」的配置会真正拦工具。而 PermissionConfig 首次
+ * 安装默认是 safe（filesystem=read / shell=none），写工具（Edit/Bash）会被拒。
+ * 这本身是**正确的产品行为**（用户要的就是权限管理真生效），但老测试
+ * （run-checkpoint / spawn-independence / context-propagation / agent-brain-poc）
+ * 的主题不是权限，只是顺带调了写工具 —— 它们用确认桥表达「授权写操作」，
+ * 但 RBAC 是独立于确认桥的另一道门，确认桥同意也拦。
+ *
+ * 【设计约束：不改生产默认值】不在生产代码里放宽 safe，也不留全局旁路。
+ * 改为测试侧显式声明「本测试的用户已选无限制模式」，与 installToolConfirmation
+ * 同构。护栏同前：主题为安全/权限的测试【禁止】调用本 helper。
+ */
+export function activatePermissiveForTest(): void {
+  try {
+    // 顶层静态引入（同步），避免异步激活与用例执行竞态
+    const sets = PermissionManager.getInstance().getAllPermissionSets()
+    const permissive = sets.find((s) => s.template === 'permissive') ?? sets.find((s) => s.id === 'preset_permissive')
+    if (permissive) PermissionManager.getInstance().setActivePermissionSet(permissive.id)
+  } catch { /* 权限模块未就绪则忽略，由 ToolGate 原档位判定 */ }
 }

@@ -1,5 +1,5 @@
 <!--
-  PiPiClaw - Skeleton 加载占位组件
+  New World - Skeleton 加载占位组件
 
   用法:
     <Skeleton type="text" :lines="3" />

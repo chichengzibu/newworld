@@ -1,5 +1,5 @@
 /**
- * PiPiClaw — M4-D 技能效用测试
+ * New World — M4-D 技能效用测试
  * ═══════════════════════════════════════════════════════════════
  * 【这一批回答的问题】
  * 「这个技能到底有没有用?」
@@ -26,7 +26,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 vi.mock('electron', () => ({
-  app: { getPath: vi.fn((k: string) => `/tmp/pipiclaw-m4d-${k}`) },
+  app: { getPath: vi.fn((k: string) => `/tmp/newworld-m4d-${k}`) },
 }))
 
 vi.mock('electron-log', () => ({

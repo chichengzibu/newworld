@@ -1,11 +1,11 @@
-# PiPiClaw 文档中心
+# New World 文档中心
 
-> 这是 PiPiClaw 项目所有文档的统一入口。仓库内文档目录,GitHub Pages 可直接渲染。
+> 这是 New World 项目所有文档的统一入口。仓库内文档目录,GitHub Pages 可直接渲染。
 > GA 前如有需要再迁到 Docusaurus / VitePress(本目录结构与 frontmatter 已是兼容写法)。
 
 ## 📖 用户文档
 
-面向终端用户 — 想用 PiPiClaw 解决问题的人从这里开始。
+面向终端用户 — 想用 New World 解决问题的人从这里开始。
 
 - [新手入门](user-guide/getting-started.md) — 5 分钟快速上手
 - [用户手册](user-guide/user-guide.md) — 8 个能力域的 How-to
@@ -14,7 +14,7 @@
 
 ## 🛠 开发者文档
 
-面向贡献者 / 集成方 — 想理解或扩展 PiPiClaw 内部实现的人。
+面向贡献者 / 集成方 — 想理解或扩展 New World 内部实现的人。
 
 - [架构总览](architecture/overview.md) — 技术栈 + 模块图
 - [IPC 协议](architecture/ipc.md) — 主进程 ↔ 渲染端 100+ handler 全表

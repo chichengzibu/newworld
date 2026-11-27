@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - BashTool (M1 v0.1 + #002-v3)
+ * New World - BashTool (M1 v0.1 + #002-v3)
  *
  * 跑命令, 跟 ClaudeCode Bash tool 协议对齐:
  *   args: { command: string, args?: string[], cwd?: string, timeout_ms?: number }

@@ -1,4 +1,4 @@
-# PiPiClaw 记忆持久化层 (#006)
+# New World 记忆持久化层 (#006)
 
 本目录实现 **"重启后记得你"** — 文本真源与向量缓存统一持久化。
 设计依据: `docs/#006-memory-persistence-design.md` (B.1-B.7, N1-N3, D5)

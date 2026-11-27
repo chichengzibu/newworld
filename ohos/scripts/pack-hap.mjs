@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * PiPiClaw - 调用鸿蒙工具链把壳工程打成 HAP
+ * New World - 调用鸿蒙工具链把壳工程打成 HAP
  *
  * 现状:本机未安装 HarmonyOS SDK / DevEco Studio / 官方 OHOS Electron runtime,
  * 因此本脚本只做环境探测 + 明确失败,**不伪造成功**

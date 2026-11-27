@@ -1,6 +1,8 @@
 /**
- * PiPiClaw - 聊天类型定义
+ * New World - 聊天类型定义
  */
+
+import type { ProducedArtifact } from '../agent/tools/Tool';
 
 export type MessageRole = 'user' | 'assistant' | 'system';
 /**
@@ -19,6 +21,10 @@ export interface ChatMessage {
   role: MessageRole;
   content: string;
   thinking?: string;
+  /** 【P2】provider 真实回传的思考 token 数；缺失时不落字段，UI 不展示 */
+  thinkingTokens?: number;
+  /** 本轮 agent 真实落盘的成品；落消息而非只发事件，刷新后仍可打开 */
+  artifacts?: ProducedArtifact[];
   timestamp: number;
   status: MessageStatus;
   modelId?: string;

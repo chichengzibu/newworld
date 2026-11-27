@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - 工具权限门 (M2-B)
+ * New World - 工具权限门 (M2-B)
  *
  * 【要修的安全洞】
  * EditTool.ts:56 标注了 `requiresPermission: true`,但这个字段在整个 run loop
@@ -36,7 +36,25 @@ export interface ToolGateDecision {
   prompt?: string
 }
 
+/**
+ * RBAC 判定结果（由主进程注入，ToolGate 本身不直接依赖 PermissionManager）。
+ * - allowed=false → 工具被当前激活权限集禁止，直接 deny
+ * - 返回 null → 没有配置/没有激活权限集，交回 ToolGate 原有档位判定
+ */
+export interface ToolRbacDecision {
+  allowed: boolean
+  reason: string
+}
+
 export interface ToolGateHooks {
+  /**
+   * 【v4.8】RBAC 能力级检查（用户在「设置 → 权限管理」选的安全/标准/全量）。
+   * 按工具名映射到 category/action，不传 resource —— 避免把 sandbox/workspace
+   * 路径误判为不在 safe 模板的 $HOME/Documents 白名单里。
+   * 注入回调而非在 ToolGate 内 import PermissionManager，是为了让单测(node 环境、
+   * 无 electron userData)能独立验证档位逻辑；生产由 LlmAgentBrain 注入真实判定。
+   */
+  rbacCheck?: (toolName: string) => ToolRbacDecision | null
   /**
    * 请求用户确认。仅 contextKind==='ui' 时才会被调用 ——
    * headless / scheduler / im_inbound 无法弹窗,一律按拒绝处理
@@ -70,6 +88,13 @@ const DEFAULT_PERMISSIONS: Record<string, ToolPermission> = {
   //   症状:「技能被应用」这件事在数据里根本不存在(M4-D 的信号源),
   //   且只读操作被当成有副作用,徒增打断。
   load_skill: 'auto',
+  // 【v4.8】联网搜索是只读网络检索，无本地副作用。是否可用由 ChatInput 的
+  // 「联网搜索」开关决定（开关关闭时工具根本不进入 LLM 的 tools schema），
+  // 这里只需保证开关开启后不会被档位默认 'confirm' 卡住。
+  web_search: 'auto',
+  // 【P3】委派本身不直接读写文件:它只派生子代理,子代理的每次工具调用仍走各自权限门,
+  // 因此不构成提权。若标 confirm,headless/定时任务会因无人确认而整体拒绝编排。
+  parallel_subtasks: 'auto',
   // 写:需要用户知情
   Edit: 'confirm',
   Write: 'confirm',
@@ -156,6 +181,28 @@ export class ToolGate {
       return { allowed: false, permission: 'deny', reason: `工具 ${name} 被标记为禁止执行` }
     }
 
+    // ①bis 【v4.8】RBAC 能力级检查 —— 用户配置的权限集真正生效的地方。
+    // 放在档位判定之前：即使某工具档位是 auto(如 Bash/Read)，只要用户在
+    // 「设置 → 权限管理」把对应能力关掉(safe 模板 shell=none / filesystem=read)，
+    // 就必须拒绝。只判能力级别、不传 resource，避免路径白名单误伤 workspace。
+    if (hooks?.rbacCheck) {
+      let rbac: ToolRbacDecision | null = null
+      try {
+        rbac = hooks.rbacCheck(name) ?? null
+      } catch (e) {
+        // 判定回调异常 → fail-safe 拒绝(与确认桥异常一致)
+        return {
+          allowed: false,
+          permission: 'deny',
+          reason: `权限判定异常,已拒绝(${(e as Error).message})`,
+        }
+      }
+      if (rbac && !rbac.allowed) {
+        log.warn(`ToolGate: RBAC 拒绝 ${name} —— ${rbac.reason}`)
+        return { allowed: false, permission: 'deny', reason: `权限集已禁止:${rbac.reason}` }
+      }
+    }
+
     // ② 权限档位:metadata.requiresPermission 为真 → 至少 confirm
     //
     // 【口径说明 — 别只改一半】
@@ -215,7 +262,7 @@ export class ToolGate {
       // 无 UI 上下文 → 无法获得用户确认 → 拒绝(不默认放行)。
       //
       // 【为什么不留"豁免开关"】
-      // 曾考虑过 globalThis.__pipiclawHeadlessExempt 之类的测试后门,
+      // 曾考虑过 globalThis.__newworldHeadlessExempt 之类的测试后门,
       // 但那是把安全边界建立在"没人会写这行代码"的约定上 ——
       // 任何人加一行赋值就能绕过 fail-safe。已废弃该方向。
       // 需要在非 UI 上下文预授权的,必须由调用方【显式传参】
@@ -283,6 +330,13 @@ function buildPrompt(name: string, args: Record<string, unknown>): string {
   if (name === 'Bash') {
     const cmd = typeof args.command === 'string' ? args.command : '(未提供)'
     return `即将执行命令:${cmd}`
+  }
+  // create_artifact 的路径由工具自己固定在 userData/workspace，args 里只有文件名；
+  // 提示里把「文件类型 + 文件名」说清楚，用户才知道自己确认的是哪份成品。
+  if (name === 'create_artifact') {
+    const type = typeof args.type === 'string' ? args.type : '未知类型'
+    const file = typeof args.filename === 'string' ? args.filename : '未命名'
+    return `即将生成成品文件:${file}（${type}）`
   }
   return `即将使用工具 ${name}${p ? `:${p}` : ''}`
 }

@@ -5,63 +5,17 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
 /**
- * 走完首次启动引导（4 步 el-dialog）。
+ * 【v4.8 起为空兼容】首次启动引导已按用户决策整体移除（FirstLaunchGuide.vue
+ * 不再挂载）。保留此导出,让既有 spec 的调用点无需改动；现在直接返回 false。
  *
- * 【为什么必须走】首次启动引导是 `close-on-click-modal=false` +
- * `close-on-press-escape=false` + `show-close=false` —— **没有任何快捷关闭方式**,
- * 只能一步步走完。用户不点完,整个界面(侧栏/标题栏/输入区)都被遮罩挡住,
- * 任何点击都会超时。
+ * 历史：这里曾负责走完 4 步 el-dialog + 隐藏遮挡「新建」按钮的欢迎 toast。
+ * 引导移除后,首屏直接进入 /chat,不会再有遮罩或 toast。若未来捡回来,把下面
+ * 的兼容实现换成真实走引导逻辑即可。
  *
- * 【为什么现在才遇到】userData 隔离修好之前(e2e 一直写真实 %APPDATA%),
- * 引导早就被手动关过了 —— 于是"新用户第一次打开"这条路径**从未被测过**。
- *
- * @returns 是否真的走过引导(false = 没出现,已跳过)
+ * @returns 恒为 false（引导不存在）
  */
-export async function completeFirstLaunchGuide(window: Page): Promise<boolean> {
-  const guide = window.locator('.first-launch-guide')
-  const visible = await guide.isVisible().catch(() => false)
-  if (!visible) return false
-
-  // 步骤 0(欢迎) → 下一步
-  const nextBtn = window.getByRole('button', { name: /下一步/ })
-  if (await nextBtn.count()) await nextBtn.first().click().catch(() => {})
-  await window.waitForTimeout(200)
-
-  // 步骤 1(选模型) → 先选一张卡片,「下一步」才会出现
-  const modelCard = window.locator('.model-option')
-  if (await modelCard.count()) await modelCard.first().click().catch(() => {})
-  await window.waitForTimeout(200)
-  if (await nextBtn.count()) await nextBtn.first().click().catch(() => {})
-  await window.waitForTimeout(200)
-
-  // 步骤 2(权限) → 完成配置
-  const finishCfg = window.getByRole('button', { name: /完成配置/ })
-  if (await finishCfg.count()) await finishCfg.first().click().catch(() => {})
-  await window.waitForTimeout(200)
-
-  // 步骤 3(完成) → 开始使用
-  const start = window.getByRole('button', { name: /开始使用/ })
-  if (await start.count()) await start.first().click().catch(() => {})
-  await window.waitForTimeout(600)
-
-  // 【关键】引导结束后会弹一个「欢迎使用 PiPiClaw!」的 toast,
-  // 它**正好盖在侧栏「新建」按钮上**(实测截图)→ 之后的点击被 toast 吃掉,
-  // 表现为"点了新建但会话没建出来",且**随机**(取决于 toast 是否还在)。
-  //
-  // 【M4-S】等它自己消失要 ~3s —— 每个测试都等,全量要多花好几分钟。
-  // 而 toast 只是浮在 DOM 上的一个元素,**直接移除**即可(等价于它消失)。
-  await window.locator('.el-message').first()
-    .waitFor({ state: 'attached', timeout: 5_000 })
-    .catch(() => {})
-  await window.evaluate(() => {
-    // 【用隐藏而不是移除】移除 DOM 节点会让 Element Plus 到点自己 unmount 时
-    // 可能对已脱离的节点报错;隐藏则完全不动它的生命周期,只是不挡点击。
-    document.querySelectorAll('.el-message').forEach((el) => {
-      ;(el as HTMLElement).style.display = 'none'
-    })
-  })
-  await window.waitForTimeout(100)
-  return true
+export async function completeFirstLaunchGuide(_window: Page): Promise<boolean> {
+  return false
 }
 
 /**
@@ -88,20 +42,86 @@ export async function completeFirstLaunchGuide(window: Page): Promise<boolean> {
  */
 
 /**
- * 侧栏导航 —— v4.4 改版后侧栏是 **icon-only rail**:
- *   `nav.sidenav > a.nav-icon`(不再是旧版的 `a.nav-item` 文本列表)
- * 统一走这个 helper,免得每个 spec 各写一份选择器、各错一次。
+ * 侧栏导航 —— v4.4 起侧栏是 **icon-only rail**:`nav.sidenav > a.nav-icon`。
+ *
+ * v4.7 四层信息架构:
+ *   · rail    → 3 个工作对象 + 底部设置(`a.nav-icon`,选择器不变)
+ *   · 更多    → 3 个内容浏览项(`a.nav-more-item`)
+ *   · 设置页  → 4 个配置入口(`a.settings-link`) + 内嵌模型 tab
+ *   · 输入区  → 语音能力(`.input-tool-btn`)；联网搜索已改为「给模型用的开关」
+ * 本 helper 按真实用户路径依次尝试 rail → 输入区 → 更多 → 设置页配置中心,
+ * 这样既有 spec 无需改动,新架构的可达性也由同一条路径验证。
  */
+// v4.8：/search 的 ChatInput 按钮已从「跳转手动搜索页」改为「模型联网开关」，
+// 点它不会改 hash。不能再把它当跳转型输入工具，否则 gotoBySideNav 会等 URL 超时。
+const INPUT_TOOL_PATHS = ['/voice']
+/** 独立路由页：入口在设置页内建 tab、命令面板或直达 hash，导航里不重复列出 */
+const DIRECT_ROUTE_PATHS = ['/models', '/search']
+
 export async function gotoBySideNav(window: Page, path: string): Promise<void> {
-  const link = window.locator(`nav.sidenav a.nav-icon[href$="#${path}"]`).first()
-  await link.waitFor({ state: 'visible', timeout: 15_000 })
-  await link.click()
+  const direct = window.locator(`nav.sidenav a.nav-icon[href$="#${path}"]`).first()
+  if (await direct.count() > 0) {
+    await direct.waitFor({ state: 'visible', timeout: 15_000 })
+    await direct.click()
+  } else if (INPUT_TOOL_PATHS.includes(path)) {
+    // 输入能力在 ChatInput 工具条,既不在 rail 也不在更多/设置页
+    await gotoViaInputTool(window, path)
+  } else if (DIRECT_ROUTE_PATHS.includes(path)) {
+    // /models 独立页：配置中心已去重（模型管理是设置页内建 tab），走直达路由
+    await gotoRoute(window, path)
+  } else if (!(await tryGotoByMore(window, path))) {
+    await gotoViaSettings(window, path)
+  }
   await window.waitForURL(new RegExp(`#${path.replace('/', '\\/')}`), { timeout: 10_000 })
+}
+
+/** 通过 ChatInput 工具条进入输入能力页面(v4.7 新增) */
+export async function gotoViaInputTool(window: Page, path: string): Promise<void> {
+  await gotoRoute(window, '/chat')
+  const tool = window.locator(`.input-tool-btn[data-path="${path}"]`).first()
+  await tool.waitFor({ state: 'visible', timeout: 10_000 })
+  await tool.click()
+}
+
+/** 尝试从「更多」面板进入;面板里没有该路径就收起并返回 false */
+async function tryGotoByMore(window: Page, path: string): Promise<boolean> {
+  const trigger = window.locator('[data-testid="nav-more-trigger"]')
+  await trigger.waitFor({ state: 'visible', timeout: 10_000 })
+  const panel = window.locator('[data-testid="nav-more-panel"]')
+  if (!(await panel.isVisible().catch(() => false))) {
+    await trigger.click()
+  }
+  await panel.waitFor({ state: 'visible', timeout: 8_000 })
+  const item = panel.locator(`a.nav-more-item[href$="#${path}"]`).first()
+  if (await item.count() === 0) {
+    await window.keyboard.press('Escape')
+    await panel.waitFor({ state: 'hidden', timeout: 8_000 }).catch(() => {})
+    return false
+  }
+  await item.waitFor({ state: 'visible', timeout: 8_000 })
+  await item.click()
+  // 点完应自动收起,不残留浮层遮住页面
+  await panel.waitFor({ state: 'hidden', timeout: 8_000 }).catch(() => {})
+  return true
+}
+
+/** 通过「更多」面板进入内容浏览页面(v4.6 新增,v4.7 收敛为 3 项) */
+export async function gotoByMore(window: Page, path: string): Promise<void> {
+  const ok = await tryGotoByMore(window, path)
+  if (!ok) throw new Error(`「更多」面板里没有入口 ${path}`)
+}
+
+/** 通过设置页「配置中心」进入配置类页面(v4.7 新增) */
+export async function gotoViaSettings(window: Page, path: string): Promise<void> {
+  await gotoRoute(window, '/settings')
+  const link = window.locator(`a.settings-link[href$="#${path}"]`).first()
+  await link.waitFor({ state: 'visible', timeout: 10_000 })
+  await link.click()
 }
 
 /**
  * 直接跳路由 —— 用于**侧栏没有入口**的页面(如 /clawhub 只在命令面板与
- * ModelCompare 里有入口)。比点不存在的导航项诚实。
+ * 「更多」面板里有入口)。比点不存在的导航项诚实。
  */
 export async function gotoRoute(window: Page, path: string): Promise<void> {
   await window.evaluate((p: string) => { window.location.hash = p }, path)
@@ -168,44 +188,49 @@ export async function createConversationViaUi(window: Page): Promise<void> {
 }
 
 /**
- * 在模型选择器里选 provider + model(两个 el-select,第一个是 provider)。
+ * 在输入卡的两个 pill 里选 provider + model。
+ *
+ * 【v4.6 修】旧实现找 `.model-selector .el-select` —— 那是**已删除的死 CSS**
+ * (Chat.vue 里留了注释:「输入区已抽到 ChatInput.vue」),真实结构是
+ * `.provider-pill` / `.model-pill` 两个 el-select。旧 helper 在
+ * `providerSelect.click()` 上必等 30s 超时(实测 ER1/ER2 全挂)。
+ * 现按真实 DOM 选,并用 :visible 过滤 Teleport 出来、可能同时存在的多个下拉。
  */
 export async function selectProviderAndModel(
   window: Page,
   providerText: string,
   modelText: string,
 ): Promise<void> {
-  const providerSelect = window.locator('.model-selector .el-select').first()
-  await providerSelect.click()
-  await window.waitForTimeout(500)
-  const providerOpt = window.locator(`.el-select-dropdown__item:has-text("${providerText}")`).first()
+  const providerPill = window.locator('.provider-pill').first()
+  await providerPill.waitFor({ state: 'visible', timeout: 15_000 })
+  await providerPill.click()
+  const providerOpt = window.locator(
+    `.el-select-dropdown__item:visible:has-text("${providerText}")`,
+  ).first()
+  await providerOpt.waitFor({ state: 'visible', timeout: 10_000 })
   await providerOpt.click()
 
-  // 【必须验证选中生效,不能盲等】选 provider 会走 `setCurrentModel(provider, '')`,
-  // 它先把 `lastProviderId` 同步设上、再 **await** 会话更新 —— 期间如果就去点 model,
-  // model 的 setter 读到的 provider 可能还是旧的 → 会话里只记了 model 没记 provider
-  // → 发送时报 "no LLM provider configured"(实测踩到)。
-  // 故:等选择框真的显示出该 provider 的名字,再动 model。
+  // 【必须验证选中生效】选 provider 会先同步 lastProviderId 再 await 会话更新,
+  // 期间就去点 model,setter 读到的可能是旧 provider → 发送时报
+  // "no LLM provider configured"。故等 pill 真显示选中值再动 model。
   await window.waitForFunction(
-    (text: string) => {
-      const sels = document.querySelectorAll('.model-selector .el-select')
-      return ((sels[0] as HTMLElement)?.textContent ?? '').includes(text)
-    },
+    (text: string) =>
+      (document.querySelector('.provider-pill')?.textContent ?? '').includes(text),
     providerText,
     { timeout: 15_000 },
   )
 
-  const modelSelect = window.locator('.model-selector .el-select').nth(1)
-  await modelSelect.waitFor({ state: 'visible', timeout: 15_000 })
-  await modelSelect.click()
-  await window.waitForTimeout(500)
-  const opt = window.locator(`.el-select-dropdown__item:has-text("${modelText}")`).first()
+  const modelPill = window.locator('.model-pill').first()
+  await modelPill.waitFor({ state: 'visible', timeout: 15_000 })
+  await modelPill.click()
+  const opt = window.locator(
+    `.el-select-dropdown__item:visible:has-text("${modelText}")`,
+  ).first()
+  await opt.waitFor({ state: 'visible', timeout: 10_000 })
   await opt.click()
   await window.waitForFunction(
-    (text: string) => {
-      const sels = document.querySelectorAll('.model-selector .el-select')
-      return ((sels[1] as HTMLElement)?.textContent ?? '').includes(text)
-    },
+    (text: string) =>
+      (document.querySelector('.model-pill')?.textContent ?? '').includes(text),
     modelText,
     { timeout: 15_000 },
   )
@@ -237,7 +262,7 @@ export const shouldRunElectronE2E = !!process.env.E2E_ELECTRON
  * 顺带把 profile 也做成每个测试独立 → 零额外成本,状态彻底不串。
  */
 function createUserDataDir(): string {
-  return mkdtempSync(join(tmpdir(), 'pipiclaw-e2e-'))
+  return mkdtempSync(join(tmpdir(), 'newworld-e2e-'))
 }
 
 export const test = base.extend<{
@@ -262,7 +287,7 @@ export const test = base.extend<{
       // 【M4-K 实测发现】`--user-data-dir` 必须**显式**放进 args ——
       // Playwright 的 `_electron.launch()` **不支持** `userDataDir` 选项
       // (只有 `launchPersistentContext` 有),之前 fixture 传的那个字段被**静默忽略** →
-      // 应用一直写真实的 %APPDATA%/pipiclaw,于是:
+      // 应用一直写真实的 %APPDATA%/newworld,于是:
       //   ① e2e 污染开发者的真实数据(P0-T0.4「每次测试用全新 userData」从未生效)
       //   ② 测试之间互相污染 —— 实测侧栏累积到 **192 个会话**,
       //      侧栏一次渲染 192 项 → DOM 持续重渲染 → Playwright 动作性检查超时 →
@@ -270,15 +295,21 @@ export const test = base.extend<{
       args: [mainEntry, '--no-sandbox', `--user-data-dir=${userDataDir}`],
       cwd: repoRoot,
       env: {
-        ...process.env,
+        // 【环境残留清除】宿主(WorkBuddy/CI)可能带 ELECTRON_RUN_AS_NODE=1,
+        // 会让 electron.exe 按 Node 模式启动 → "bad option: --remote-debugging-port=0"。
+        // 必须**删除**该键(置空字符串在部分 Electron 版本仍按存在处理)。
+        ...(() => {
+          const { ELECTRON_RUN_AS_NODE: _drop, ...rest } = process.env as Record<string, string | undefined>
+          return rest
+        })(),
         // 强制 WindowManager 走 prod 路径(loadFile dist/index.html),
         // 否则会去找 vite dev server (localhost:5173)
-        PIPICLAW_E2E: '1',
+        NW_E2E: '1',
         // NOVA #003-C · M2(第③笔): 显式 splash 旁路(命令 §F6 硬条件)。
-        //   BootOrchestrator 对 PIPICLAW_E2E='1' 同样 bypass, 此处显式声明是
+        //   BootOrchestrator 对 NW_E2E='1' 同样 bypass, 此处显式声明是
         //   双保险 + 自文档化: 防止未来重构拆开 E2E/SPLASH 耦合时 splash 劫持
         //   firstWindow()(34 个既有 e2e 全部会因首个窗口是 splash 而超时)。
-        PIPICLAW_SKIP_SPLASH: '1',
+        NW_SKIP_SPLASH: '1',
         ELECTRON_DISABLE_SECURITY_WARNINGS: '1',
       },
       timeout: 30_000,
@@ -287,14 +318,14 @@ export const test = base.extend<{
     await use(app)
     await app.close().catch(() => {})
     // 清理本测试的 profile(不留垃圾)。
-    // 【护栏】只删「系统临时目录下 + 前缀 pipiclaw-e2e-」的目录 ——
+    // 【护栏】只删「系统临时目录下 + 前缀 newworld-e2e-」的目录 ——
     // 万一将来有人把路径传错,这里不会误删别的东西。
     try {
       const resolved = path.resolve(userDataDir)
       const tmpRoot = path.resolve(tmpdir())
       const isTempProfile =
         resolved.startsWith(tmpRoot + path.sep) &&
-        path.basename(resolved).startsWith('pipiclaw-e2e-')
+        path.basename(resolved).startsWith('newworld-e2e-')
       if (isTempProfile) rmSync(resolved, { recursive: true, force: true })
     } catch { /* best-effort */ }
   },
@@ -306,7 +337,7 @@ export const test = base.extend<{
     await window.waitForSelector('#app', { timeout: 15_000 })
     // 默认跳到 /dashboard。给 router 一拍时间切到目标
     await window.waitForTimeout(500)
-    // fresh profile 下首次启动引导会遮住整个界面 → 先走完它
+    // v4.8：首次引导已移除，保留兼容调用（恒 false，不再遮界面）
     await completeFirstLaunchGuide(window)
     await use(window)
   },

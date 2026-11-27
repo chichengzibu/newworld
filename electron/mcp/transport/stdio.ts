@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - MCP stdio transport
+ * New World - MCP stdio transport
  *
  * 职责:
  * 1. spawn 子进程 (Node 脚本或外部 binary, 不走 shell)
@@ -69,7 +69,7 @@ export class StdioTransport {
    * 启动子进程 + 等待 initialize 完成
    * - 走 child_process.spawn (不用 shell)
    * - env 用 process.env + opts.env (PATH 保留, 防止找不到 node)
-   * - cwd 强制 = 主进程 cwd (即 PiPiClaw 安装根), 防止子进程意外读 ~/.pipiclaw
+   * - cwd 强制 = 主进程 cwd (即 New World 安装根), 防止子进程意外读 ~/.newworld
    */
   async start(): Promise<void> {
     if (this.child) {
@@ -87,7 +87,7 @@ export class StdioTransport {
         shell: false,
         // 合并 env, 但保留 PATH 防止找不到 node
         env: { ...process.env, ...this.opts.env },
-        // 强制 cwd = 主进程 cwd (PiPiClaw 安装根)
+        // 强制 cwd = 主进程 cwd (New World 安装根)
         cwd: process.cwd(),
         stdio: ['pipe', 'pipe', 'pipe'],
         windowsHide: true,
@@ -152,7 +152,7 @@ export class StdioTransport {
 
       this._sendRawRequest('initialize', {
         protocolVersion: '2025-06-18',
-        clientInfo: { name: 'pipiclaw', version: '4.5.0' },
+        clientInfo: { name: 'newworld', version: '4.5.0' },
         capabilities: {},
       })
         .then((resp) => {

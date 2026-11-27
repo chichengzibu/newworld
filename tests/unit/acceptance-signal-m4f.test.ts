@@ -1,5 +1,5 @@
 /**
- * PiPiClaw — 用户接受度信号测试（M4-F）
+ * New World — 用户接受度信号测试（M4-F）
  * ═══════════════════════════════════════════════════════════════
  * 【这一批在测什么】
  * M4-E 的成功信号是弱代理(「工具全成功 + 有最终答复」)—— 那是**过程**指标,
@@ -14,7 +14,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 vi.mock('electron', () => ({
-  app: { getPath: vi.fn((k: string) => `/tmp/pipiclaw-m4f-${k}`) },
+  app: { getPath: vi.fn((k: string) => `/tmp/newworld-m4f-${k}`) },
 }))
 
 vi.mock('electron-log', () => ({

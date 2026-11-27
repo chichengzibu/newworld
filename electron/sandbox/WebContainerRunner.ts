@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - WebContainerRunner (W11.1)
+ * New World - WebContainerRunner (W11.1)
  *
  * 职责:
  * 1. 集成 @webcontainer/api(浏览器内零容器前端运行时)

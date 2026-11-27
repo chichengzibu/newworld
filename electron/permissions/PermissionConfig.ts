@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - 权限配置管理器
+ * New World - 权限配置管理器
  *
  * 职责：
  * 1. 权限配置的持久化存储
@@ -10,7 +10,7 @@
  * - 首次安装默认 safe 模式 (least privilege),不是 permissive
  * - permissive 模板重命名为 "unrestricted" / "无限制模式 ⚠️",description 标红字警告
  * - 模式切换进 EventBus 'permission:mode-changed' + Insight 审计
- * - forceResetToPermissive 保留,仅 IPC `force:true` 或 PIPICLAW_RESET_PERMISSIONS=1 触发
+ * - forceResetToPermissive 保留,仅 IPC `force:true` 或 NW_RESET_PERMISSIONS=1 触发
  */
 
 
@@ -231,6 +231,31 @@ export class PermissionConfig {
     return Array.from(this.permissionSets.values());
   }
 
+  /** 【本地备份】导出权限集快照（不含运行时状态，直接可 JSON 序列化） */
+  public exportSnapshot(): { version: string; permissionSets: PermissionSet[]; activeSetId: string | null } {
+    return {
+      version: this.getAppVersion(),
+      permissionSets: this.getAllPermissionSets(),
+      activeSetId: this.activeSetId,
+    };
+  }
+
+  /** 【本地备份】从快照恢复；格式不合法时抛错且不改动现有状态 */
+  public importSnapshot(data: any): void {
+    const sets = data?.permissionSets;
+    if (!Array.isArray(sets) || sets.some((s: any) => !s || typeof s.id !== 'string')) {
+      throw new Error('备份权限格式错误：permissionSets 非法');
+    }
+    const active = typeof data.activeSetId === 'string' && sets.some((s: any) => s.id === data.activeSetId)
+      ? data.activeSetId
+      : null;
+    this.permissionSets.clear();
+    for (const s of sets) this.permissionSets.set(s.id, s);
+    this.activeSetId = active;
+    this.saveConfig();
+    this.log.info(`权限配置已从本地备份恢复（${sets.length} 组）`);
+  }
+
   public getPermissionSet(id: string): PermissionSet | undefined {
     return this.permissionSets.get(id);
   }
@@ -397,8 +422,8 @@ export class PermissionConfig {
    * - 启动时**不再调用**本方法 (main.ts 已删除调用)。
    * - 仅以下场景会真正重置:
    *   1. `options.force === true` — IPC `permissions:reset` 用户主动操作
-   *   2. 环境变量 PIPICLAW_DEV=1 — 开发/调试模式
-   *   3. 环境变量 PIPICLAW_RESET_PERMISSIONS=1 — 显式一次性重置
+   *   2. 环境变量 NW_DEV=1 — 开发/调试模式
+   *   3. 环境变量 NW_RESET_PERMISSIONS=1 — 显式一次性重置
    *   4. activeSetId 为空 — 旧 config 格式不匹配 (migration 工具,带 version check)
    *
    * 行为: 把 active 切到 `preset_permissive` (id 仍兼容老 config;展示名 "无限制模式 ⚠️"),
@@ -411,21 +436,21 @@ export class PermissionConfig {
    */
   public forceResetToPermissive(options?: { force?: boolean }): boolean {
     const force = options?.force === true;
-    const isDevMode = process.env.PIPICLAW_DEV === '1' || process.env.PIPICLAW_DEV === 'true';
-    const isExplicitReset = process.env.PIPICLAW_RESET_PERMISSIONS === '1' || process.env.PIPICLAW_RESET_PERMISSIONS === 'true';
+    const isDevMode = process.env.NW_DEV === '1' || process.env.NW_DEV === 'true';
+    const isExplicitReset = process.env.NW_RESET_PERMISSIONS === '1' || process.env.NW_RESET_PERMISSIONS === 'true';
     const isFirstBoot = !this.activeSetId;
 
     if (!force && !isDevMode && !isExplicitReset && !isFirstBoot) {
       this.log.info('[PermissionConfig] ⏭️ 跳过强制重置 (生产模式 + 已设过权限,尊重用户选择)', {
         activeSetId: this.activeSetId,
-        hint: '要强制重置请设 PIPICLAW_DEV=1 或 PIPICLAW_RESET_PERMISSIONS=1,或在 UI 点"重置"按钮'
+        hint: '要强制重置请设 NW_DEV=1 或 NW_RESET_PERMISSIONS=1,或在 UI 点"重置"按钮'
       });
       return false;
     }
 
     const reason: 'ipc-reset' | 'env-reset' = force ? 'ipc-reset' : 'env-reset';
     this.log.info('[PermissionConfig] ========== 强制重置权限为无限制模式 ⚠️ ==========', {
-      reason: force ? '用户主动操作 (IPC forceReset)' : isDevMode ? 'PIPICLAW_DEV=1' : isExplicitReset ? 'PIPICLAW_RESET_PERMISSIONS=1' : '首次启动 / migration',
+      reason: force ? '用户主动操作 (IPC forceReset)' : isDevMode ? 'NW_DEV=1' : isExplicitReset ? 'NW_RESET_PERMISSIONS=1' : '首次启动 / migration',
       via: reason
     });
 

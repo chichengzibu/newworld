@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - 网关状态管理 (Pinia Store)
+ * New World - 网关状态管理 (Pinia Store)
  */
 
 import { defineStore } from 'pinia';

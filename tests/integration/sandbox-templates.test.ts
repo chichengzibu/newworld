@@ -4,7 +4,7 @@ import * as path from 'node:path'
 import * as os from 'node:os'
 
 vi.mock('electron', () => ({
-  app: { getPath: vi.fn((k: string) => `/tmp/pipiclaw-templates-${k}`) },
+  app: { getPath: vi.fn((k: string) => `/tmp/newworld-templates-${k}`) },
 }))
 
 vi.mock('electron-log', () => ({
@@ -35,7 +35,7 @@ describe('P1-T1.2: SandboxBuilder 4 templates build successfully', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     // 用临时目录作为 workspace host 路径,避免污染真实目录
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pipiclaw-validate-'))
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'newworld-validate-'))
     vi.spyOn(WorkspaceManager.prototype, 'createWorkspace').mockImplementation(
       (opts: { name: string; type: 'project' | 'experiment' }) => {
         const wsPath = path.join(tmpDir, opts.name)

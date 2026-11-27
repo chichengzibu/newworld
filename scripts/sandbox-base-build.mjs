@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * PiPiClaw sandbox base image build 脚本
+ * New World sandbox base image build 脚本
  * 用法: pnpm sandbox:build-base  或  node scripts/sandbox-base-build.mjs
  *
  * W9 阶段:脚本只打印 docker build 命令,不真跑(避免 W9 阶段没有 docker 的环境阻塞)
@@ -8,7 +8,7 @@
  */
 import { execSync } from 'node:child_process'
 
-const IMAGE_NAME = 'pipiclaw/sandbox-base'
+const IMAGE_NAME = 'newworld/sandbox-base'
 const IMAGE_TAG = 'latest'
 const DOCKERFILE = 'sandbox/base/Dockerfile'
 

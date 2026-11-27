@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - Agent / RetryPolicy + CircuitBreaker
+ * New World - Agent / RetryPolicy + CircuitBreaker
  *
  * 【设计依据:业界调研结论】
  * 2026 年的生产实践数据(12+ agent 系统 / 4 provider / 6 个月):

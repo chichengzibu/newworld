@@ -21,61 +21,57 @@
     <div class="voice-settings">
       <label class="setting-row">
         <span>{{ t('nova.voice.tts.enabled') }}</span>
-        <input
-          type="checkbox"
-          :checked="voice.settings.enabled"
+        <el-switch
+          :model-value="voice.settings.enabled"
           aria-label="tts-enabled"
-          @change="onToggleEnabled(($event.target as HTMLInputElement).checked)"
+          @change="onToggleEnabled($event as boolean)"
         />
       </label>
       <label class="setting-row">
         <span>{{ t('nova.voice.tts.autoRead') }}</span>
-        <input
-          type="checkbox"
-          :checked="voice.settings.autoRead"
+        <el-switch
+          :model-value="voice.settings.autoRead"
           aria-label="tts-autoread"
-          @change="onToggleAutoRead(($event.target as HTMLInputElement).checked)"
+          @change="onToggleAutoRead($event as boolean)"
         />
       </label>
-      <label class="setting-row">
+      <label class="setting-row setting-row--slider">
         <span>{{ t('nova.voice.tts.rate') }}: {{ voice.settings.rate.toFixed(1) }}</span>
-        <input
-          type="range"
-          min="0.5" max="2" step="0.1"
-          :value="voice.settings.rate"
+        <el-slider
+          :model-value="voice.settings.rate"
+          :min="0.5" :max="2" :step="0.1"
           aria-label="tts-rate"
-          @input="onSetRate(Number(($event.target as HTMLInputElement).value))"
+          @input="onSetRate($event as number)"
         />
       </label>
-      <label class="setting-row">
+      <label class="setting-row setting-row--slider">
         <span>{{ t('nova.voice.tts.pitch') }}: {{ voice.settings.pitch.toFixed(1) }}</span>
-        <input
-          type="range"
-          min="0" max="2" step="0.1"
-          :value="voice.settings.pitch"
+        <el-slider
+          :model-value="voice.settings.pitch"
+          :min="0" :max="2" :step="0.1"
           aria-label="tts-pitch"
-          @input="onSetPitch(Number(($event.target as HTMLInputElement).value))"
+          @input="onSetPitch($event as number)"
         />
       </label>
-      <label class="setting-row">
+      <label class="setting-row setting-row--slider">
         <span>{{ t('nova.voice.tts.volume') }}: {{ voice.settings.volume.toFixed(1) }}</span>
-        <input
-          type="range"
-          min="0" max="1" step="0.1"
-          :value="voice.settings.volume"
+        <el-slider
+          :model-value="voice.settings.volume"
+          :min="0" :max="1" :step="0.1"
           aria-label="tts-volume"
-          @input="onSetVolume(Number(($event.target as HTMLInputElement).value))"
+          @input="onSetVolume($event as number)"
         />
       </label>
       <label v-if="voices.length > 0" class="setting-row">
         <span>{{ voices[0]?.name }}</span>
-        <select
-          :value="voices[0]?.name"
+        <el-select
+          :model-value="voices[0]?.name"
           aria-label="tts-voice"
-          @change="onSetVoice(($event.target as HTMLSelectElement).value)"
+          style="width: 320px"
+          @change="onSetVoice($event as string)"
         >
-          <option v-for="v in voices" :key="v.name" :value="v.name">{{ v.name }} ({{ v.lang }})</option>
-        </select>
+          <el-option v-for="v in voices" :key="v.name" :label="`${v.name} (${v.lang})`" :value="v.name" />
+        </el-select>
       </label>
     </div>
 
@@ -121,10 +117,11 @@
  *   - speechSynthesis \u5f15\u64ce\u672c\u8eab\u5728\u6e32\u67d3\u7aef, \u672c\u9875\u76f4\u63a5\u8c03\u7528 window.speechSynthesis
  *   - \u4e0d\u8fdb\u5165 ChatManager; \u4e0d\u4fee\u6539 Chat.vue; \u4e0d\u52a8 M1 \u9501\u9762
  *
- * \u9519\u8bef\u72b6\u6001\u4e0a\u62a5 (\u7c89\u9636\u5f0f \u2014\u2014 \u8bbe\u8ba1\u7a3f F7.1 stub):
- *   - speechSynthesis \u5168\u7f3a\u5931 \u2192 error(\u9519\u8bef\u6587\u6848 = unavailable)
- *   - text \u4e3a\u7a7a \u2192 error(\u9519\u8bef\u6587\u6848 = \u201c\u671f\u520a\u5df2\u505c\u6b62\u201d \u662f\u8bbe\u8ba1\u7a3f canceled \u590d\u7528, MVP \u4e0d\u533a\u5206)
- *   - \u672a\u6765 W4 \u63a5\u4e91\u7aef ASR: \u4f9d F8 \u9690\u79c1\u8bbe\u8ba1\u989d\u5916\u589e\u52a0\u660e\u786e\u9519\u8bef\u6587\u6848
+ * 错误状态上报（P2 已落地）：
+ *   - 页面每条失败路径都带 code/source/cause 调 voice.setState('error', ...)
+ *   - store 统一把错误写进本地台账（voice-unavailable / voice-invalid-text / voice-engine / voice-settings）
+ *   - 空文本与引擎失败此前共用「朗读已停止」，现分别显示真实原因
+ *   - 未来 W4 接云端 ASR 时沿用同一套 code → kind 映射
  */
 import { onMounted, ref } from 'vue';
 import { useI18n } from 'vue-i18n';
@@ -140,8 +137,12 @@ const voices = ref<VoiceInfo[]>([]);
 function refreshVoices(): void {
   if (typeof window === 'undefined') return;
   const g = window as { speechSynthesis?: { getVoices?: () => Array<{ name: string; lang: string }> } };
-  if (g.speechSynthesis?.getVoices) {
-    voices.value = g.speechSynthesis.getVoices().map((v) => ({ name: v.name, lang: v.lang }));
+  try {
+    if (g.speechSynthesis?.getVoices) {
+      voices.value = g.speechSynthesis.getVoices().map((v) => ({ name: v.name, lang: v.lang }));
+    }
+  } catch (e) {
+    voice.reportVoiceError({ code: 'engine-error', source: 'voice:voices', cause: e });
   }
 }
 
@@ -157,18 +158,18 @@ function onSpeak(): void {
   const win = window as { speechSynthesis?: { speak?: (u: unknown) => void; cancel?: () => void } };
   const ss = win.speechSynthesis;
   if (!ss || !ss.speak) {
-    voice.setState('error', t('nova.voice.tts.error.unavailable'));
+    voice.setState('error', t('nova.voice.tts.error.unavailable'), { code: 'unavailable', source: 'voice:tts' });
     return;
   }
   const text2 = text.value.trim();
   if (!text2) {
-    voice.setState('error', t('nova.voice.tts.error.canceled'));
+    voice.setState('error', t('nova.voice.tts.error.empty'), { code: 'invalid-text', source: 'voice:tts' });
     return;
   }
   voice.setState('speaking');
   const U = (globalThis as { SpeechSynthesisUtterance?: new (t: string) => unknown }).SpeechSynthesisUtterance;
   if (!U) {
-    voice.setState('error', t('nova.voice.tts.error.unavailable'));
+    voice.setState('error', t('nova.voice.tts.error.noVoice'), { code: 'no-voice', source: 'voice:tts' });
     return;
   }
   const u = new U(text2);
@@ -179,11 +180,17 @@ function onSpeak(): void {
     (u as { volume?: number }).volume = voice.settings.volume;
     (u as { onstart?: () => void }).onstart = () => voice.setState('speaking');
     (u as { onend?: () => void }).onend = () => voice.setState('idle');
-    (u as { onerror?: () => void }).onerror = () => voice.setState('error', t('nova.voice.tts.error.canceled'));
+    (u as { onerror?: (e?: { error?: string }) => void }).onerror = (e) => {
+      voice.setState('error', t('nova.voice.tts.error.engine'), {
+        code: 'engine-error',
+        source: 'voice:tts',
+        cause: new Error(e?.error ?? 'speech-synthesis-onerror'),
+      });
+    };
     if (ss.cancel) ss.cancel();
     ss.speak(u);
-  } catch {
-    voice.setState('error', t('nova.voice.tts.error.canceled'));
+  } catch (e) {
+    voice.setState('error', t('nova.voice.tts.error.engine'), { code: 'engine-error', source: 'voice:tts', cause: e });
   }
 }
 
@@ -192,7 +199,10 @@ function onCancel(): void {
   const g = window as { speechSynthesis?: { cancel?: () => void } };
   try {
     if (g.speechSynthesis && g.speechSynthesis.cancel) g.speechSynthesis.cancel();
-  } catch { /* ignore */ }
+  } catch (e) {
+    // 停止失败不该改变 UI 状态，但必须可观测
+    voice.reportVoiceError({ code: 'engine-error', source: 'voice:tts', cause: e }, t('nova.voice.tts.error.canceled'));
+  }
   voice.setState('idle');
 }
 
@@ -252,10 +262,11 @@ onMounted(() => {
   color: var(--fg-default);
 }
 
-.setting-row input[type='range'],
-.setting-row select {
-  flex: 1;
+/* el-slider 宿主: 固定宽度, 不吃 flex 拉伸 */
+.setting-row--slider .el-slider {
+  width: 320px;
   margin-left: 16px;
+  flex: none;
 }
 
 .voice-form {

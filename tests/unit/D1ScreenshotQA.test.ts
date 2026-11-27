@@ -5,7 +5,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { d1SkillDefinition } from '../../electron/skill/builtin/D1ScreenshotQA'
 
 vi.mock('electron', () => ({
-  app: { getPath: vi.fn(() => '/tmp/pipiclaw-test') },
+  app: { getPath: vi.fn(() => '/tmp/newworld-test') },
 }))
 
 describe('P2-T3.2: D1ScreenshotQA handler', () => {

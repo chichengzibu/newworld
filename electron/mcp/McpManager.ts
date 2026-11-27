@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - MCP Manager (主进程)
+ * New World - MCP Manager (主进程)
  *
  * 职责:
  * 1. 维护多个 MCP server 实例 (一个 server → 一个 transport)
@@ -91,7 +91,7 @@ function resolveFilesystemServerScript(): string {
  * (因为 .mjs 必须用 Node 跑, 不接受用户随便填 npx 之类的命令)
  *
  * 接受用户两种配置:
- *   1) 显式 command='pipiclaw-filesystem' (我们识别) → 用内置脚本
+ *   1) 显式 command='newworld-filesystem' (我们识别) → 用内置脚本
  *   2) command='node' / command 留空 → 同样用内置脚本
  *   3) 其他 command → 原样 spawn (留给 M2 接 npx -y @modelcontextprotocol/server-filesystem 之类)
  */
@@ -456,7 +456,7 @@ export class McpManager {
   /**
    * 识别 "filesystem server"
    * - 显式: command 包含 'filesystem' 或 name === 'filesystem' 或 name 以 'filesystem' 开头
-   * - 默认: name === 'pipiclaw-filesystem' (我们写死的内部 server)
+   * - 默认: name === 'newworld-filesystem' (我们写死的内部 server)
    */
   private isFilesystemServer(config: McpServerConfig): boolean {
     const lc = (s: string) => s.toLowerCase();

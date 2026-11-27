@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - 执行模式状态管理 (Pinia Store)
+ * New World - 执行模式状态管理 (Pinia Store)
  * 
  * 职责：
  * 1. 管理执行模式状态（安全/计划/全量）

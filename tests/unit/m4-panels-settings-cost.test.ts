@@ -1,11 +1,10 @@
 /**
- * PiPiClaw — M4 面板渲染测试（设置页嵌入后端 + 模型对比页今日成本）
+ * New World — M4 面板渲染测试（设置页嵌入后端）
  * ═══════════════════════════════════════════════════════════════
  * 【为什么单独一份】
  * SkillsView 的 4 个面板已在 `skills-m4-panels.test.ts` 覆盖。
- * 本份覆盖另外两个:
- *   - 「设置 → 记忆」的**嵌入后端**卡片(M3-A 加的)
- *   - 「模型对比」的**今日成本**卡片(M3-E 加的)
+ * 本份覆盖:
+ *   - 「设置 → 记忆」的**嵌入后端**卡片(M3-A 加的)（模型对比卡片随 v4.9 模块下线一并移除）
  *
  * 【两个面板的共同要害:诚实标注】
  * 这两处都涉及「用假数据冒充真数据」的诱惑:
@@ -16,6 +15,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { createPinia, setActivePinia } from 'pinia'
+import { createRouter, createMemoryHistory } from 'vue-router'
 
 vi.mock('element-plus/es/components/message/index', () => ({
   ElMessage: { warning: vi.fn(), success: vi.fn(), error: vi.fn(), info: vi.fn() },
@@ -26,7 +26,6 @@ vi.mock('element-plus/es/components/message-box/index', () => ({
 
 import i18n from '../../src/locales'
 import Settings from '../../src/views/Settings.vue'
-import ModelCompare from '../../src/views/ModelCompare.vue'
 
 let api: any
 
@@ -69,7 +68,6 @@ function installApi() {
       }),
     },
     insight: {
-      // ModelCompare 的今日成本走的是既有的 insight.costToday 通道
       // 【形状必须与真实 handler 一致】insight:cost:today 返回的是**扁平**结构
       // (totalCostUsd / totalInputTokens / byModel / recent 同级),
       // 不是 {today:{...}} 嵌套 —— 组件读的就是扁平的那层。
@@ -105,12 +103,22 @@ const tabStubs = {
   'el-tab-pane': { template: '<div class="ep-tab-pane"><slot /></div>', props: ['label', 'name'] },
 }
 
+// v4.9：Settings 用 useRoute/useRouter，Composition API 不读 $route mock，
+// 必须装真 router 插件（内存 history）。
+const testRouter = createRouter({
+  history: createMemoryHistory(),
+  routes: [
+    { path: '/settings', component: { template: '<div />' } },
+    { path: '/:pathMatch(.*)*', component: { template: '<div />' } },
+  ],
+})
+
 async function mountView(Comp: any) {
   setActivePinia(createPinia())
   const ElementPlus = (await import('element-plus')).default
   const w = mount(Comp, {
     global: {
-      plugins: [ElementPlus, i18n],
+      plugins: [ElementPlus, i18n, testRouter],
       stubs: tabStubs,
       mocks: {
         $route: { path: '/settings', push: vi.fn() },
@@ -162,34 +170,3 @@ describe('M4 设置页嵌入后端卡片', () => {
   })
 })
 
-describe('M4 模型对比页今日成本卡片', () => {
-  beforeEach(() => { installApi() })
-
-  it('显示今日费用与输入/输出 token 分项', async () => {
-    const w = await mountView(ModelCompare)
-    const text = w.text()
-    expect(text).toContain('今日成本')
-    expect(text).toContain('输入 token')
-    expect(text).toContain('输出 token')
-  })
-
-  it('按模型分布显示每个模型花了多少', async () => {
-    const w = await mountView(ModelCompare)
-    expect(w.text()).toContain('qwen3.5:9b')
-  })
-
-  it('「定价设置」入口在(用户得能给自己的模型配价)', async () => {
-    const w = await mountView(ModelCompare)
-    const btn = w.findAll('button').find((b: any) => b.text().includes('定价设置'))
-    expect(btn).toBeTruthy()
-  })
-
-  it('「定价设置」弹出单价表单', async () => {
-    const w = await mountView(ModelCompare)
-    const btn = w.findAll('button').find((b: any) => b.text().includes('定价设置'))
-    await btn!.trigger('click')
-    await flushPromises()
-    expect(w.text()).toContain('输入单价')
-    expect(w.text()).toContain('输出单价')
-  })
-})

@@ -3,10 +3,10 @@ import { BrowserWindow } from 'electron'
 
 vi.mock('electron', () => ({
   app: {
-    getPath: vi.fn((key: string) => `/tmp/pipiclaw-chat-${key}`),
+    getPath: vi.fn((key: string) => `/tmp/newworld-chat-${key}`),
     on: vi.fn(),
     off: vi.fn(),
-    getName: () => 'pipiclaw',
+    getName: () => 'newworld',
     getVersion: () => '0.0.0',
   },
   ipcMain: { handle: vi.fn(), on: vi.fn(), removeHandler: vi.fn() },

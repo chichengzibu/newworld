@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - 标准 Electron 平台实现(win32 / darwin / linux)
+ * New World - 标准 Electron 平台实现(win32 / darwin / linux)
  *
  * 把 electron `app` 的只读调用与生命周期调用桥接到 PlatformHost 接口。
  * 这是 Phase 2 解耦的"机械替换"落点:core 里原先的

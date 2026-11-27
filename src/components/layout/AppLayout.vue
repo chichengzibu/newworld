@@ -171,10 +171,11 @@ function onGlobalKeydown(e: KeyboardEvent): void {
   font-size: var(--font-size-sm);
   font-weight: var(--font-weight-medium);
   cursor: pointer;
-  box-shadow: var(--shadow-lg);
-  backdrop-filter: saturate(180%) blur(20px);
-  -webkit-backdrop-filter: saturate(180%) blur(20px);
-  border: 0.5px solid var(--border-base);
+  box-shadow: var(--shadow-md);
+  /* v4.9：收敛重度毛玻璃（saturate 180% blur 20px → 轻量 blur），减少「AI 概念图」观感 */
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid var(--border-base);
   transition: transform var(--duration-fast) var(--ease-spring),
     box-shadow var(--duration-fast) var(--ease-standard),
     background-color var(--duration-fast) var(--ease-standard);

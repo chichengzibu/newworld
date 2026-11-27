@@ -3,401 +3,149 @@
 <head>
   <meta charset="utf-8" />
   <meta name="color-scheme" content="dark" />
-  <title>NOVA Boot · PiPiClaw</title>
+  <title>New World · 启动日志</title>
   <style>
-    /* 画布底色硬编码 #050508 (值来源 src/styles/tokens.css:416 --nova-bg-deep; 设计稿 F8)
-       Splash 不走 Vite 管线 → 不 import tokens.css, 用 literal + 行内注释锁定来源 */
+    /* 极简中性风: 无霓虹、无渐变发光、无装饰动画。只保留 logo + 真实日志窗口。
+       Splash 不走 Vite 管线, 颜色在此字面量锁定, 不 import tokens.css。 */
     :root {
-      --nova-cyan: #22d3ee;          /* 值来源 tokens.css:404 */
-      --nova-violet: #a78bfa;        /* 值来源 tokens.css:405 */
-      --nova-bg-deep: #050508;       /* 值来源 tokens.css:416 */
-      --nova-grid-line: rgba(34, 211, 238, .06); /* 值来源 tokens.css:419 */
-      --nova-gradient: 135deg, var(--nova-cyan), var(--nova-violet);
-      --nova-dur-fast: 180ms;
-      --nova-dur-base: 320ms;
-      --nova-glow-cyan: 0 0 18px rgba(34, 211, 238, .55),
-                        0 0 36px rgba(34, 211, 238, .25);
-      --nova-glow-violet: 0 0 18px rgba(167, 139, 250, .55),
-                          0 0 36px rgba(167, 139, 250, .25);
-      font-family: "Inter", "Segoe UI", system-ui, -apple-system, sans-serif;
+      --bg: #101014;
+      --panel: #17171c;
+      --border: #2b2b33;
+      --fg: #d6d6dc;
+      --muted: #8d8d98;
+      --ok: #83c9a6;
+      --warn: #d9b169;
+      --error: #e08585;
+      --mono: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, "Courier New", monospace;
     }
     html, body {
       margin: 0; padding: 0;
       width: 100%; height: 100%;
-      background: var(--nova-bg-deep);
-      color: #e6f1ff;
+      background: var(--bg);
+      color: var(--fg);
       overflow: hidden;
+      font-family: var(--mono);
       -webkit-user-select: none; user-select: none;
     }
-
-    /* ---- 网格底 (设计稿 F5 · "科技风"氛围底) ---- */
-    #grid {
-      position: fixed; inset: 0; z-index: 0;
-      background-image:
-        linear-gradient(to right, var(--nova-grid-line) 1px, transparent 1px),
-        linear-gradient(to bottom, var(--nova-grid-line) 1px, transparent 1px);
-      background-size: 48px 48px;
-      opacity: 1;
-      -webkit-mask-image: radial-gradient(ellipse at 50% 60%, #000 30%, transparent 75%);
-              mask-image: radial-gradient(ellipse at 50% 60%, #000 30%, transparent 75%);
+    #app {
+      display: flex; flex-direction: column;
+      height: 100%; box-sizing: border-box;
+      padding: 22px; gap: 14px;
     }
-
-    /* ---- 四角括号 (.nova-hud-corner 等价物, 设计稿 #002 工具类) ---- */
-    .hud {
-      position: fixed; inset: 28px; z-index: 1; pointer-events: none;
-    }
-    .hud::before, .hud::after,
-    .hud .tl, .hud .br {
-      content: ''; position: absolute; width: 22px; height: 22px;
-      border-color: rgba(34, 211, 238, .55);
-      border-style: solid; border-width: 0;
-      filter: drop-shadow(0 0 6px rgba(34, 211, 238, .4));
-    }
-    .hud::before { top: 0; left: 0;  border-top-width: 2px; border-left-width: 2px; }
-    .hud::after  { bottom: 0; right: 0; border-bottom-width: 2px; border-right-width: 2px; }
-
-    /* ---- 顶部扫描微光 (.nova-scanline 等价物) ---- */
-    .scanline {
-      position: fixed; top: 0; left: 0; right: 0; height: 2px; z-index: 2;
-      background: linear-gradient(90deg,
-        transparent 0%, transparent 20%,
-        var(--nova-cyan) 50%,
-        transparent 80%, transparent 100%);
-      opacity: .65;
-      filter: drop-shadow(0 0 8px var(--nova-cyan));
-      animation: scan 2.4s linear infinite;
-    }
-    @keyframes scan {
-      0% { transform: translateX(-100%); }
-      100% { transform: translateX(100%); }
-    }
-
-    /* ---- 中心内容 ---- */
-    #stage {
-      position: relative; z-index: 3;
-      display: flex; flex-direction: column; align-items: center; justify-content: center;
-      height: 100%;
-      gap: 11px;
-      padding: 18px 0;
-    }
-
-    /* ---- 中心 Orb (复用 NovaOrb 视觉, 但静态 SVG/CSS inline) ---- */
-    #orb {
-      position: relative; width: 126px; height: 126px;
-      display: grid; place-items: center;
-    }
-    #orb .core {
-      width: 48px; height: 48px; border-radius: 50%;
-      background: radial-gradient(circle at 35% 35%, #ffffff, var(--nova-cyan) 30%, var(--nova-violet) 70%, #1b0040);
-      box-shadow:
-        0 0 42px var(--nova-cyan),
-        0 0 84px rgba(167, 139, 250, .35),
-        inset 0 0 22px rgba(255, 255, 255, .35);
-      animation: breathe 3s ease-in-out infinite;
-    }
-    #orb .ring {
-      position: absolute; inset: 0;
-      border-radius: 50%;
-      border: 1px solid rgba(34, 211, 238, .5);
-      opacity: .8;
-      animation: pulse-ring 2.4s ease-out infinite;
-    }
-    #orb .ring.r2 { inset: 15px; border-color: rgba(167, 139, 250, .55); animation-delay: .6s; }
-    @keyframes breathe { 50% { box-shadow: 0 0 24px var(--nova-cyan), 0 0 48px rgba(167, 139, 250, .25); } }
-    @keyframes pulse-ring {
-      0% { transform: scale(.55); opacity: .9; }
-      100% { transform: scale(1); opacity: 0; }
-    }
-
-    /* ---- LOGO ---- */
+    header { display: flex; align-items: baseline; gap: 12px; flex: 0 0 auto; }
     #logo {
-      display: flex; align-items: center; gap: 12px;
-      font-size: 22px; font-weight: 600; letter-spacing: .12em;
-      color: #eaf6ff;
-      text-shadow: 0 0 16px rgba(34, 211, 238, .5);
+      font-size: 15px; font-weight: 600; letter-spacing: .16em;
+      color: var(--fg);
     }
-    #logo .dot {
-      width: 10px; height: 10px; border-radius: 50%;
-      background: linear-gradient(135deg, var(--nova-cyan), var(--nova-violet));
-      box-shadow: var(--nova-glow-cyan), var(--nova-glow-violet);
-    }
+    #subtitle { font-size: 11px; color: var(--muted); letter-spacing: .03em; }
 
-    /* ---- 副标题 + 阶段 label ---- */
-    #subtitle { font-size: 13px; color: #a7c2d6; letter-spacing: .04em; }
-    #stage-label {
-      font-size: 15px; color: var(--nova-cyan); min-height: 1.4em;
-      letter-spacing: .03em;
-      text-shadow: 0 0 10px rgba(34, 211, 238, .35);
+    #terminal {
+      flex: 1 1 auto; min-height: 0;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      padding: 12px 13px;
+      box-sizing: border-box;
+      overflow-y: auto;
+      font-size: 11.5px;
+      line-height: 1.7;
+      font-variant-ligatures: none;
     }
+    #terminal::-webkit-scrollbar { width: 7px; }
+    #terminal::-webkit-scrollbar-thumb { background: var(--border); border-radius: 4px; }
+    #terminal .line { white-space: pre-wrap; word-break: break-word; }
+    #terminal .ts { color: var(--muted); }
+    #terminal .lvl-info { color: var(--fg); }
+    #terminal .lvl-warn { color: var(--warn); }
+    #terminal .lvl-error { color: var(--error); }
+    #terminal .stage { color: var(--ok); }
+    #terminal .msg { color: var(--fg); }
+    #terminal .placeholder { color: var(--muted); }
 
-    /* ---- 进度条 ---- */
-    #bar {
-      width: 320px; height: 4px; border-radius: 4px;
-      background: rgba(255, 255, 255, .08);
-      overflow: hidden;
-      position: relative;
-    }
-    #bar .fill {
-      height: 100%; width: 0%;
-      background: linear-gradient(90deg, var(--nova-cyan), var(--nova-violet));
-      box-shadow: 0 0 10px rgba(34, 211, 238, .6);
-      transition: width var(--nova-dur-base) ease;
-    }
-    #pct {
-      font-size: 12px; color: #6d8ba1; min-width: 42px; text-align: right;
-      font-variant-numeric: tabular-nums;
-    }
-
-    /* ---- 模块清单 (逐模块显示, 已完成打勾) ---- */
-    #modules {
-      list-style: none; padding: 0; margin: 2px 0 0;
-      display: grid; gap: 5px;
-      width: 320px;
-      font-size: 12.5px; color: #86a5bb;
-    }
-    #modules li {
-      display: flex; align-items: center; gap: 10px;
-      padding: 3px 10px; border-radius: 6px;
-      border: 1px solid rgba(34, 211, 238, .10);
-      background: rgba(34, 211, 238, .04);
-      opacity: .45; transition: opacity var(--nova-dur-base) ease;
-    }
-    #modules li.active {
-      opacity: 1;
-      border-color: rgba(34, 211, 238, .55);
-      background: rgba(34, 211, 238, .08);
-      color: var(--nova-cyan);
-    }
-    #modules li.done {
-      opacity: 1;
-      color: #4fe3b0;
-      border-color: rgba(79, 227, 176, .35);
-      background: rgba(79, 227, 176, .05);
-    }
-    #modules .tick {
-      width: 16px; text-align: center; font-size: 12px;
-      color: transparent;
-    }
-    #modules li.done .tick { color: #4fe3b0; }
-    #modules li.active .tick { color: var(--nova-cyan); animation: blink 1s steps(2, start) infinite; }
-    @keyframes blink { to { visibility: hidden; } }
-
-    /* ---- 底部提示(流内, 置于模块清单之后, 避免与 list 项重叠) ---- */
-    #hint {
-      text-align: center; font-size: 11px; color: #4d667c; z-index: 4;
-      letter-spacing: .04em; margin-top: 2px;
-    }
-
-    /* ---- 点亮阶段 ---- */
-    body.litup #orb .core {
-      animation: litup 900ms ease-out forwards;
-    }
-    @keyframes litup {
-      0% { transform: scale(1); filter: brightness(1); }
-      40% { transform: scale(1.2); filter: brightness(1.8); }
-      100% { transform: scale(1.05); filter: brightness(1.2); }
-    }
-    body.litup #stage-label { color: #4fe3b0; text-shadow: 0 0 14px rgba(79, 227, 176, .6); }
-    body.litup .scanline { opacity: .3; animation-duration: 1.2s; }
-    body.litup .hud::before, body.litup .hud::after,
-    body.litup .hud .tl, body.litup .hud .br { border-color: rgba(79, 227, 176, .8); }
-
-    /* ---- prefers-reduced-motion 兜底: 全部退化静态 (设计稿 F7 兜底链 + 命令 #002) ---- */
     @media (prefers-reduced-motion: reduce) {
-      .scanline,
-      #orb .core,
-      #orb .ring,
-      #modules li.active .tick { animation: none; }
-      #bar .fill { transition: none; }
+      #terminal { scroll-behavior: auto; }
     }
   </style>
 </head>
 <body>
-  <div id="grid" aria-hidden="true"></div>
-  <div class="hud" aria-hidden="true"></div>
-  <div class="scanline" aria-hidden="true"></div>
-
-  <main id="stage">
-    <div id="orb" aria-hidden="true">
-      <div class="ring"></div>
-      <div class="ring r2"></div>
-      <div class="core"></div>
+  <div id="app">
+    <header>
+      <div id="logo" data-i18n="logo">NEW WORLD</div>
+      <div id="subtitle" data-i18n="subtitle">正在启动…</div>
+    </header>
+    <div id="terminal" aria-label="boot-log">
+      <div class="placeholder" id="placeholder">等待主进程启动日志…</div>
     </div>
-
-    <div id="logo">
-      <span class="dot"></span>
-      <span data-i18n="logo">PI PICLAW</span>
-    </div>
-
-    <div id="subtitle" data-i18n="subtitle">Loading…</div>
-    <div id="stage-label">…</div>
-
-    <div id="bar"><div class="fill"></div></div>
-    <div id="pct">0%</div>
-
-    <ul id="modules" aria-label="boot-modules">
-      <li data-stage="config"><span class="tick">✓</span><span data-i18n="config">内核初始化</span></li>
-      <li data-stage="ipc"><span class="tick">✓</span><span data-i18n="ipc">IPC 服务</span></li>
-      <li data-stage="llm-config"><span class="tick">✓</span><span data-i18n="llm-config">LLM 通道</span></li>
-      <li data-stage="memory"><span class="tick">✓</span><span data-i18n="memory">记忆装载</span></li>
-      <li data-stage="skills"><span class="tick">✓</span><span data-i18n="skills">技能注册</span></li>
-      <li data-stage="chats"><span class="tick">✓</span><span data-i18n="chats">会话索引</span></li>
-      <li data-stage="channels"><span class="tick">✓</span><span data-i18n="channels">IM 通道</span></li>
-    </ul>
-
-    <div id="hint" data-i18n="hint">点击或按任意键跳过</div>
-  </main>
+  </div>
 
   <script>
-    // ============ NOVA #003-C · M2 — Splash 渲染层 (纯前端, 无构建管线) ============
-    // 数据源: window.electronAPI.nova.{ onBootEvent, skip }  (preload 暴露)
-    // 非 Electron 环境(浏览器直开/单测): window.electronAPI 不存在 → 全量 fallback 静态, 不阻塞
-    // 跳过双保险: 主进程 SplashWindow mouse-down 已覆盖; 渲染端 keyboard 补位(命令 §F5)
-    // 2.8s 下限由主进程 BootDirector 判定, 渲染端只做"点亮阶段"的视觉反馈
+    // ============ Splash 渲染层: 真实启动日志流 ============
+    // 数据源: window.electronAPI.nova.onBootEvent(handler) —— 主进程 BootOrchestrator.pushBootLog()
+    //   经 SplashWindow.pushBootLog() → webContents.send('nova:boot-event', { log })
+    // 每条载荷: { log: { level: 'INFO'|'WARN'|'ERROR', message, timestamp, stage? } }
+    // 非 Electron 环境(浏览器直开/单测): electronAPI 不存在 → 仅显示占位, 不阻塞、不造假。
     (function () {
       'use strict';
 
-      // ---------- 双语硬编码 (F8 报备第3条: splash 不走 Vite 管线, 不能 import vue-i18n) ----------
-      // 语言判定: navigator.language 首段 (zh* → 中文, 其他 → 英文)
+      // 双语硬编码(splash 不走 Vite 管线, 不能 import vue-i18n)
       var I18N = {
-        'zh': {
-          'logo': 'PI PICLAW',
-          'subtitle': 'PiPiClaw 正在唤醒…',
-          'hint': '点击或按任意键跳过',
-          'config': '内核初始化',
-          'ipc': 'IPC 服务',
-          'llm-config': 'LLM 通道',
-          'memory': '记忆装载',
-          'skills': '技能注册',
-          'chats': '会话索引',
-          'channels': 'IM 通道'
-        },
-        'en': {
-          'logo': 'PI PICLAW',
-          'subtitle': 'PiPiClaw is waking up…',
-          'hint': 'Click or press any key to skip',
-          'config': 'Core init',
-          'ipc': 'IPC services',
-          'llm-config': 'LLM channel',
-          'memory': 'Loading memory',
-          'skills': 'Registering skills',
-          'chats': 'Indexing chats',
-          'channels': 'IM channels'
-        }
+        'zh': { 'logo': 'NEW WORLD', 'subtitle': '正在启动…', 'placeholder': '等待主进程启动日志…' },
+        'en': { 'logo': 'NEW WORLD', 'subtitle': 'Starting…', 'placeholder': 'Waiting for boot log…' }
       };
       var LANG = (navigator.language || 'en').toLowerCase();
       var L = LANG.indexOf('zh') === 0 ? I18N['zh'] : I18N['en'];
-      var apply = function (key, el) { if (L[key] && el) el.textContent = L[key]; };
       document.querySelectorAll('[data-i18n]').forEach(function (el) {
-        apply(el.getAttribute('data-i18n'), el);
+        var key = el.getAttribute('data-i18n');
+        if (L[key]) el.textContent = L[key];
       });
 
-      // ---------- 进度状态 ----------
-      var currentStage = null; // 当前活动 stage
-      var doneStages = new Set();
-      var litupFired = false; // 点亮态标记(真 boolean; 别再用 litup 同名, 会与函数 litup 冲突)
+      var term = document.getElementById('terminal');
+      var placeholder = document.getElementById('placeholder');
 
-      var stageOrder = ['config', 'ipc', 'llm-config', 'memory', 'skills', 'chats', 'channels'];
-      var barFill = document.querySelector('#bar .fill');
-      var pctEl = document.getElementById('pct');
-      var labelEl = document.getElementById('stage-label');
-      var modulesEl = document.getElementById('modules');
-
-      function setBar(progress) {
-        var p = Math.max(0, Math.min(1, progress || 0));
-        barFill.style.width = (p * 100).toFixed(1) + '%';
-        pctEl.textContent = Math.round(p * 100) + '%';
+      function pad(n, len) {
+        var s = String(n);
+        while (s.length < len) s = '0' + s;
+        return s;
+      }
+      function fmtTime(ts) {
+        var d = new Date(typeof ts === 'number' ? ts : Date.now());
+        return pad(d.getHours(), 2) + ':' + pad(d.getMinutes(), 2) + ':' +
+          pad(d.getSeconds(), 2) + '.' + pad(d.getMilliseconds(), 3);
+      }
+      function esc(s) {
+        return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
       }
 
-      function markModule(stage) {
-        var li = modulesEl.querySelector('li[data-stage="' + stage + '"]');
-        if (!li) return;
-        modulesEl.querySelectorAll('li.active').forEach(function (x) {
-          if (x !== li) x.classList.remove('active');
-        });
-        li.classList.add('done');
-        li.classList.remove('active');
-        doneStages.add(stage);
-      }
-
-      function setActive(stage) {
-        var li = modulesEl.querySelector('li[data-stage="' + stage + '"]');
-        if (li) {
-          li.classList.add('active');
-          // label 显示 i18n 后的展示文案(设计稿 §4.2 label 字段)
-          var keyMap = {
-            'config': 'config', 'ipc': 'ipc', 'llm-config': 'llm-config',
-            'memory': 'memory', 'skills': 'skills', 'chats': 'chats', 'channels': 'channels'
-          };
-          var k = keyMap[stage];
-          if (k && L[k]) labelEl.textContent = L[k];
-          currentStage = stage;
+      function appendLog(log) {
+        if (!log || typeof log !== 'object') return;
+        if (placeholder && placeholder.parentNode) {
+          placeholder.parentNode.removeChild(placeholder);
+          placeholder = null;
         }
+        var level = String(log.level || 'INFO').toUpperCase();
+        var cls = level === 'WARN' ? 'lvl-warn' : level === 'ERROR' ? 'lvl-error' : 'lvl-info';
+        var html = '<span class="ts">[' + fmtTime(log.timestamp) + ']</span> ' +
+          '<span class="' + cls + '">[' + esc(level) + ']</span> ';
+        if (log.stage) html += '<span class="stage">[' + esc(log.stage) + ']</span> ';
+        html += '<span class="msg">' + esc(log.message == null ? '' : log.message) + '</span>';
+
+        var line = document.createElement('div');
+        line.className = 'line';
+        line.innerHTML = html;
+        term.appendChild(line);
+        // 逐行追加, 自动滚到底部
+        term.scrollTop = term.scrollHeight;
       }
 
-      function paintBootEvent(ev) {
-        if (!ev) return;
-        setBar(ev.progress);
-        if (ev.stage) {
-          if (currentStage === ev.stage) return; // 幂等
-          // 上一 stage 标记完成
-          if (currentStage) markModule(currentStage);
-          // 新 stage 设为活跃
-          if (ev.progress >= 1) {
-            // 全完成: 点亮
-            markModule(ev.stage);
-            litup();
-          } else {
-            setActive(ev.stage);
-          }
-        }
-      }
-
-      // ---------- 点亮(视觉态; 实际关闭由主进程决定, 见 SplashWindow.close) ----------
-      function litup() {
-        if (litupFired) return;
-        litupFired = true;
-        document.body.classList.add('litup');
-        labelEl.textContent = (L === I18N['en']) ? 'Ready' : '唤醒完成';
-        setBar(1);
-        // 等一小段时间再退出,让用户看到"点亮"动画 (~700ms)
-        setTimeout(function () {
-          // 主进程已在 canCloseSplash 判定后 close 掉窗口,
-          // 这里不做任何 window.close(只读) — 若主进程未触发, 用户仍可通过 hint 跳过
-        }, 700);
-      }
-
-      // ---------- IPC 订阅 ----------
-      var api = (typeof window !== 'undefined' && window.electronAPI && window.electronAPI.nova) ? window.electronAPI.nova : null;
+      var api = (typeof window !== 'undefined' && window.electronAPI && window.electronAPI.nova)
+        ? window.electronAPI.nova : null;
       if (api && typeof api.onBootEvent === 'function') {
-        api.onBootEvent(paintBootEvent);
+        api.onBootEvent(function (ev) {
+          // 只消费真实日志行; 兼容旧 stage 事件(忽略, 不再展示假阶段文字)
+          if (ev && ev.log) appendLog(ev.log);
+        });
       }
-
-      // ---------- 跳过(点击已由主进程 mouse-down 双保险; 这里补 keyboard) ----------
-      var skipOnce = false;
-      function skip() {
-        if (skipOnce) return;
-        skipOnce = true;
-        // 视觉反馈: 进入"即将退出"态
-        document.body.classList.add('litup');
-        if (api && typeof api.skip === 'function') {
-          try { api.skip(); } catch (e) { /* 主进程不可达 */ }
-        } else {
-          // 非 Electron: 静默退出(splash 场景不应在纯浏览器出现, 兜底避免悬空)
-          setTimeout(function(){ document.body.style.opacity = '0'; }, 200);
-        }
-      }
-      window.addEventListener('keydown', skip, { once: false, passive: true });
-      // 点击跳过已由 SplashWindow.mouse-down 主进程兜底；此处不重复绑定(避免与主进程双触发造成视觉闪烁)
-
-      // ---------- 兜底: 30s 仍未被主进程 close(异常) → 视觉提示 + 让用户手动跳过 ----------
-      var watchdog = setTimeout(function () {
-        if (!litupFired) {
-          labelEl.textContent = (L === I18N['en']) ? 'Waiting…' : '等待中…';
-        }
-      }, 30000);
-      window.addEventListener('pagehide', function () { clearTimeout(watchdog); }, { once: true });
-
     })();
   </script>
 </body>

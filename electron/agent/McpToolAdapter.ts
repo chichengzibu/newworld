@@ -1,12 +1,12 @@
 /**
- * PiPiClaw - MCP 工具适配器 (M3-A)
+ * New World - MCP 工具适配器 (M3-A)
  *
  * 【要解决的缺口】
  * McpManager 是完整可用的子系统(stdio transport / JSON-RPC 2.0 / tools/list
  * 缓存 / invoke / 重名检测,1105 行),但它只挂在 IPC 层 —— 渲染进程能调,
  * **LLM 调不到任何 MCP 工具**。
  *
- * 后果: 用户装了 GitHub MCP server,PiPiClaw 的 agent 依然不知道有这个
+ * 后果: 用户装了 GitHub MCP server,New World 的 agent 依然不知道有这个
  * 能力存在。生态扩展性为零 —— 装了也白装。
  *
  * 【做法】

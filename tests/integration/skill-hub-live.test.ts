@@ -1,5 +1,5 @@
 /**
- * PiPiClaw — 开源技能库实跑（M4-X）
+ * New World — 开源技能库实跑（M4-X）
  * ═══════════════════════════════════════════════════════════════════════
  * 【这一批在测什么】
  * 「联网环境下自动去开源技能库寻找以及推荐用户联网下载」——
@@ -16,7 +16,7 @@
  * 单测里的假索引证明不了任何一条。
  *
  * 【怎么跑】
- *   PIPICLAW_SKILL_HUB=1 npx vitest run tests/integration/skill-hub-live.test.ts
+ *   NW_SKILL_HUB=1 npx vitest run tests/integration/skill-hub-live.test.ts
  *
  * 【默认不跑】要联网;不显式开启就跳过。
  */
@@ -29,7 +29,7 @@ import { TEST_USER_DATA } from '../unit/test-host'
 vi.mock('electron', () => ({
   app: {
     getPath: vi.fn((k: string) => `${TEST_USER_DATA}/${k}`),
-    getName: () => 'pipiclaw',
+    getName: () => 'newworld',
     getVersion: () => '4.5.0',
   },
   safeStorage: {
@@ -49,7 +49,7 @@ import { SkillHub } from '../../electron/skill/SkillHub'
 import { SkillLoader } from '../../electron/skill/SkillLoader'
 import { SkillManager } from '../../electron/skill/SkillManager'
 
-const ENABLED = process.env.PIPICLAW_SKILL_HUB === '1'
+const ENABLED = process.env.NW_SKILL_HUB === '1'
 
 describe('M4-X 开源技能库实跑', () => {
   beforeAll(() => {
@@ -59,7 +59,7 @@ describe('M4-X 开源技能库实跑', () => {
 
   it('拉索引 → 搜索 → 推荐 → 安装 → 能被加载', async (ctx) => {
     if (!ENABLED) {
-      return ctx.skip('[SKIP] 需要联网: PIPICLAW_SKILL_HUB=1')
+      return ctx.skip('[SKIP] 需要联网: NW_SKILL_HUB=1')
     }
 
     const hub = SkillHub.getInstance()

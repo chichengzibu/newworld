@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - M3-B 接线验证:LLM 调用失败时的重试行为
+ * New World - M3-B 接线验证:LLM 调用失败时的重试行为
  *
  * 【本测试不联网】LlmClient.prototype.streamChat 被替换为本地 mock generator。
  *

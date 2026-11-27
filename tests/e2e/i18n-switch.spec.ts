@@ -26,7 +26,7 @@ test.describe('T+450 国际化语言切换', () => {
     await window.waitForSelector('#app', { timeout: 10_000 })
     await window.waitForTimeout(800)
     const lang = await window.evaluate(() => {
-      const stored = localStorage.getItem('pipiclaw:locale')
+      const stored = localStorage.getItem('nw:locale')
       if (stored) return stored
       return document.documentElement.lang || document.documentElement.getAttribute('data-lang') || ''
     })

@@ -108,7 +108,7 @@ export interface SkillCallRecord {
 
 /**
  * SkillEffectivenessTracker: 跟踪 skill 调用效果 + 用户满意度。
- * 持久化到 ~/.pipiclaw/skill-stats.json
+ * 持久化到 ~/.newworld/skill-stats.json
  * 主要消费者:InsightManager(给 Insights 看板用) + SkillVersioning 自动推荐回滚
  */
 export class SkillEffectivenessTracker {

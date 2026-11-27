@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - Insight / AnomalyTimeline (W5.1)
+ * New World - Insight / AnomalyTimeline (W5.1)
  *
  * Rolling anomaly timeline. Each anomaly has severity + category and can
  * be resolved later. Bounded FIFO retention (default 200 entries).

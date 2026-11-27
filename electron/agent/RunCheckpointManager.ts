@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - RunCheckpointManager (#004 设计稿 A1-A3 落实)
+ * New World - RunCheckpointManager (#004 设计稿 A1-A3 落实)
  *
  * run 层 checkpoint:把 LlmAgentBrain 一次 run 的 {messages(含轮内工具结果), tool_state,
  * iteration, status} 以 **append-only 事件流** 落盘,供崩溃/中止后恢复续跑。

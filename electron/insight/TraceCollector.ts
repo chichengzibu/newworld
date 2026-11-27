@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - Insight / TraceCollector (W5.1)
+ * New World - Insight / TraceCollector (W5.1)
  *
  * OpenTelemetry-style in-process span tracker.
  * Stores active spans in memory and publishes trace:span:start / trace:span:end events.

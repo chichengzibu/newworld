@@ -2,6 +2,21 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import { setActivePinia, createPinia } from 'pinia'
 import { nextTick } from 'vue'
+import { createRouter, createMemoryHistory } from 'vue-router'
+
+// v4.9：Settings 现在用 useRoute/useRouter 承载配置中心内嵌切换，
+// 单测需要装一个内存路由，否则注入为 undefined（源码已有防御，但装上更贴近真实）。
+const testRouter = createRouter({
+  history: createMemoryHistory(),
+  routes: [
+    { path: '/settings', component: { template: '<div />' } },
+    { path: '/im-management', component: { template: '<div />' } },
+    { path: '/permissions', component: { template: '<div />' } },
+    { path: '/remote-control', component: { template: '<div />' } },
+    { path: '/settings/im-accounts', component: { template: '<div />' } },
+    { path: '/:pathMatch(.*)*', component: { template: '<div />' } },
+  ],
+})
 
 // Mock element-plus 静态方法(ElMessage / ElMessageBox)。
 // 视图从 element-plus 子路径取用(src/views/Settings.vue:565-566),
@@ -128,7 +143,7 @@ describe('Settings.vue', () => {
 
   function mountComponent() {
     return mount(Settings, {
-      global: { stubs },
+      global: { stubs, plugins: [testRouter] },
       attachTo: document.body,
     })
   }

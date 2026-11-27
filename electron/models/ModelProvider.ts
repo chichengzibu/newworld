@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - 模型提供商类型定义
+ * New World - 模型提供商类型定义
  */
 
 export type ProviderType = 'openai' | 'anthropic' | 'deepseek' | 'azure' | 'ollama' | 'custom' | 'openrouter' | 'volc_ark';

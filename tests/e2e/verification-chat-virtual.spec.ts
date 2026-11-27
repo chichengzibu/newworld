@@ -112,7 +112,7 @@ test.describe('VERIFICATION D5 · 50+ 条消息 + 虚拟滚动', () => {
 
     // 【P0 回归钉】不能出现红屏
     const bodyText = await window.evaluate(() => document.body.innerText)
-    expect(bodyText, '出现了红屏兜底 —— Chat 视图崩了').not.toContain('[PiPiClaw render error]')
+    expect(bodyText, '出现了红屏兜底 —— Chat 视图崩了').not.toContain('[New World render error]')
 
     // 消息确实进了 store(用户消息 + 助手回复 = 110 条)
     const total = await window.evaluate(async ({ convId }) => {

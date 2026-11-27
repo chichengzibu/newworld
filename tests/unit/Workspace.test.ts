@@ -3,7 +3,7 @@ import * as fs from 'node:fs'
 import * as path from 'node:path'
 
 vi.mock('electron', () => ({
-  app: { getPath: vi.fn((k: string) => `/tmp/pipiclaw-ws-${k}`) },
+  app: { getPath: vi.fn((k: string) => `/tmp/newworld-ws-${k}`) },
 }))
 
 vi.mock('electron-log', () => ({

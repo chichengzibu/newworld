@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 
 vi.mock('electron', () => ({
-  app: { getPath: () => process.cwd() + '/.smoke-tmp', getAppPath: () => process.cwd(), getVersion: () => '0.0.0', getName: () => 'pipiclaw' },
+  app: { getPath: () => process.cwd() + '/.smoke-tmp', getAppPath: () => process.cwd(), getVersion: () => '0.0.0', getName: () => 'newworld' },
   ipcMain: { handle: () => {}, on: () => {}, removeHandler: () => {} },
   BrowserWindow: class {},
   dialog: { showMessageBox: () => {}, showOpenDialog: () => {} },

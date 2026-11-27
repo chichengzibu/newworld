@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * PiPiClaw - MCP filesystem server (stdio child process)
+ * New World - MCP filesystem server (stdio child process)
  *
  * 协议: MCP 2025-06-18 (JSON-RPC 2.0 over stdio, newline-delimited)
  * 实现: 5 个工具
@@ -394,7 +394,7 @@ async function handleRequest(msg) {
       case 'initialize': {
         return reply(id, {
           protocolVersion: '2025-06-18',
-          serverInfo: { name: 'pipiclaw-filesystem', version: '1.0.0' },
+          serverInfo: { name: 'newworld-filesystem', version: '1.0.0' },
           capabilities: { tools: {} },
         });
       }

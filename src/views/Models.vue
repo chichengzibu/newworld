@@ -6,13 +6,7 @@
         <span class="provider-count">{{ t('models.providerCount', { enabled: modelsStore.enabledCount, total: modelsStore.totalCount }) }}</span>
       </div>
       <div class="header-right">
-        <Breadcrumb />
-        <!-- 【M4-M】模型对比入口:原来只有 Ctrl+K 命令面板能到(用户得先知道快捷键)。
-             放在模型页的头上 —— 「我想比较几个模型」这个意图就发生在这里。 -->
-        <el-button @click="router.push('/model-compare')">
-          <el-icon><Switch /></el-icon>
-          {{ t('models.compare') }}
-        </el-button>
+        <!-- 【设计审计 #P1-5】面包屑已移除: 60px 图标栏已表达位置, 页头只留主操作 -->
         <el-button type="primary" @click="handleAddProvider">
           <el-icon><Plus /></el-icon>
           {{ t('models.addProvider') }}
@@ -266,9 +260,8 @@ import { ref, reactive, onMounted, computed } from 'vue';
 import { ElMessage } from "element-plus/es/components/message/index"
 import { ElMessageBox } from "element-plus/es/components/message-box/index";
 import { useI18n } from 'vue-i18n';
-import Breadcrumb from '@/components/layout/Breadcrumb.vue';
 import { useModelsStore, PROVIDER_DEFAULTS, type ProviderConfig, type ProviderFormData } from '@/stores/models';
-import { Plus, Switch } from '@element-plus/icons-vue';
+import { Plus } from '@element-plus/icons-vue';
 import { useRouter } from 'vue-router';
 
 const { t } = useI18n();

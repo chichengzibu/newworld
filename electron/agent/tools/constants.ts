@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - BashTool 三层名单 (v3 终版 + 5 裁决; 唯一可调松紧处)
+ * New World - BashTool 三层名单 (v3 终版 + 5 裁决; 唯一可调松紧处)
  *
  * 纯逻辑模块: 禁止 import electron / node 运行时依赖以外的东西,
  * 使 decideCommand / normalizeCommand / isSecretsSegmentHit 可脱离 electron 独立测试 (T1-T5)。
@@ -38,7 +38,8 @@ export interface Decision {
 export const SECRETS_GUARD_PATTERNS: ReadonlyArray<string> = [
   // 裁决 #2a: 路径段感知 → 以下均为 "段名", 匹配 basename or path-segment
   '.ssh',                          // /home/user/.ssh/ , C:\Users\xxx\.ssh\
-  '.pipiclaw-secrets',             // 自定义秘钥包
+  '.newworld-secrets',             // 自定义秘钥包
+  '.pipiclaw-secrets',             // 旧目录名仍在本机存在,保留 guard 防误读真实私钥
   'clawhub-dev-ed25519.key',       // 禁止入库的 key (即使不在 .git 里也拦截)
   'id_rsa',                        // 常见 SSH 私钥文件名
   'id_dsa',

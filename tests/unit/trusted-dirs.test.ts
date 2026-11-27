@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - #005 D6 章 (可信目录联动) 五钉子测试
+ * New World - #005 D6 章 (可信目录联动) 五钉子测试
  *
  * ═══ 被测机制 ═══
  *   isCwdInSandbox 唯一 cwd 校验点 (commandDecide.ts:140-154) 扩为 sandbox ∪ TRUSTED_DIRS。

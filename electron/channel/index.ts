@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - Channel 域入口 (W7.1)
+ * New World - Channel 域入口 (W7.1)
  */
 
 export { ChannelRouter } from './ChannelRouter'

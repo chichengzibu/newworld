@@ -1,5 +1,5 @@
 /**
- * PiPiClaw — 旧技能目录迁移（M4-AH）
+ * New World — 旧技能目录迁移（M4-AH）
  * ═══════════════════════════════════════════════════════════════════════
  * 【这一批在测什么】
  * M4-X 把技能目录从 `<userData>/skills` 改到了「应用自身目录的 skills」。
@@ -34,7 +34,7 @@ describe('M4-AH 旧技能目录迁移', () => {
   let target: string
 
   beforeEach(() => {
-    target = fs.mkdtempSync(path.join(os.tmpdir(), 'pipiclaw-skills-target-'))
+    target = fs.mkdtempSync(path.join(os.tmpdir(), 'newworld-skills-target-'))
     fs.mkdirSync(LEGACY_DIR, { recursive: true })
   })
 

@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - Channel / WhatsAppChannel (W8)
+ * New World - Channel / WhatsAppChannel (W8)
  *
  * Meta WhatsApp Business Cloud API(真实 fetch 实现)。
  * 发消息: https://graph.facebook.com/v19.0/{phoneNumberId}/messages
@@ -32,8 +32,10 @@ export class WhatsAppChannel implements Channel {
   async send(msg: ChannelMessage): Promise<void> {
     const config = this.configStore.get('im-whatsapp')
     if (!config?.enabled) throw new Error('WhatsAppChannel: 通道未启用或未配置')
-    if (!config.botToken || !config.appId) throw new Error('WhatsAppChannel: 缺少 botToken 与 appId(phone number id)')
-    const url = `https://graph.facebook.com/v19.0/${config.appId}/messages`
+    // IM 真连通:UI 保存 phoneNumberId，老配置用 appId
+    const phoneNumberId = config.phoneNumberId ?? config.appId
+    if (!config.botToken || !phoneNumberId) throw new Error('WhatsAppChannel: 缺少 botToken 与 appId(phone number id)')
+    const url = `https://graph.facebook.com/v19.0/${phoneNumberId}/messages`
     const res = await fetch(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${config.botToken}` },

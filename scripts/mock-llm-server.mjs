@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * PiPiClaw Mock LLM Server (P1-T1.4)
+ * New World Mock LLM Server (P1-T1.4)
  *
  * 模拟 OpenAI chat/completions 端点,返回可控响应。
  * 用法:

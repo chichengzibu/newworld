@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - ContextEngine:上下文预算管理 (M2-A)
+ * New World - ContextEngine:上下文预算管理 (M2-A)
  *
  * 【为什么需要】
  * LlmAgentBrain.run() 的 messages 数组在单轮 run 内【只增不减】:

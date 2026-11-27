@@ -1,5 +1,5 @@
 /**
- * PiPiClaw — 兜底占位实现的诚实性测试（M4-H）
+ * New World — 兜底占位实现的诚实性测试（M4-H）
  * ═══════════════════════════════════════════════════════════════
  * 【为什么这条值得单独钉】
  * `main.ts` 的注册顺序是:
@@ -17,7 +17,7 @@
 import { describe, it, expect, vi } from 'vitest'
 
 vi.mock('electron', () => ({
-  app: { getPath: vi.fn((k: string) => `/tmp/pipiclaw-stub-${k}`) },
+  app: { getPath: vi.fn((k: string) => `/tmp/newworld-stub-${k}`) },
   ipcMain: { handle: () => {}, on: () => {}, removeHandler: () => {} },
   BrowserWindow: class {},
   dialog: { showMessageBox: () => {}, showOpenDialog: () => {} },

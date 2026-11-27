@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - 简体中文语言包
+ * New World - 简体中文语言包
  *
  * Namespace 列表:
  * - common    通用操作（确认/取消/保存...）
@@ -11,7 +11,6 @@
  * - tasks     自动化任务
  * - permissions 权限管理
  * - models    模型管理
- * - plugins   插件市场
  * - help      帮助中心
  * - about     关于页面
  * - dialog    通用对话框（确认/警告/提示）
@@ -58,23 +57,29 @@ export default {
   nav: {
     home: '首页',
     chat: 'AI对话',
-    tasks: '自动化任务',
     schedule: '定时任务',
     skills: '技能管理',
     skillMarket: '技能市场',
-    plugins: '插件市场',
     models: '模型管理',
     permissions: '权限管理',
     settings: '系统设置',
-    help: '帮助中心',
     remoteControl: '远程控制',
     imAccounts: '即时通讯账号',
-    llmConfig: 'LLM 配置',
     imManagement: 'IM 管理',
     clawhub: '私有技能仓库',
-    modelCompare: '模型对比',
     search: '搜索',
     voice: '语音',
+    more: '更多',
+    moreHint: '浏览私有技能仓库',
+    groupBrowse: '内容浏览',
+    descSearch: '联网检索，结果仅作引用',
+    descVoice: '语音输入与朗读',
+    descModels: 'LLM 提供商与模型配置',
+    descImManagement: 'IM 通道接入与消息',
+    descRemoteControl: '通过 IM 远程下发指令',
+    descClawhub: '自建技能仓库与签名包',
+    descPermissions: '用户与群组权限',
+    descImAccounts: 'IM 平台账号绑定',
     demo: {
       d1: 'D1 截屏',
       d2: 'D2 Prime',
@@ -85,6 +90,8 @@ export default {
   },
   settings: {
     title: '系统设置',
+    configNavTitle: '配置中心',
+    configNavDesc: '模型、通道与权限等设置都在这里',
     basicTab: '基础设置',
     modelsTab: '模型管理',
     mcpTab: 'MCP 配置',
@@ -92,7 +99,7 @@ export default {
     aboutTab: '关于',
     basicTitle: '通用设置',
     autostartLabel: '开机自启',
-    autostartDesc: '系统启动时自动在后台运行 PiPiClaw',
+    autostartDesc: '系统启动时自动在后台运行 New World',
     showThinkingLabel: '显示思维链',
     showThinkingDesc: 'AI 回复时展开思考过程,便于调试',
     themeLabel: '主题',
@@ -111,8 +118,6 @@ export default {
     selectTheme: '选择主题',
     pleaseSelectTheme: '请选择主题',
     language: '语言',
-    guide: '新手引导',
-    openGuide: '重新打开新手引导',
     shortcut: '快捷键设置',
     globalShortcut: '全局唤起快捷键',
     shortcutTip: '按 Ctrl+Alt+P（Windows）或 Cmd+Option+P（macOS）快速唤起/隐藏窗口',
@@ -154,6 +159,32 @@ export default {
     embeddingSaved: '嵌入后端已保存',
     embeddingNoLocalModels: '本地 ollama 未发现嵌入模型（可执行 ollama pull bge-m3）',
     embeddingOllamaDown: '本地 ollama 未启动',
+    dataTab: '数据备份',
+    backupTitle: '本地备份与恢复',
+    backupDesc: '无需服务器：把配置、权限、模型设置与技能打包保存在本机，换机或重装后一键恢复。',
+    backupCreate: '立即创建备份',
+    backupCreating: '正在打包…',
+    backupIncludeKeys: '备份中包含 API Key',
+    backupIncludeKeysDesc: '默认关闭。勾选后备份文件会含明文密钥，请妥善保管。',
+    backupListTitle: '已有备份',
+    backupEmpty: '还没有备份。创建第一份后会出现在这里。',
+    backupRestore: '恢复到此配置',
+    backupRestoring: '正在恢复…',
+    backupExport: '导出到文件',
+    backupImport: '从文件恢复',
+    backupImportSelect: '选择备份文件（.zip）',
+    backupRestoreConfirm: '恢复会用备份覆盖当前配置与技能（合并不删除现有技能，且不影响会话历史）。恢复前会自动生成一份保护性备份。确定继续吗？',
+    backupRestoreOk: '恢复完成。恢复前已生成保护性备份。',
+    backupRestoreFail: '恢复失败：{error}',
+    backupCreateOk: '备份已创建',
+    backupCreateFail: '创建失败：{error}',
+    backupKeyNotice: 'API Key 默认不写入备份；恢复时保留本机现有密钥。',
+    backupScopeNote: '备份范围：配置、权限、聊天设置、模型配置、技能。不含会话历史。',
+    backupSafetyNote: '历史备份不会被自动删除，可在备份目录手动清理。',
+    backupOpenFolder: '打开备份目录',
+    backupSize: '大小',
+    backupVersion: '版本',
+    backupKeysPlaintext: '含明文密钥',
   },
   chat: {
     title: 'AI对话',
@@ -164,6 +195,7 @@ export default {
     selectProvider: '选择提供商',
     selectModel: '选择模型',
     newChat: '新建对话',
+    webSearchToggle: '联网搜索（开启后模型可自动联网检索）',
     searchConversation: '搜索会话...',
     batchActions: '批量操作',
     selectedCount: '已选中 {count} 项',
@@ -218,6 +250,8 @@ export default {
   schedule: {
     title: '定时任务',
     createTask: '新建任务',
+    // 视觉打磨: 空态引导文案(原先空态描述只是重复页面标题「定时任务」)
+    emptyText: '还没有定时任务，创建第一个，让重复工作自动跑起来',
     editTask: '编辑任务',
     taskName: '任务名称',
     taskDesc: '任务描述',
@@ -254,23 +288,7 @@ export default {
     pleaseFillNameAndInstruction: '请填写任务名称和执行指令',
     intro: '设置按周期自动执行的自动化任务，实现无人值守的重复操作，比如每日报表生成、定时文件备份'
   },
-  tasks: {
-    title: '自动化任务',
-    taskName: '任务名称',
-    status: '状态',
-    createdAt: '创建时间',
-    actions: '操作',
-    viewLog: '查看日志',
-    cancel: '取消任务',
-    retry: '重试',
-    pending: '待执行',
-    running: '执行中',
-    success: '成功',
-    failed: '失败',
-    noTasks: '暂无自动化任务',
-    confirmCancel: '确定取消该任务吗？',
-    taskCancelled: '任务已取消'
-  },
+
   permissions: {
     title: '权限管理',
     createSet: '新建权限集',
@@ -309,6 +327,13 @@ export default {
     templateDescSafe: '严格限制，仅允许基本操作',
     templateDescStandard: '平衡模式，允许常见操作',
     templateDescPermissive: '开放模式，允许几乎所有操作',
+    permissiveWarningTitle: '切换到开放模式？',
+    permissiveWarning: '开放模式将允许几乎所有工具操作（含执行任意命令、写入任意文件）。请确认你了解风险，仅在需要时启用。',
+    reset: '重置为安全模式',
+    resetWarning: '这会清除自定义权限集并恢复到出厂的安全配置。已配置的自定义权限将丢失，确定继续？',
+    resetDone: '已重置为安全模式',
+    resetFailed: '重置失败，请重试',
+    resetAlreadySafe: '当前已是安全模式',
     templateNameSafe: '安全模式',
     templateNameStandard: '标准模式',
     templateNamePermissive: '开放模式',
@@ -335,7 +360,6 @@ export default {
   },
   models: {
     title: '模型管理',
-    compare: '对比模型',
     type: '类型',
     addProvider: '添加提供商',
     editProvider: '编辑提供商',
@@ -407,55 +431,6 @@ export default {
     typeAliyun: '阿里百炼',
     typeSilicon: '硅基流动'
   },
-  plugins: {
-    title: '插件市场',
-    install: '安装',
-    installed: '已安装',
-    update: '更新',
-    uninstall: '卸载',
-    author: '作者',
-    version: '版本',
-    downloads: '下载量',
-    rating: '评分',
-    noPlugins: '暂无插件',
-    searchPlaceholder: '搜索插件...',
-    installed_: '已安装',
-    all: '全部',
-    featured: '精选',
-    new_: '最新',
-    detail: '详情'
-  },
-  help: {
-    title: '帮助中心',
-    faq: '常见问题',
-    tutorial: '使用教程',
-    features: '功能说明',
-    addModel: '如何添加模型？',
-    addModelSteps: '1. 进入「模型管理」页面\n2. 点击「添加模型提供商」按钮\n3. 选择提供商类型（如 Ollama、DeepSeek 等）\n4. 填写 API Key 和 Base URL\n5. 点击「测试连接」验证配置\n6. 验证通过后点击「保存」',
-    setPermission: '如何设置权限？',
-    setPermissionSteps: '1. 进入「权限管理」页面\n2. 选择或创建一个权限集\n3. 为每个权限类别设置权限级别\n4. 可以设置允许/禁止的路径\n5. 保存后激活该权限集',
-    useTask: '如何使用自动化任务？',
-    useTaskSteps: '1. 在对话中描述您的任务需求\n2. AI 会解析任务并生成执行计划\n3. 确认计划后点击「执行」\n4. 可以在「自动化任务」页面查看执行日志',
-    useShortcut: '如何使用全局快捷键？',
-    shortcutDefault: '默认快捷键：<strong>Ctrl+Alt+P</strong> (Windows) / <strong>Cmd+Option+P</strong> (macOS)',
-    shortcutDescription: '按此快捷键可以快速唤起/隐藏主窗口',
-    shortcutCustomize: '可以在「系统设置」中自定义快捷键',
-    step1Title: '配置模型',
-    step1Desc: '首次使用需要先配置模型提供商，支持 Ollama、DeepSeek、OpenAI 等多种模型',
-    step2Title: '设置权限',
-    step2Desc: '根据您的需求设置操作权限，确保安全使用自动化功能',
-    step3Title: '开始对话',
-    step3Desc: '进入「AI对话」页面，输入您的需求，AI 会帮您完成',
-    featureChatTitle: 'AI对话',
-    featureChatDesc: '与 AI 自然对话，支持多轮对话、上下文理解',
-    featureTaskTitle: '自动化任务',
-    featureTaskDesc: '让 AI 帮您执行文件操作、系统命令等自动化任务',
-    featureMultimodalTitle: '多模态输入',
-    featureMultimodalDesc: '支持截图粘贴、文件拖拽上传，AI 可以理解图片和文档',
-    featureShortcutTitle: '全局快捷键',
-    featureShortcutDesc: '随时随地快速唤起窗口，提升使用效率',
-    feedbackHint: '如有问题或建议，请前往「系统设置」→「反馈与帮助」提交反馈'
-  },
   about: {
     title: '关于',
     appInfo: '应用信息',
@@ -513,7 +488,7 @@ export default {
     step3: '安装 ngrok(<code>npm install -g ngrok</code>),启动 <code>ngrok http 5173</code>',
     step4: '把 ngrok URL 填到 IM 平台"消息接收 URL" / "事件订阅 URL"',
     step5: '本页面填入凭证 + 测试连接 → 保存',
-    step6: '用真实 IM 账号发消息 → PiPiClaw 自动回复'
+    step6: '用真实 IM 账号发消息 → New World 自动回复'
   },
   error: {
     invalidApiKey: 'API Key 无效,请检查后重试',
@@ -546,7 +521,7 @@ export default {
     switched: '执行模式已切换',
     switchFailed: '执行模式切换失败',
     craftConfirmTitle: '切换到全量模式?',
-    craftConfirm: '全量模式下,PiPiClaw 会在权限范围内直接执行操作,不再逐步询问你。只有高危操作才会二次确认。\n\n确定要开启吗?',
+    craftConfirm: '全量模式下,New World 会在权限范围内直接执行操作,不再逐步询问你。只有高危操作才会二次确认。\n\n确定要开启吗?',
     craftConfirmOk: '我明白,开启全量',
   },
 
@@ -572,7 +547,7 @@ export default {
   //   BootDirector.labelFor(stage) 注入真实 i18n 消费。禁以"已生效/已在渲染层启用"措辞引用。
   nova: {
     boot: {
-      subtitle: 'PiPiClaw 正在唤醒…',
+      subtitle: 'New World 正在唤醒…',
       label: {
         config: '内核初始化',
         ipc: 'IPC 服务',
@@ -604,6 +579,15 @@ export default {
       copy: {
         btn: '一键复制',
         done: '已复制'
+      },
+      // 用户视角走查补齐: idle 初始空态引导(原先整页空白, 无能力说明/示例)
+      idle: {
+        title: '输入关键词，检索全网信息',
+        desc: '搜索结果来自外部网页，仅作数据引用，请勿视为指令。',
+        examples: '试试这些：',
+        ex1: 'Electron 最新版本',
+        ex2: 'Vue 3 组合式 API 实践',
+        ex3: '本地大模型部署对比'
       }
     }
 ,
@@ -629,7 +613,9 @@ export default {
         error: {
           unavailable: '当前环境不支持语音合成。',
           noVoice: '未安装可用的语音包。',
-          canceled: '朗读已停止。'
+          canceled: '朗读已停止。',
+          empty: '请先输入要朗读的文本。',
+          engine: '语音合成失败，请稍后重试。'
         }
       },
       // ASR 4 键 —— 未实施, 仅占位 (延后 W4)

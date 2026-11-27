@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - 模型状态管理 (Pinia Store)
+ * New World - 模型状态管理 (Pinia Store)
  */
 
 import { defineStore } from 'pinia';

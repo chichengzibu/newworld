@@ -1,5 +1,5 @@
 /**
- * PiPiClaw — 裁判校准测试（M4-J）
+ * New World — 裁判校准测试（M4-J）
  * ═══════════════════════════════════════════════════════════════════════
  * 【这一批在测什么】
  * ① 校准指标算得对不对（κ / Wilson CI / 相关 / 混淆）
@@ -14,7 +14,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 vi.mock('electron', () => ({
-  app: { getPath: vi.fn((k: string) => `/tmp/pipiclaw-calib-${k}`) },
+  app: { getPath: vi.fn((k: string) => `/tmp/newworld-calib-${k}`) },
 }))
 vi.mock('electron-log', () => ({
   default: {

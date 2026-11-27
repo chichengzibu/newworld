@@ -1,11 +1,11 @@
-// P5-UX E: Ollama 宕机 / 网络异常 / 错误模型 — PiPiClaw 降级 UX
+// P5-UX E: Ollama 宕机 / 网络异常 / 错误模型 — New World 降级 UX
 import { describe, it, expect } from 'vitest'
 import { vi } from 'vitest'
 
 vi.mock('electron', () => ({
   app: {
-    getPath: vi.fn((k: string) => `/tmp/pipiclaw-ollama-fail-${k}`),
-    getName: () => 'pipiclaw',
+    getPath: vi.fn((k: string) => `/tmp/newworld-ollama-fail-${k}`),
+    getName: () => 'newworld',
     getVersion: () => '4.2.0',
   },
   safeStorage: {

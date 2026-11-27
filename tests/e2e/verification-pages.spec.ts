@@ -34,7 +34,10 @@ test.describe('VERIFICATION · 剩余界面实跑', () => {
       root: '.skills-page',
       must: [
         '.skills-dir-card',        // 技能目录卡
-        '.skills-trial-card',      // 技能验证(受控对照)卡
+        // 【P1-5 设计改版】技能验证卡默认收在「技能作者工具」折叠面板里,
+        // `.skills-trial-card` 是 hidden,旧断言 toBeVisible 永远不成立 →
+        // 改为断折叠入口本身可见(卡片内容由展开交互负责)。
+        '.skills-trial-collapse',
         // 【M4-Y】原「浏览 ClawHub 市场」按钮已删 —— 开源技能库直接内嵌在本页，
         // 公开技能在「开源技能库」卡片里找（自建仓库才去 /clawhub）。
         '.skills-hub-card',        // 开源技能库卡（搜索/推荐/下载）
@@ -44,13 +47,12 @@ test.describe('VERIFICATION · 剩余界面实跑', () => {
       name: '模型管理',
       go: (w) => gotoBySideNav(w, '/models'),
       root: '.models-page',
-      must: [
-        'button:has-text("添加提供商")',
-        'button:has-text("对比模型")', // M4-M 新增的入口
-      ],
+      // v4.9：「对比模型」按钮随模型对比模块下线一并移除
+      must: ['button:has-text("添加提供商")'],
     },
     {
       name: 'IM 管理',
+      // v4.9：IM 管理内嵌在设置页配置中心（左侧选栏 + 右侧面板切换）
       go: (w) => gotoRoute(w, '/im-management'),
       root: '.im-management',
       must: ['.im-tabs'],
@@ -97,7 +99,7 @@ test.describe('VERIFICATION · 剩余界面实跑', () => {
 
       // ③ 没有红屏兜底
       const bodyText = await window.evaluate(() => document.body.innerText)
-      expect(bodyText, `${page.name}页出现红屏兜底`).not.toContain('[PiPiClaw render error]')
+      expect(bodyText, `${page.name}页出现红屏兜底`).not.toContain('[New World render error]')
 
       // 渲染期没有未捕获异常
       expect(errors, `${page.name}页有未捕获异常:${errors.join(' | ')}`).toHaveLength(0)
@@ -133,7 +135,7 @@ test.describe('VERIFICATION · 剩余界面实跑', () => {
       const panelText = (await window.locator('.settings-panels').innerText()).trim()
       expect(panelText.length, `设置页第 ${i + 1} 个页签内容为空`).toBeGreaterThan(0)
       const bodyText = await window.evaluate(() => document.body.innerText)
-      expect(bodyText, `设置页第 ${i + 1} 个页签出现红屏`).not.toContain('[PiPiClaw render error]')
+      expect(bodyText, `设置页第 ${i + 1} 个页签出现红屏`).not.toContain('[New World render error]')
     }
   })
 })

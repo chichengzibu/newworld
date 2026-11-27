@@ -1,5 +1,5 @@
 /**
- * PiPiClaw — 失败分类器 (M4-B)
+ * New World — 失败分类器 (M4-B)
  *
  * 【为什么单独成模块,而不是挂在 SelfLearner 上】
  * 上一版把 classifyFailure 写成 `SelfLearner.classifyFailure` 静态方法,

@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - Channel / SlackChannel (W8)
+ * New World - Channel / SlackChannel (W8)
  *
  * Slack Web API(真实 fetch 实现)。
  * 发消息: https://slack.com/api/chat.postMessage

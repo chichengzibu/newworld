@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - Workspace 抽象(W9.3)
+ * New World - Workspace 抽象(W9.3)
  *
  * host path = userData/sandboxes/{id}/mnt
  * container path = /mnt/data(固定,便于 docker -v 挂载)

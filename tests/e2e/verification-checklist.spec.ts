@@ -38,14 +38,14 @@ test.describe('VERIFICATION D/E 段 · 清单自动化', () => {
     const nav = window.locator('nav.sidenav')
     await expect(nav).toHaveCount(1)
 
-    // 清单要求:5 个主图标 + 底部齿轮。实际条目数随版本变(已加 /search /voice),
-    // 所以断「≥5」而不是断死数字 —— 断死数字只会在 UI 正常增项时误报。
+    // 【v4.7】rail 收敛为 3 个工作对象 + 底部设置(共 4)。输入能力下沉到
+    // ChatInput、配置页进设置页、浏览项进「更多」——所以这里断 4,不再是 6。
+    // 数量本身也有契约:tests/unit/nav-ia.test.ts 锁定 PRIMARY_NAV 恰为 3。
     const icons = nav.locator('a.nav-icon')
     const count = await icons.count()
-    expect(count).toBeGreaterThanOrEqual(6) // 5 主图标 + 底部设置
+    expect(count).toBe(4) // 对话 / 技能 / 定时任务 + 底部设置
 
-    // 【关键断言】每个图标都要有非空 aria-label/title。
-    // M4-G 实跑抓到:nav.search / nav.voice 缺 i18n key → 图标画得出、但没有文案。
+    // 【关键断言】每个图标都要有非空 aria-label/title(M4-G 缺陷回归钉)。
     const labels = await icons.evaluateAll((els: Element[]) =>
       els.map((el) => ({
         aria: el.getAttribute('aria-label') ?? '',
@@ -58,13 +58,24 @@ test.describe('VERIFICATION D/E 段 · 清单自动化', () => {
       expect(l.title.trim(), `图标 ${l.href} 缺少 title`).not.toBe('')
     }
 
+    // 下沉到「更多」的输入/浏览项同样要有可读文案(原来只有 rail 被钉住)
+    await window.locator('[data-testid="nav-more-trigger"]').click()
+    const morePanel = window.locator('[data-testid="nav-more-panel"]')
+    await expect(morePanel).toBeVisible({ timeout: 8_000 })
+    const moreLabels = await morePanel.locator('a.nav-more-item .nav-more-item-title').allTextContents()
+    expect(moreLabels.length).toBeGreaterThanOrEqual(1)
+    for (const label of moreLabels) {
+      expect(label.trim(), '「更多」入口缺少可读文案').not.toBe('')
+    }
+    await window.keyboard.press('Escape')
+
     // 底部齿轮 = 设置入口(独立于主导航)
     const settings = nav.locator('a.nav-icon[href*="settings"]')
     await expect(settings).toHaveCount(1)
     await expect(settings).toHaveAttribute('aria-label', /\S/)
   })
 
-  test('D2: 标题栏 = 齿轮 + PiPiClaw + 三枚窗口控制(可见且有尺寸)', async ({ window }) => {
+  test('D2: 标题栏 = 齿轮 + New World + 三枚窗口控制(可见且有尺寸)', async ({ window }) => {
     await settle(window)
 
     const titleBar = window.locator('.title-bar')
@@ -72,7 +83,7 @@ test.describe('VERIFICATION D/E 段 · 清单自动化', () => {
 
     // 前齿轮 + 应用名
     await expect(titleBar.locator('.app-icon')).toHaveCount(1)
-    await expect(titleBar.locator('.app-name')).toHaveText(/PiPiClaw/i)
+    await expect(titleBar.locator('.app-name')).toHaveText(/New World/i)
 
     // 窗口控制:最小化 / 最大化 / 关闭
     for (const cls of ['minimize', 'maximize', 'close']) {
@@ -96,15 +107,16 @@ test.describe('VERIFICATION D/E 段 · 清单自动化', () => {
     const attached = (await indicator.count()) > 0
     if (!attached) {
       // 端口没起来 → 指示器理应不显示(不该凭空显示一个空圆点)
-      const port = window.locator('.gateway-port')
-      expect(await port.count(), '没有网关指示器时不应有残留端口号').toBe(0)
       test.info().annotations.push({ type: 'note', description: '网关在本轮未启动,指示器正确隐藏' })
       return
     }
 
-    // 端口号必须是数字
-    const portText = (await indicator.locator('.gateway-port').innerText()).trim()
-    expect(portText, '网关端口号不是数字').toMatch(/^\d+$/)
+    // 【审计 #P1-5】端口号已从常驻 DOM(.gateway-port 已删)收进 hover tooltip。
+    // 真实用户看到的就是这个 title,所以断它里面的端口是数字。
+    const title = (await indicator.getAttribute('title')) ?? ''
+    expect(title, '网关指示器应有状态 tooltip').toMatch(/端口\s*\d+/)
+    const portMatch = title.match(/端口\s*(\d+)/)
+    expect(portMatch, `tooltip 端口号不是数字:${title}`).not.toBeNull()
 
     // 小圆点存在
     await expect(indicator.locator('.gateway-dot')).toHaveCount(1)
@@ -204,10 +216,10 @@ test.describe('VERIFICATION D/E 段 · 清单自动化', () => {
     await window.waitForTimeout(800)
 
     const bodyText = await window.evaluate(() => document.body.innerText)
-    expect(bodyText, '未出现红屏兜底文本').toContain('[PiPiClaw render error]')
+    expect(bodyText, '未出现红屏兜底文本').toContain('[New World render error]')
     expect(bodyText).toContain('VERIFICATION-E2-探针错误')
   })
-  test('M1: 低频功能入口在「意图现场」,不在图标栏里(开源技能库 / 模型对比)', async ({ window }) => {
+  test('M1: 低频功能入口在「意图现场」,不在图标栏里(开源技能库)', async ({ window }) => {
     // 【M4-M】v4.4 把侧栏收成 7 个固定图标时,ClawHub 与模型对比的侧栏入口丢了。
     // 决策:不进侧栏(无文字的图标栏靠"识别",对新手更难),改为在**母页面**放带文字的入口
     //   —— 同类产品的做法:Cherry Studio 的插件市场在「设置 → Agent 设置 → 插件」、
@@ -229,16 +241,7 @@ test.describe('VERIFICATION D/E 段 · 清单自动化', () => {
     // 卡片里要有搜索框（用户能直接在这里找，而不是先跳页）
     await expect(window.locator('.skills-hub-card input').first()).toBeVisible({ timeout: 10_000 })
 
-    // ② 模型页 → 对比模型
-    await gotoBySideNav(window, '/models')
-    const compareBtn = window.locator('button:has-text("对比模型"), button:has-text("Compare Models")').first()
-    await expect(compareBtn, '模型页缺少「对比模型」入口').toBeVisible({ timeout: 15_000 })
-    await expect(compareBtn).toBeInViewport({ timeout: 10_000 })
-    await compareBtn.click()
-    await window.waitForURL(/#\/model-compare/, { timeout: 10_000 })
-    await expect(window.locator('h1').first()).toBeVisible({ timeout: 10_000 })
-
-    // ③ 侧栏**没有**这两个图标(决策本身也要被钉住 —— 免得哪天又被加回去)
+    // ② 侧栏**不该有**这些图标(决策本身也要被钉住 —— 免得哪天又被加回去)
     await expect(window.locator('nav.sidenav a.nav-icon[href$="#/clawhub"]')).toHaveCount(0)
     await expect(window.locator('nav.sidenav a.nav-icon[href$="#/model-compare"]')).toHaveCount(0)
   })

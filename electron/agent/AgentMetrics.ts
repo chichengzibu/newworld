@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - Agent / AgentMetrics (W5.2.1)
+ * New World - Agent / AgentMetrics (W5.2.1)
  *
  * In-memory counters for decisions, tool calls, cost. Powers the Agent
  * tab in the Insights view.

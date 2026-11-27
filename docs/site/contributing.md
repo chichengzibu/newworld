@@ -1,6 +1,6 @@
-# PiPiClaw 贡献者指南
+# New World 贡献者指南
 
-> 欢迎贡献 PiPiClaw!这份文档说明如何提 PR / 报 bug / 贡献 skill。
+> 欢迎贡献 New World!这份文档说明如何提 PR / 报 bug / 贡献 skill。
 
 ## 行为准则
 
@@ -13,8 +13,8 @@
 ### 1. Fork + 分支
 
 ```bash
-git clone https://github.com/<your-fork>/pipiclaw.git
-cd pipiclaw
+git clone https://github.com/<your-fork>/newworld.git
+cd newworld
 git checkout -b feat/your-feature
 ```
 
@@ -89,7 +89,7 @@ GitHub Issues,带以下模板:
 ...
 
 ## 环境
-- PiPiClaw 版本: v2.1.0
+- New World 版本: v2.1.0
 - OS: Windows 11 / macOS 14 / Ubuntu 22.04
 - LLM provider: OpenAI GPT-4
 - 已安装技能: <列表>
@@ -194,7 +194,7 @@ piclaw/
 
 - GitHub Issues:Bug / Feature
 - GitHub Discussions:设计 / skill proposal
-- 邮件:`support@pipiclaw.dev`(预留)
+- 邮件:`support@newworld.dev`(预留)
 
 ---
 

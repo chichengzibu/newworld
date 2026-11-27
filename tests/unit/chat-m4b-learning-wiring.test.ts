@@ -1,5 +1,5 @@
 /**
- * PiPiClaw — M4-B 学习闭环【接线】验证
+ * New World — M4-B 学习闭环【接线】验证
  * ═══════════════════════════════════════════════════════════════
  * 【为什么单独一个文件】
  * 上一份 learning-trajectory-m4b.test.ts 验的是【单元】:
@@ -23,10 +23,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 vi.mock('electron', () => ({
   app: {
-    getPath: vi.fn((key: string) => `/tmp/pipiclaw-m4b-${key}`),
+    getPath: vi.fn((key: string) => `/tmp/newworld-m4b-${key}`),
     getAppPath: () => '/tmp',
     getVersion: () => '0.0.0',
-    getName: () => 'pipiclaw',
+    getName: () => 'newworld',
     on: vi.fn(),
     off: vi.fn(),
   },

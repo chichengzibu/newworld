@@ -123,8 +123,9 @@ describe('P5-UX: CommandPalette 命令面板(逻辑层)', () => {
     // 【M4-N 修】原查询是 'pylb' —— 实测它在真实字段里**匹配不到任何一项**
     // (原来这条能过,是因为 prompt 模板的优先级加权在**零匹配时也被加上**
     //  → 所有模板恒"匹配成功" → 过滤形同虚设)。
-    // 现改成真正能命中的散字查询:'cmp' 是关键词 'compare' 的子序列(c→m→p)。
-    ;(w.vm as any).query = 'cmp'
+    // 现改成真正能命中的散字查询:'mdl' 是关键词 'models' 的子序列(m→d→l)。
+    // (原 'cmp' 依赖已删的「模型对比」命令 compare 关键词,v4.9 模块下线后改此。)
+    ;(w.vm as any).query = 'mdl'
     await flushPromises()
     const gr = (w.vm as any).groupedResults as Array<{ items: Array<{ title: string }> }>
     const allItems = gr.flatMap((g) => g.items)
@@ -151,7 +152,7 @@ describe('P5-UX: CommandPalette 命令面板(逻辑层)', () => {
 
   it('recentConversations 读取 localStorage', async () => {
     localStorage.setItem(
-      'pipiclaw_recent_commands',
+      'nw_recent_commands',
       JSON.stringify([{ id: 'r1', title: '测试', ts: Date.now() }]),
     )
     const w = mount(CommandPalette, { global: { plugins: [i18n, router] } })
@@ -170,7 +171,7 @@ describe('P5-UX: CommandPalette 命令面板(逻辑层)', () => {
     expect(firstItem).toBeDefined()
     if (firstItem) {
       await (w.vm as any).commitItem(firstItem)
-      const stored = JSON.parse(localStorage.getItem('pipiclaw_recent_commands') || '[]') as Array<unknown>
+      const stored = JSON.parse(localStorage.getItem('nw_recent_commands') || '[]') as Array<unknown>
       expect(stored.length).toBeGreaterThan(0)
     }
   })

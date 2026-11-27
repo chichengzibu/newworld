@@ -136,7 +136,7 @@ async function runDemo() {
 
 .a5-step {
   padding: var(--space-sm, 8px) var(--space-md, 16px);
-  border-left: 3px solid var(--accent-color, #007aff);
+  border-left: 3px solid var(--accent-color, #7c8db5);
   background: var(--card-bg, #fafafa);
   border-radius: var(--radius-sm, 4px);
   margin-bottom: var(--space-sm, 8px);
@@ -156,11 +156,11 @@ async function runDemo() {
 }
 
 .a5-step-ok {
-  color: #16a34a;
+  color: var(--success-color, #16a34a);
 }
 
 .a5-step-fail {
-  color: #c92a2a;
+  color: var(--danger-color, #c92a2a);
 }
 
 .a5-step-understanding {

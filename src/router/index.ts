@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - Vue Router路由配置
+ * New World - Vue Router路由配置
  * 
  * 职责：
  * 1. 定义应用路由
@@ -45,21 +45,17 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
-    path: '/help',
-    name: 'Help',
-    component: () => import('@/views/Help.vue'),
-    meta: { title: '帮助', icon: 'QuestionFilled' }
-  },
-  {
     path: '/models',
     name: 'Models',
     component: () => import('@/views/Models.vue'),
     meta: { title: '模型', icon: 'Cpu' }
   },
   {
+    // v4.9：配置中心四项不再是整页 —— 统一渲染 Settings，并在其右侧面板内切换
     path: '/permissions',
     name: 'Permissions',
-    component: () => import('@/views/Permissions.vue'),
+    component: () => import('@/views/Settings.vue'),
+    props: { initialConfigPath: '/permissions' },
     meta: { title: '权限', icon: 'Lock' }
   },
   {
@@ -75,15 +71,16 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '语音', icon: 'Microphone' }
   },
   {
+    // 【设计审计 #P0-4】插件市场已下架 — 原页面为假数据演示卡(下载量/评分均为编造),
+    // 无真实生态前不暴露该页; 私有技能分发走 /clawhub。
     path: '/plugin-market',
-    name: 'PluginMarket',
-    component: () => import('@/views/PluginMarket.vue'),
-    meta: { title: '插件市场', icon: 'Shop' }
+    redirect: '/clawhub'
   },
   {
     path: '/remote-control',
     name: 'RemoteControl',
-    component: () => import('@/views/RemoteControl.vue'),
+    component: () => import('@/views/Settings.vue'),
+    props: { initialConfigPath: '/remote-control' },
     meta: { title: '远程控制', icon: 'Connection' }
   },
   {
@@ -93,10 +90,10 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '计划任务', icon: 'Calendar' }
   },
   {
+    // 【设计审计 #P0-3】/tasks(自动化任务)与 /schedule(定时任务)语义重叠 → 统一入口。
+    // 老链接 /tasks 重定向到 /schedule; Tasks.vue 保留文件但不再注册独立页面。
     path: '/tasks',
-    name: 'Tasks',
-    component: () => import('@/views/Tasks.vue'),
-    meta: { title: '任务', icon: 'List' }
+    redirect: '/schedule'
   },
   {
     path: '/d1-demo',
@@ -131,12 +128,14 @@ const routes: RouteRecordRaw[] = [
   {
     path: '/settings/im-accounts',
     name: 'ImAccounts',
-    component: () => import('@/views/ImAccounts.vue'),
+    component: () => import('@/views/Settings.vue'),
+    props: { initialConfigPath: '/settings/im-accounts' },
   },
   {
     path: '/im-management',
     name: 'ImManagement',
-    component: () => import('@/views/ImManagement.vue'),
+    component: () => import('@/views/Settings.vue'),
+    props: { initialConfigPath: '/im-management' },
     meta: { title: 'IM 管理', icon: 'ChatDotRound' },
   },
   {
@@ -147,17 +146,11 @@ const routes: RouteRecordRaw[] = [
     meta: { title: '私有技能仓库', icon: 'Goods' },
   },
   {
-    path: '/model-compare',
-    name: 'ModelCompare',
-    component: () => import('@/views/ModelCompare.vue'),
-    meta: { title: '模型对比', icon: 'DataAnalysis' },
-  },
-  {
+    // 【设计审计 #P0-3】模型配置统一入口 = /models(模型管理)。
+    // /settings/llm-config 重定向过去; humanizeError 的「打开 LLM 配置」同步改指 /models。
     path: '/settings/llm-config',
-    name: 'LlmConfig',
-    component: () => import('@/views/LlmConfig.vue'),
-    meta: { title: 'LLM 配置', icon: 'MagicStick' }
-  }
+    redirect: '/models'
+  },
 ];
 
 const router = createRouter({
@@ -182,7 +175,7 @@ if (!isDev) {
 router.beforeEach((to, _, next) => {
   const title = to.meta.title as string;
   if (title) {
-    document.title = `${title} - PiPiClaw`;
+    document.title = `${title} - New World`;
   }
   next();
 });

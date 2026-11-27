@@ -1,5 +1,5 @@
 /**
- * PiPiClaw — M3-B 混合检索测试（中文分词 + RRF 融合）
+ * New World — M3-B 混合检索测试（中文分词 + RRF 融合）
  * ═══════════════════════════════════════════════════════════════
  * 【这一批修两件事】
  *
@@ -26,7 +26,7 @@
 import { describe, it, expect, vi } from 'vitest'
 
 vi.mock('electron', () => ({
-  app: { getPath: vi.fn((k: string) => `/tmp/pipiclaw-m3b-${k}`) },
+  app: { getPath: vi.fn((k: string) => `/tmp/newworld-m3b-${k}`) },
 }))
 
 vi.mock('electron-log', () => ({

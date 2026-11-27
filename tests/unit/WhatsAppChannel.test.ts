@@ -46,7 +46,7 @@ describe('P1-02: WhatsAppChannel.send', () => {
     configWhatsApp()
     const ch = new WhatsAppChannel()
     mockFetch.mockResolvedValueOnce(mockJsonResponse({ messages: [{ id: 'wamid.1' }] }))
-    await ch.send({ id: 'm1', text: 'hi', channel: 'whatsapp', from: 'piPiClaw', to: '+8613800', ts: Date.now() } as any)
+    await ch.send({ id: 'm1', text: 'hi', channel: 'whatsapp', from: 'nwWorld', to: '+8613800', ts: Date.now() } as any)
     const [url, init] = mockFetch.mock.calls[0]
     expect(url).toBe('https://graph.facebook.com/v19.0/phone-123/messages')
     expect(init.method).toBe('POST')

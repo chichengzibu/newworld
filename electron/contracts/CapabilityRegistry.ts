@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - 域间协议注册表(W3 骨架)
+ * New World - 域间协议注册表(W3 骨架)
  *
  * 职责:
  * 1. 各域启动时调用 register(domain) 把自己挂到 registry

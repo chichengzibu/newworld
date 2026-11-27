@@ -68,13 +68,24 @@ export interface LlmRequest {
   think?: boolean
 }
 
+/**
+ * 归一后的 token 计数。
+ * reasoningTokens 只有 provider 真实回传时才存在 —— UI 据此决定显示与否。
+ */
+export interface LlmUsage {
+  promptTokens: number
+  completionTokens: number
+  totalTokens: number
+  reasoningTokens?: number
+}
+
 export interface LlmResponse {
   ok: boolean
   provider: LlmProvider
   content: string
   model: string
   /** token 数 */
-  usage?: { promptTokens: number; completionTokens: number; totalTokens: number }
+  usage?: LlmUsage
   /** ms */
   durationMs: number
   error?: string
@@ -121,7 +132,7 @@ export interface LlmStreamChunk {
   /** tool_call 时的整条 call (聚合后) */
   toolCall?: LlmToolCall
   /** usage chunk */
-  usage?: { promptTokens: number; completionTokens: number; totalTokens: number }
+  usage?: LlmUsage
   /** done 时填 finishReason */
   finishReason?: string
   /** error 时填 */

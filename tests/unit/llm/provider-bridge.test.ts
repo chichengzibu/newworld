@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest'
 
 /**
- * PiPiClaw — provider 桥接测试（M4-L）
+ * New World — provider 桥接测试（M4-L）
  * ═══════════════════════════════════════════════════════════════════════
  * 【背景】本项目有**两套 provider 注册表**(路线图开篇的「LLM 精神分裂」):
  *   · ModelManager    —— 用户在「设置 → 模型管理」配的 provider(聊天选型器读它)
@@ -16,7 +16,7 @@ import { describe, it, expect, vi } from 'vitest'
  */
 
 vi.mock('electron', () => ({
-  app: { getPath: vi.fn((k: string) => `/tmp/pipiclaw-provider-bridge-${k}`) },
+  app: { getPath: vi.fn((k: string) => `/tmp/newworld-provider-bridge-${k}`) },
 }))
 vi.mock('electron-log', () => ({
   default: {

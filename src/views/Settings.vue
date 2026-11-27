@@ -26,9 +26,54 @@
           <span class="settings-nav__label">{{ tab.label }}</span>
           <span v-if="tab.count" class="settings-nav__count">{{ tab.count }}</span>
         </button>
+
+        <!-- v4.7: 设置升级为「配置容器」。此前模型/IM/权限/远程/账号散落在 rail、
+             更多菜单与命令面板三处,用户不知道去哪配。现在统一从设置页进入。 -->
+        <div
+          class="settings-config-nav"
+          role="group"
+          :aria-label="t('settings.configNavTitle')"
+          data-testid="settings-config-nav"
+        >
+          <div class="settings-config-nav__title">{{ t('settings.configNavTitle') }}</div>
+          <div class="settings-config-nav__desc">{{ t('settings.configNavDesc') }}</div>
+          <!-- v4.9：不再是整页跳转 —— 点击在右侧面板内切换（保留 href 兼容深链与既有测试） -->
+          <a
+            v-for="link in SETTINGS_LINKS"
+            :key="link.path"
+            :class="['settings-link', { 'is-active': activeTab === link.path }]"
+            :href="`#${link.path}`"
+            :title="t(link.descKey)"
+            :data-path="link.path"
+            :aria-current="activeTab === link.path ? 'page' : undefined"
+            @click.prevent="selectConfig(link.path)"
+          >
+            <el-icon class="settings-link__icon" :size="15" aria-hidden="true">
+              <component :is="link.icon" />
+            </el-icon>
+            <span class="settings-link__body">
+              <span class="settings-link__title">{{ t(link.titleKey) }}</span>
+              <span class="settings-link__desc">{{ t(link.descKey) }}</span>
+            </span>
+          </a>
+        </div>
       </nav>
 
       <div class="settings-panels">
+
+        <!-- v4.9：配置中心四项内嵌面板 —— 左侧选栏保留，右侧切换，不再整页跳转。
+             必须是 .settings-panels 的直接子级（与其它 panel 同级），否则会被
+             某个 v-show=false 的 panel 包住而整体 display:none。 -->
+        <div
+          v-if="embeddedConfigPath"
+          :id="`settings-panel-${embeddedConfigPath}`"
+          class="settings-panel settings-panel--embedded"
+          role="tabpanel"
+        >
+          <KeepAlive>
+            <component :is="embeddedConfigComponent" :key="embeddedConfigPath" embedded />
+          </KeepAlive>
+        </div>
         <div
           v-show="activeTab === 'basic'"
           id="settings-panel-basic"
@@ -39,7 +84,7 @@
           <div class="tab-content">
             <div class="settings-h">
               <h2>{{ t('settings.basicTitle') }}</h2>
-              <div class="settings-h__desc">PiPiClaw v4.4 · 1 改 token 已应用</div>
+              <div class="settings-h__desc">New World v4.4 · 1 改 token 已应用</div>
             </div>
 
             <section class="settings-section">
@@ -83,7 +128,9 @@
                     :class="['radio', { active: selectedTheme === opt.value }]"
                     :aria-pressed="selectedTheme === opt.value"
                     @click="handleThemeChange(opt.value)"
-                  >{{ opt.label }}</button>
+                  >
+{{ opt.label }}
+</button>
                 </div>
               </div>
 
@@ -107,7 +154,9 @@
                       v-for="model in provider.models"
                       :key="model.id"
                       :value="`${provider.id}::${model.id}`"
-                    >{{ model.name }}</option>
+                    >
+{{ model.name }}
+</option>
                   </optgroup>
                 </select>
               </div>
@@ -124,8 +173,52 @@
                     :class="['radio', { active: currentLocale === opt.value }]"
                     :aria-pressed="currentLocale === opt.value"
                     @click="handleLanguageChange(opt.value)"
-                  >{{ opt.label }}</button>
+                  >
+{{ opt.label }}
+</button>
                 </div>
+              </div>
+            </section>
+
+            <!-- M4.9 Codex 式双闸门：沙箱档位 + 自动审查 -->
+            <div class="settings-h" style="margin-top: var(--space-4)">
+              <h2>执行安全</h2>
+              <div class="settings-h__desc">
+                决定助手能在你电脑上"碰什么"，以及"什么时候需要先问你"。
+              </div>
+            </div>
+
+            <section class="settings-section">
+              <div class="setting-row">
+                <div>
+                  <div class="setting-label">沙箱档位</div>
+                  <div class="setting-desc">{{ sandboxTierDesc }}</div>
+                </div>
+                <div class="radio-group">
+                  <button
+                    v-for="opt in sandboxTierOptions"
+                    :key="opt.value"
+                    :class="['radio', { active: sandboxTier === opt.value }]"
+                    :aria-pressed="sandboxTier === opt.value"
+                    @click="handleSandboxTierChange(opt.value)"
+                  >
+                    {{ opt.label }}
+                  </button>
+                </div>
+              </div>
+
+              <div class="setting-row">
+                <div>
+                  <div class="setting-label">自动审查低风险操作</div>
+                  <div class="setting-desc">
+                    开启后，低风险的「需确认」命令由模型先判一次、自动放行；
+                    删库/格式化/提权/外传数据等硬禁区永不放行。
+                  </div>
+                </div>
+                <el-switch
+                  :model-value="autoReviewEnabled"
+                  @change="(v: unknown) => handleAutoReviewChange(Boolean(v))"
+                />
               </div>
             </section>
 
@@ -144,15 +237,6 @@
                   v-model="shortcutConfig.toggle"
                   default-accelerator="Ctrl+Alt+P"
                 />
-              </div>
-              <div class="setting-row">
-                <div>
-                  <div class="setting-label">{{ t('settings.guide') }}</div>
-                  <div class="setting-desc">{{ t('settings.openGuide') }}</div>
-                </div>
-                <button class="btn-secondary" @click="appStore.openGuide">
-                  {{ t('settings.openGuide') }}
-                </button>
               </div>
               <div class="setting-row">
                 <div>
@@ -487,6 +571,85 @@
             </el-card>
           </div>
         </div>
+
+        <!-- 本地备份：无服务器方案下替代账号云同步 -->
+        <div
+          v-show="activeTab === 'data'"
+          id="settings-panel-data"
+          class="settings-panel"
+          role="tabpanel"
+          aria-labelledby="settings-tab-data"
+        >
+          <div class="tab-content" data-testid="backup-panel">
+            <div class="settings-h">
+              <h2>{{ t('settings.backupTitle') }}</h2>
+              <div class="settings-h__desc">{{ t('settings.backupDesc') }}</div>
+            </div>
+
+            <section class="settings-section">
+              <div class="setting-row">
+                <div>
+                  <div class="setting-label">{{ t('settings.backupIncludeKeys') }}</div>
+                  <div class="setting-desc">{{ t('settings.backupIncludeKeysDesc') }}</div>
+                </div>
+                <button
+                  class="toggle"
+                  :class="{ on: backupIncludeKeys }"
+                  :aria-pressed="backupIncludeKeys"
+                  :aria-label="t('settings.backupIncludeKeys')"
+                  @click="backupIncludeKeys = !backupIncludeKeys"
+                />
+              </div>
+
+              <div class="backup-actions">
+                <el-button type="primary" :loading="backupBusy" @click="handleBackupCreate">
+                  {{ backupBusy ? t('settings.backupCreating') : t('settings.backupCreate') }}
+                </el-button>
+                <el-button :disabled="backupBusy" @click="handleBackupImport">{{ t('settings.backupImport') }}</el-button>
+                <el-button @click="handleBackupOpenFolder">{{ t('settings.backupOpenFolder') }}</el-button>
+              </div>
+
+              <div class="backup-note">{{ t('settings.backupScopeNote') }}</div>
+              <div class="backup-note">{{ t('settings.backupKeyNotice') }}</div>
+              <div class="backup-note">{{ t('settings.backupSafetyNote') }}</div>
+            </section>
+
+            <section class="settings-section">
+              <div class="setting-label">{{ t('settings.backupListTitle') }}</div>
+              <div v-if="backupList.length === 0" class="backup-empty" data-testid="backup-empty">
+                {{ t('settings.backupEmpty') }}
+              </div>
+              <div v-else class="backup-list" data-testid="backup-list">
+                <div
+                  v-for="b in backupList"
+                  :key="b.filePath"
+                  class="backup-row"
+                  :data-testid="`backup-row-${b.fileName}`"
+                >
+                  <div class="backup-meta">
+                    <div class="backup-name">{{ b.fileName }}</div>
+                    <div class="backup-sub">
+                      {{ formatBackupTime(b.createdAt) }} · {{ t('settings.backupSize') }} {{ formatBackupSize(b.size) }} · {{ b.appVersion }}
+                      <span v-if="b.apiKeysIncluded" class="backup-warn"> · {{ t('settings.backupKeysPlaintext') }}</span>
+                    </div>
+                  </div>
+                  <div class="backup-row-actions">
+                    <el-button size="small" text :disabled="backupBusy" @click="handleBackupRestore(b.filePath)">
+                      {{ t('settings.backupRestore') }}
+                    </el-button>
+                    <el-button size="small" text @click="handleBackupExport(b.filePath)">
+                      {{ t('settings.backupExport') }}
+                    </el-button>
+                    <el-button size="small" text @click="handleBackupShow(b.filePath)">
+                      {{ t('settings.backupOpenFolder') }}
+                    </el-button>
+                  </div>
+                </div>
+              </div>
+            </section>
+          </div>
+
+        </div>
       </div>
     </div>
 
@@ -644,7 +807,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, onMounted, computed, nextTick, watch } from 'vue';
+import { ref, reactive, onMounted, computed, nextTick, watch, markRaw } from 'vue';
 import { ElMessage } from "element-plus/es/components/message/index"
 import { ElMessageBox } from "element-plus/es/components/message-box/index";
 import { useI18n } from 'vue-i18n';
@@ -657,14 +820,80 @@ import { useHermesMemoryStore } from '@/stores/hermesMemory';
 import { useModelsStore, PROVIDER_DEFAULTS, type ProviderConfig, type ProviderFormData } from '@/stores/models';
 import { Plus, MagicStick, Memo, Connection, Sunny, Box, Lightning, Setting } from '@element-plus/icons-vue';
 import { setLocale, type SupportedLocale } from '@/locales';
+import type { BackupInfo } from '@/types/electron-api';
+import { SETTINGS_LINKS } from '@/components/layout/nav-config';
+import { useRoute, useRouter } from 'vue-router';
+// v4.9：配置中心四项内嵌为设置页右侧面板（左侧选栏保留，右侧切换，不再整页跳转）
+import ImManagement from '@/views/ImManagement.vue';
+import Permissions from '@/views/Permissions.vue';
+import RemoteControl from '@/views/RemoteControl.vue';
+import ImAccounts from '@/views/ImAccounts.vue';
 
 const { t } = useI18n();
+// 防御式取路由：单测/嵌入场景可能没有安装 vue-router（注入为 undefined），
+// 这里不能让 route.path 访问直接崩掉整个设置页。
+const route = useRoute() as ReturnType<typeof useRoute> | undefined;
+const router = useRouter() as ReturnType<typeof useRouter> | undefined;
+
+/**
+ * v4.9：路由层把 /im-management 等四条配置路由统一渲染为本组件，并通过该 prop
+ * 告知应选中哪个配置项 —— 这样深链与 e2e 直达仍落在设置页内嵌面板里，
+ * 不再出现「点配置入口 → 整页跳走」的割裂感。
+ */
+const props = defineProps<{ initialConfigPath?: string }>();
+
+/** 配置中心路由 → 内嵌组件映射（markRaw 防止被响应式代理） */
+const CONFIG_PAGE_COMPONENTS: Record<string, ReturnType<typeof markRaw>> = {
+  '/im-management': markRaw(ImManagement),
+  '/permissions': markRaw(Permissions),
+  '/remote-control': markRaw(RemoteControl),
+  '/settings/im-accounts': markRaw(ImAccounts),
+};
+
+/** 当前选中的配置中心路径；非配置项时为 null */
+const embeddedConfigPath = computed(() =>
+  SETTINGS_LINKS.some((l) => l.path === activeTab.value) ? activeTab.value : null,
+);
+const embeddedConfigComponent = computed(() =>
+  embeddedConfigPath.value ? CONFIG_PAGE_COMPONENTS[embeddedConfigPath.value] : null,
+);
+
+/**
+ * 点击配置中心入口：在设置页内切换（不整页跳转）。
+ * 同时把 hash 换成目标路径，保证深链可分享、既有 e2e 的 waitForURL 仍成立。
+ */
+function selectConfig(path: string): void {
+  activeTab.value = path;
+  if (route && router && route.path !== path) void router.replace(path);
+}
+
+// 路由变化时同步选中态：回到 /settings 显示基础设置；进入配置路由则选中对应项。
+// （同一组件实例被复用时 watch 生效，避免「从 /permissions 点侧栏设置仍停在权限页」）
+watch(
+  () => route?.path,
+  (p) => {
+    if (p === '/settings') {
+      activeTab.value = 'basic';
+    } else if (p && SETTINGS_LINKS.some((l) => l.path === p)) {
+      activeTab.value = p;
+    }
+  },
+);
 
 const appStore = useAppStore();
 const hermesMemoryStore = useHermesMemoryStore();
 const modelsStore = useModelsStore();
 
-const activeTab = ref('basic');
+// 配置中心四条路由直达时，初始选中对应配置项；否则从基础设置开始
+const activeTab = ref(
+  props.initialConfigPath && SETTINGS_LINKS.some((l) => l.path === props.initialConfigPath)
+    ? props.initialConfigPath
+    : 'basic',
+);
+// 本地备份（无账号云同步）
+const backupList = ref<BackupInfo[]>([]);
+const backupIncludeKeys = ref(false);
+const backupBusy = ref(false);
 const selectedTheme = ref<'light' | 'dark' | 'system'>(appStore.themeMode);
 const showFeedbackModal = ref(false);
 
@@ -673,7 +902,7 @@ const autostartEnabled = ref<boolean>(false);
 const showThinkingBlock = ref<boolean>(true);
 const defaultModelId = ref<string>('');
 const currentLocale = ref<SupportedLocale>(
-  (typeof localStorage !== 'undefined' && (localStorage.getItem('pipiclaw:locale') as SupportedLocale)) || 'zh-CN'
+  (typeof localStorage !== 'undefined' && (localStorage.getItem('nw:locale') as SupportedLocale)) || 'zh-CN'
 );
 
 const themeOptions = [
@@ -686,6 +915,62 @@ const languageOptions = [
   { value: 'zh-CN' as const, label: '中文' },
   { value: 'en-US' as const, label: 'English' }
 ];
+
+// ========== M4.9 执行安全（Codex 式双闸门）==========
+type SandboxTier = 'read-only' | 'workspace' | 'full';
+const sandboxTier = ref<SandboxTier>('workspace');
+const autoReviewEnabled = ref(false);
+
+const sandboxTierOptions: Array<{ value: SandboxTier; label: string }> = [
+  { value: 'read-only', label: '只读' },
+  { value: 'workspace', label: '工作区' },
+  { value: 'full', label: '完全开放' },
+];
+
+const sandboxTierDesc = computed(() => {
+  switch (sandboxTier.value) {
+    case 'read-only':
+      return '只允许查询类命令，任何写操作与命令执行都会被拒绝。';
+    case 'full':
+      return '不受限制。仅建议在受控环境中使用 —— 助手可以执行任意命令。';
+    default:
+      return '工作区内可读写可执行；访问区外路径或外部网络时需要你确认。';
+  }
+});
+
+async function loadApprovalConfig(): Promise<void> {
+  try {
+    const res = await window.electronAPI?.sandbox?.getApprovalConfig?.();
+    if (res?.success && res.data) {
+      sandboxTier.value = res.data.tier;
+      autoReviewEnabled.value = res.data.autoReview;
+    }
+  } catch {
+    /* 读失败用默认值，不打扰用户 */
+  }
+}
+
+async function handleSandboxTierChange(tier: SandboxTier): Promise<void> {
+  const prev = sandboxTier.value;
+  sandboxTier.value = tier;
+  try {
+    const res = await window.electronAPI?.sandbox?.setApprovalConfig?.({ tier });
+    if (!res?.success) sandboxTier.value = prev;
+  } catch {
+    sandboxTier.value = prev;
+  }
+}
+
+async function handleAutoReviewChange(enabled: boolean): Promise<void> {
+  const prev = autoReviewEnabled.value;
+  autoReviewEnabled.value = enabled;
+  try {
+    const res = await window.electronAPI?.sandbox?.setApprovalConfig?.({ autoReview: enabled });
+    if (!res?.success) autoReviewEnabled.value = prev;
+  } catch {
+    autoReviewEnabled.value = prev;
+  }
+}
 
 function handleLanguageChange(locale: SupportedLocale): void {
   currentLocale.value = locale;
@@ -709,8 +994,119 @@ const navTabs = computed(() => [
     count: mcpServers.value.length > 0 ? String(mcpServers.value.length) : ''
   },
   { key: 'memory', label: t('settings.memoryTab'), icon: 'Memo' },
+  { key: 'data', label: t('settings.dataTab'), icon: 'Box' },
   { key: 'about', label: t('settings.aboutTab'), icon: 'InfoFilled' }
 ]);
+
+// ========== 本地备份 ==========
+function formatBackupTime(ts: number): string {
+  try { return new Date(ts).toLocaleString() } catch { return String(ts) }
+}
+
+function formatBackupSize(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return '0 B'
+  if (n < 1024) return `${n} B`
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`
+}
+
+function backupErrText(e: unknown): string {
+  return e instanceof Error ? e.message : String(e)
+}
+
+async function refreshBackupList(): Promise<void> {
+  try {
+    const r = await window.electronAPI.backup.list();
+    backupList.value = r?.success && Array.isArray(r.data) ? r.data : [];
+  } catch {
+    backupList.value = [];
+  }
+}
+
+async function handleBackupCreate(): Promise<void> {
+  backupBusy.value = true;
+  try {
+    const r = await window.electronAPI.backup.create({ includeApiKeys: backupIncludeKeys.value });
+    if (!r?.success) throw new Error(r?.error || 'create failed');
+    await refreshBackupList();
+    ElMessage.success(t('settings.backupCreateOk'));
+  } catch (e) {
+    ElMessage.error(t('settings.backupCreateFail', { error: backupErrText(e) }));
+  } finally {
+    backupBusy.value = false;
+  }
+}
+
+async function doRestore(filePath: string): Promise<void> {
+  try {
+    await ElMessageBox.confirm(t('settings.backupRestoreConfirm'), t('settings.backupRestore'), { type: 'warning' });
+  } catch {
+    return; // 用户取消
+  }
+  backupBusy.value = true;
+  try {
+    const r = await window.electronAPI.backup.restore(filePath);
+    if (!r?.success) throw new Error(r?.error || 'restore failed');
+    await refreshBackupList();
+    ElMessage.success(t('settings.backupRestoreOk'));
+  } catch (e) {
+    ElMessage.error(t('settings.backupRestoreFail', { error: backupErrText(e) }));
+  } finally {
+    backupBusy.value = false;
+  }
+}
+
+function handleBackupRestore(filePath: string): Promise<void> {
+  return doRestore(filePath);
+}
+
+async function handleBackupImport(): Promise<void> {
+  try {
+    const picked = await window.electronAPI.dialog.openFile({
+      title: t('settings.backupImportSelect'),
+      properties: ['openFile'],
+      filters: [{ name: '本地备份', extensions: ['zip'] }],
+    }) as { filePaths?: string[]; path?: string } | undefined;
+    const filePath = picked?.filePaths?.[0] ?? picked?.path;
+    if (filePath) await doRestore(filePath);
+  } catch {
+    // 用户取消选文件
+  }
+}
+
+async function handleBackupExport(filePath: string): Promise<void> {
+  try {
+    const saved = await window.electronAPI.dialog.saveFile({
+      title: t('settings.backupExport'),
+      defaultPath: filePath.split(/[\\/]/).pop(),
+      filters: [{ name: '本地备份', extensions: ['zip'] }],
+    });
+    if (saved?.canceled || !saved.filePath) return;
+    const r = await window.electronAPI.backup.copy(filePath, saved.filePath);
+    if (!r?.success) throw new Error(r?.error || 'copy failed');
+    ElMessage.success(saved.filePath);
+  } catch (e) {
+    ElMessage.error(backupErrText(e));
+  }
+}
+
+async function handleBackupShow(filePath: string): Promise<void> {
+  try {
+    const r = await window.electronAPI.file.showInFolder(filePath);
+    if (!r?.success) ElMessage.error(r?.error || 'open folder failed');
+  } catch (e) {
+    ElMessage.error(backupErrText(e));
+  }
+}
+
+async function handleBackupOpenFolder(): Promise<void> {
+  try {
+    const r = await window.electronAPI.backup.openFolder();
+    if (!r?.success) ElMessage.error(r?.error || 'open folder failed');
+  } catch (e) {
+    ElMessage.error(backupErrText(e));
+  }
+}
 
 function focusSiblingTab(direction: -1 | 1): void {
   const keys = navTabs.value.map(tab => tab.key);
@@ -1405,6 +1801,7 @@ onMounted(async () => {
   loadShortcutConfig();
   hermesMemoryStore.fetchMemories();
   loadEmbeddingConfig();
+  void loadApprovalConfig();
   await Promise.all([
     modelsStore.fetchProviders(),
     modelsStore.fetchProviderTemplates()
@@ -1412,6 +1809,7 @@ onMounted(async () => {
   await loadMcpServers();
   loadAppVersion();
   bindAutoUpdaterEvents();
+  void refreshBackupList();
 });
 </script>
 
@@ -1915,5 +2313,160 @@ onMounted(async () => {
   color: var(--el-color-danger);
   font-size: var(--font-size-caption-1);
   word-break: break-all;
+}
+
+.backup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  margin: 12px 0;
+}
+
+.backup-note {
+  font-size: var(--font-size-caption-1);
+  color: var(--text-tertiary, var(--fg-tertiary, #909399));
+  line-height: 1.6;
+}
+
+.backup-empty {
+  padding: 20px;
+  border: 1px dashed var(--border-base, #e4e7ed);
+  border-radius: 10px;
+  color: var(--text-tertiary, var(--fg-tertiary, #909399));
+  font-size: var(--font-size-body);
+  text-align: center;
+}
+
+.backup-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.backup-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid var(--border-base, #e4e7ed);
+  border-radius: 10px;
+  background: var(--bg-secondary, transparent);
+}
+
+.backup-meta {
+  flex: 1;
+  min-width: 0;
+}
+
+.backup-name {
+  font-size: var(--font-size-body);
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.backup-sub {
+  margin-top: 2px;
+  font-size: var(--font-size-caption-1);
+  color: var(--text-tertiary, var(--fg-tertiary, #909399));
+}
+
+.backup-warn {
+  color: var(--el-color-danger);
+}
+
+.backup-row-actions {
+  flex: none;
+  display: flex;
+  gap: 4px;
+}
+
+/* ===== v4.7 配置容器：设置页里集中所有配置类页面入口 ===== */
+.settings-config-nav {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--border-subtle);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+
+  &__title {
+    padding: 0 var(--space-3) 2px;
+    font-size: 11px;
+    font-weight: var(--font-weight-semibold);
+    letter-spacing: 0.04em;
+    color: var(--fg-tertiary);
+  }
+
+  &__desc {
+    padding: 0 var(--space-3) var(--space-2);
+    font-size: 11px;
+    line-height: 1.45;
+    color: var(--fg-tertiary);
+  }
+}
+
+.settings-link {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 6px var(--space-3);
+  border-radius: var(--radius-md);
+  text-decoration: none;
+  color: var(--fg-secondary);
+  transition: background var(--duration-fast) var(--ease-standard),
+    color var(--duration-fast) var(--ease-standard);
+
+  &:hover {
+    background: var(--bg-elevated);
+    color: var(--fg-primary);
+  }
+
+  /* v4.9：内嵌切换激活态 —— 与上方 navTabs 选中视觉一致 */
+  &.is-active {
+    background: var(--bg-elevated);
+    color: var(--fg-primary);
+  }
+  &.is-active &__icon {
+    color: var(--accent-base);
+  }
+
+  &:focus-visible {
+    outline: 2px solid var(--accent-base);
+    outline-offset: 2px;
+  }
+
+  &__icon {
+    flex-shrink: 0;
+    font-size: 14px;
+    line-height: 1;
+    width: 16px;
+    text-align: center;
+    color: var(--fg-tertiary);
+  }
+
+  &__body {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+
+  &__title {
+    font-size: var(--font-size-callout);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  &__desc {
+    font-size: 11px;
+    color: var(--fg-tertiary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 }
 </style>

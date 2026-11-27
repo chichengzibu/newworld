@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - MemoryVectorStore: 向量缓存持久化层 (#006)
+ * New World - MemoryVectorStore: 向量缓存持久化层 (#006)
  *
  * ═══ 设计依据 (docs/#006-memory-persistence-design.md) ═══
  * 本层是 **语义向量缓存** (memoryId → vector) — 不是文本真源 (真源在 HermesMemory / ConfigStore)。

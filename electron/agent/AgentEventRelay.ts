@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - Agent 运行事件中继 (M1-C)
+ * New World - Agent 运行事件中继 (M1-C)
  *
  * 问题背景: `LlmAgentBrainEvents` 已定义 10 种事件类型 (run_start / iteration /
  * tool_call / tool_result / content_delta / thinking_delta / final_answer /

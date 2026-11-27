@@ -1,12 +1,13 @@
 /**
- * PiPiClaw - OpenAI adapter (含流式 + tool call)
+ * New World - OpenAI adapter (含流式 + tool call)
  *
  * M1 v0.1 改进: 增加 streamChat() (SSE) 供 LlmClient.streamChat 调用.
  * tool_calls 解析保持原逻辑.
  */
 import { LogManager } from '../../core/LogManager'
-import type { LlmConfig, LlmRequest, LlmResponse, LlmToolCall, LlmStreamChunk } from '../types'
+import type { LlmConfig, LlmRequest, LlmResponse, LlmToolCall, LlmStreamChunk, LlmUsage } from '../types'
 import { DEFAULT_API_BASE, DEFAULT_MODELS } from '../types'
+import { parseOpenAiUsage } from '../usage'
 
 export class OpenAiAdapter {
   private log = LogManager.getInstance()
@@ -80,13 +81,7 @@ export class OpenAiAdapter {
         content,
         model,
         durationMs: Date.now() - startMs,
-        usage: data.usage
-          ? {
-              promptTokens: data.usage.prompt_tokens,
-              completionTokens: data.usage.completion_tokens,
-              totalTokens: data.usage.total_tokens,
-            }
-          : undefined,
+        usage: parseOpenAiUsage(data.usage),
         ...(toolCalls && toolCalls.length > 0 ? { toolCalls } : {}),
         ...(reasoning ? { reasoning } : {}),
         ...(finishReason ? { finishReason } : {}),
@@ -149,7 +144,7 @@ export class OpenAiAdapter {
     let accReasoning = ''
     // tool_calls 聚合: id -> {name, argsJson}
     const toolAcc: Map<number, { id: string; name: string; args: string }> = new Map()
-    let finalUsage: { promptTokens: number; completionTokens: number; totalTokens: number } | undefined
+    let finalUsage: LlmUsage | undefined
     let finalFinish: string | undefined
     try {
       while (true) {
@@ -188,11 +183,7 @@ export class OpenAiAdapter {
           }
           if (choice?.finish_reason) finalFinish = choice.finish_reason
           if (data.usage) {
-            finalUsage = {
-              promptTokens: data.usage.prompt_tokens,
-              completionTokens: data.usage.completion_tokens,
-              totalTokens: data.usage.total_tokens,
-            }
+            finalUsage = parseOpenAiUsage(data.usage)
           }
         }
       }

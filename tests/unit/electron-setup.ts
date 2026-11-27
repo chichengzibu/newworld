@@ -24,10 +24,10 @@ vi.mock('electron', () => {
   }
   return {
     app: {
-      getPath: vi.fn(() => '/tmp/pipiclaw-test-userdata'),
+      getPath: vi.fn(() => '/tmp/newworld-test-userdata'),
       getVersion: vi.fn(() => '4.3.0'),
       getPlatform: vi.fn(() => 'linux'),
-      getAppPath: vi.fn(() => '/tmp/pipiclaw-test-app'),
+      getAppPath: vi.fn(() => '/tmp/newworld-test-app'),
     },
     safeStorage,
     ipcMain: {
@@ -43,6 +43,7 @@ vi.mock('electron', () => {
       getAllWindows: vi.fn(() => [] as unknown[]),
     }),
     dialog: { showMessageBox: vi.fn() },
+    shell: { openPath: vi.fn(async () => ''), showItemInFolder: vi.fn() },
     contextBridge: { exposeInMainWorld: vi.fn() },
     ipcRenderer: { invoke: vi.fn(), on: vi.fn() },
   }

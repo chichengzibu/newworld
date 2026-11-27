@@ -1,6 +1,6 @@
 <template>
-  <div class="im-accounts">
-    <h2>{{ t('nav.imAccounts') }}</h2>
+  <div class="im-accounts" :class="{ 'is-embedded': embedded }">
+    <h2 v-if="!embedded">{{ t('nav.imAccounts') }}</h2>
     <p class="im-hint">{{ t('imAccounts.hint') }}</p>
 
     <el-tabs v-model="activeTab" class="im-tabs">
@@ -94,6 +94,9 @@ import { ref, reactive, onMounted } from 'vue';
 import { ElMessage } from "element-plus/es/components/message/index";
 import { useI18n } from 'vue-i18n';
 
+/** v4.9：内嵌进设置页配置中心时隐藏自带标题，交由外层滚动 */
+defineProps<{ embedded?: boolean }>();
+
 const { t } = useI18n();
 
 const activeTab = ref('feishu');
@@ -172,6 +175,12 @@ onMounted(loadConfigs);
   padding: var(--content-padding);
   max-width: var(--content-max-width);
   margin: 0 auto;
+}
+/* v4.9 内嵌态：设置页已提供留白 */
+.im-accounts.is-embedded {
+  padding: 0;
+  max-width: none;
+  margin: 0;
 }
 
 .im-hint {

@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - Agent / AgentEventBus (W5.2.1)
+ * New World - Agent / AgentEventBus (W5.2.1)
  *
  * Thin typed wrapper around the global EventBus. Provides a closed set of
  * agent:* topics for autocomplete and subscription safety.

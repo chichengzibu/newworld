@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - SkillLoader 渐进披露测试 (M4-A)
+ * New World - SkillLoader 渐进披露测试 (M4-A)
  *
  * 【设计依据】Anthropic Agent Skills 规范:
  *   L1 name+description 常驻(约100 token/技能),description 本身即路由规则

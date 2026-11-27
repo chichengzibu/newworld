@@ -8,9 +8,9 @@
  *   - markStage 必须按序推进: 乱序/跳序 → throw(调用方接线错误, 显式暴露)
  *   - 重复 markStage 同阶段 → 幂等空操作(不重复推事件)
  *   - canClose 判定(四选一, 任一满足即允许销毁 splash):
- *       1. skipped = true                     (用户点击/任意键, 立即放行)
+ *       1. skipped = true                     (保留状态机语义, 入口已移除)
  *       2. aborted = true                     (失败路径强切, 立即放行)
- *       3. rendererReady && elapsed >= MIN_SHOW_MS  (正常点亮节拍)
+ *       3. rendererReady                      (真就绪即关; MIN_SHOW_MS=0, 无人为等待)
  *       4. elapsed >= RENDERER_READY_TIMEOUT_MS     (10s 超时兜底强切)
  *   - 三"无信号"子系统(llm-config/memory/skills)经 stageFactories 注入:
  *     BootDirector 不持有任何子系统引用, 只在 markStage 时调用对应 factory
@@ -71,7 +71,7 @@ export interface BootDirectorOptions {
   stageFactories?: Partial<Record<BootStage, () => unknown>>;
   /** 阶段标签(第②笔接 i18n), 默认取阶段名 */
   labelFor?: (stage: BootStage) => string;
-  /** 2.8s 下限展示(设计稿 F5) */
+  /** 最短展示(已归零: 真就绪即关, 无人为等待) */
   minShowMs?: number;
   /** renderer-ready 10s 超时兜底(设计稿 F7) */
   rendererReadyTimeoutMs?: number;
@@ -80,7 +80,8 @@ export interface BootDirectorOptions {
 const NOOP_LOG: LogSink = { info: () => {}, warn: () => {}, error: () => {} };
 
 export class BootDirector {
-  static readonly MIN_SHOW_MS_DEFAULT = 2800;
+  /** 真就绪即关: 取消旧的 2.8s 人为最短展示 */
+  static readonly MIN_SHOW_MS_DEFAULT = 0;
   static readonly RENDERER_READY_TIMEOUT_MS_DEFAULT = 10_000;
 
   private readonly now: () => number;
@@ -111,7 +112,7 @@ export class BootDirector {
       options.rendererReadyTimeoutMs ?? BootDirector.RENDERER_READY_TIMEOUT_MS_DEFAULT;
   }
 
-  /** splash show() 时调用, 起算 2.8s 下限与 10s 兜底时钟 */
+  /** splash show() 时调用, 起算 10s 兜底时钟 */
   markSplashShown(): void {
     this.splashShownAt = this.now();
     this.log.info('[BootDirector] splash shown', { at: this.splashShownAt });
@@ -191,7 +192,7 @@ export class BootDirector {
     this.log.info('[BootDirector] renderer-ready');
   }
 
-  /** 用户跳过(点击/任意键): 立即放行, 不等下限(设计稿 F5) */
+  /** 保留状态机语义: 立即放行(skip 入口已从 splash/窗口移除, 仅兜底/降级路径内部使用) */
   markSkipped(reason: 'user-interaction' | 'timeout' = 'user-interaction'): void {
     this.skipped = true;
     this.log.info('[BootDirector] skip', { reason });
@@ -204,8 +205,8 @@ export class BootDirector {
   }
 
   /**
-   * 是否允许立即销毁 splash + show 主窗(四选一, 设计稿 F5/F7):
-   *   1. skipped 2. aborted 3. rendererReady 且 elapsed>=minShowMs
+   * 是否允许立即销毁 splash + show 主窗(四选一):
+   *   1. skipped 2. aborted 3. rendererReady(真就绪即关, minShowMs=0)
    *   4. elapsed>=rendererReadyTimeoutMs(兜底)
    * 未 show splash(splashShownAt=null)时 elapsed 按 Infinity(宽限: 允许立即点亮)。
    */

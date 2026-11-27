@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - Channel / RocketChannel (W8)
+ * New World - Channel / RocketChannel (W8)
  *
  * Rocket.Chat REST API(真实 fetch 实现)。
  * 发消息: {server}/api/v1/chat.postMessage

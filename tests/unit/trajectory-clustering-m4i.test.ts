@@ -1,5 +1,5 @@
 /**
- * PiPiClaw — 轨迹签名聚类测试（M4-I）
+ * New World — 轨迹签名聚类测试（M4-I）
  * ═══════════════════════════════════════════════════════════════
  * 【这一批在测什么】
  * 旧实现按**归一化指令**聚类 —— 指令字面几乎相同才算同一个模式。
@@ -19,7 +19,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
 vi.mock('electron', () => ({
-  app: { getPath: vi.fn((k: string) => `/tmp/pipiclaw-m4i-${k}`) },
+  app: { getPath: vi.fn((k: string) => `/tmp/newworld-m4i-${k}`) },
 }))
 vi.mock('electron-log', () => ({
   default: {

@@ -1,5 +1,5 @@
 /**
- * PiPiClaw — ProcessSandbox（进程隔离执行）
+ * New World — ProcessSandbox（进程隔离执行）
  * ═══════════════════════════════════════════════════════════════
  * 【要解决的问题】
  * 此前命令走 `execFile`,超时/中止时 Node 只杀**直接子进程**。
@@ -33,6 +33,7 @@
  */
 import { spawn } from 'node:child_process'
 import { LogManager } from '../core/LogManager'
+import { ProcessLimiter } from './ProcessLimiter'
 
 const log = LogManager.getInstance()
 
@@ -51,6 +52,11 @@ export interface ProcessSandboxOptions {
   isolation?: IsolationMode
   /** 中止信号(用户点停止) */
   signal?: AbortSignal
+  /**
+   * 【M4.9 第三层·资源限额】是否启用资源采样。
+   * 默认 true；测试可关掉（采样要 spawn 系统命令，单测里没必要）。
+   */
+  enforceLimits?: boolean
 }
 
 export interface ProcessSandboxResult {
@@ -62,10 +68,12 @@ export interface ProcessSandboxResult {
   /** 是否因超时/中止被杀 */
   killed: boolean
   /** 杀人的原因 */
-  killReason?: 'timeout' | 'aborted'
+  killReason?: 'timeout' | 'aborted' | 'resource'
   durationMs: number
   /** 隔离方式(实际用的) */
   isolation: IsolationMode
+  /** 【M4.9】超限被杀时的具体原因（内存/进程数） */
+  limitReason?: string
 }
 
 /** 按平台选默认隔离方式 */
@@ -130,7 +138,9 @@ export async function runInSandbox(
     let stdoutTruncated = false
     let stderrTruncated = false
     let settled = false
-    let killReason: 'timeout' | 'aborted' | undefined
+    let killReason: 'timeout' | 'aborted' | 'resource' | undefined
+    /** 超限被杀时的具体原因（内存/进程数），随结果返回 */
+    let limitDetail: string | undefined
 
     const child = spawn(command, args, {
       cwd: opts.cwd,
@@ -172,21 +182,27 @@ export async function runInSandbox(
       opts.signal?.removeEventListener('abort', onAbort)
       if (stdoutTruncated) stdout += '\n[输出超出上限,已截断]'
       if (stderrTruncated) stderr += '\n[输出超出上限,已截断]'
-      resolve({
+      const payload: ProcessSandboxResult = {
         ok: !killReason && exitCode === 0,
         stdout,
         stderr,
         exitCode,
         killed: !!killReason,
         ...(killReason ? { killReason } : {}),
+        ...(limitDetail ? { limitReason: limitDetail } : {}),
         durationMs: Date.now() - startedAt,
         isolation,
-      })
+      }
+      if (limitDetail) {
+        payload.stderr += `\n[资源超限，已终止] ${limitDetail}`
+      }
+      resolve(payload)
     }
 
-    const killTree = async (reason: 'timeout' | 'aborted') => {
+    const killTree = async (reason: 'timeout' | 'aborted' | 'resource', limitReason?: string) => {
       if (settled) return
       killReason = reason
+      if (limitReason) limitDetail = limitReason
       try {
         await killProcessTree(child.pid!, isolation)
       } catch (e) {
@@ -205,11 +221,45 @@ export async function runInSandbox(
       else opts.signal.addEventListener('abort', onAbort, { once: true })
     }
 
+    /**
+     * 【M4.9 第三层·资源限额采样】
+     *
+     * 每 sampleIntervalMs 采一次进程树的内存与进程数。
+     * 超限 → 杀整棵树，并把具体原因带回给调用方。
+     *
+     * 为什么是轮询而不是 OS 限额：Job Object / cgroup 都要 native 依赖或 root，
+     * 桌面应用不现实。轮询精度差一些（最坏晚一个采样周期才发现），
+     * 但足以挡住"跑着跑着把内存吃满"和"fork 出一堆进程"这两类实际事故。
+     *
+     * 采样失败一律放行 —— 限额是护栏，不是安全边界。
+     */
+    let limitTimer: NodeJS.Timeout | undefined
+    if (opts.enforceLimits !== false && child.pid) {
+      const limiter = ProcessLimiter.getInstance()
+      const interval = limiter.getLimits().sampleIntervalMs
+      limitTimer = setInterval(() => {
+        if (settled) return
+        void limiter
+          .checkTree(child.pid!)
+          .then((reason) => {
+            if (reason && !settled) {
+              log.warn(`[ProcessSandbox] 资源超限，杀进程树 pid=${child.pid}: ${reason}`)
+              void killTree('resource', reason)
+            }
+          })
+          .catch(() => {
+            /* 检查失败放行 */
+          })
+      }, interval)
+      limitTimer.unref?.()
+    }
+
     child.on('error', (err) => {
       stderr += `\n[spawn 失败] ${err.message}`
       finalize(null)
     })
     child.on('close', (code, signal) => {
+      if (limitTimer) clearInterval(limitTimer)
       // 被信号杀死时 exitCode 为 null
       finalize(code === null && signal ? null : code)
     })

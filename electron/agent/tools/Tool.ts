@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - Agent 工具基础接口 (M1 v0.1)
+ * New World - Agent 工具基础接口 (M1 v0.1)
  *
  * 跟 ClaudeCode 协议对齐: 每个 tool = { name, description, input_schema, execute() }.
  * 这是 In-process 的实现 (v0.1), 后续 M2 会拆到 MCP server 形式.
@@ -8,6 +8,15 @@ import type { ToolMetadata } from '../AgentTypes'
 import type { ContextKind } from './constants'
 
 /** 工具执行结果 (与 ToolResult 不同: 这里只覆盖 {ok, result, error}, ToolResult 在 contracts/types 是 ok/data/error 命名) */
+/** 【P3-补短】工具真实产出的文件 —— 路径/大小都来自落盘后的 stat，不是字符串承诺 */
+export interface ProducedArtifact {
+  path: string
+  name: string
+  mimeType: string
+  size: number
+  kind: 'document' | 'spreadsheet' | 'presentation' | 'other'
+}
+
 export interface ToolExecResult {
   ok: boolean
   /** 人类可读的结果内容,LLM 会读这个 */
@@ -34,6 +43,8 @@ export interface ToolExecResult {
     /** 实体标识,如技能 id */
     id: string
   }
+  /** 真实落盘的文件清单；UI 据此生成可打开的产物卡片 */
+  artifacts?: ProducedArtifact[]
 }
 
 /**
@@ -72,6 +83,13 @@ export interface RuntimeToolContext {
    * 随 run 传递(和 contextKind 同一套路)天然隔离。
    */
   suppressedSkills?: string[]
+  /**
+   * 【P3 多 agent 编排】本次 run 的并行子任务委派入口。
+   * 由 LlmAgentBrain 在每次 run 构造 toolCtx 时注入闭包，捕获当前 run 的
+   * model/provider/contextKind/AbortSignal —— 工具本身不持有 brain，零模块态。
+   * 不传 = 工具明确拒绝（不伪造结果）。
+   */
+  delegate?: (instructions: string[]) => Promise<ToolExecResult>
 }
 
 /** 工具接口 */

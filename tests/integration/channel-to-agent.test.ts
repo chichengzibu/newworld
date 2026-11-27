@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 vi.mock('electron', () => ({
-  app: { getPath: vi.fn((k: string) => `/tmp/pipiclaw-int-c2a2-${k}`) },
+  app: { getPath: vi.fn((k: string) => `/tmp/newworld-int-c2a2-${k}`) },
   ipcMain: { handle: vi.fn(), on: vi.fn() },
 }))
 

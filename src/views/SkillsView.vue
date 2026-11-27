@@ -14,6 +14,10 @@
           <el-icon><Upload /></el-icon>
           导入技能
         </el-button>
+        <el-button @click="handleExportSkills" data-testid="skills-export">
+          <el-icon><Download /></el-icon>
+          导出技能
+        </el-button>
         <!-- 【M4-X】原「浏览 ClawHub 市场」按钮已删:
              ① 它指向的本地模拟市场没了(那套是死的);
              ② 「开源技能库」卡片**就在本页**,按钮是多余的一跳;
@@ -110,7 +114,10 @@
 
       <div class="dir-primary">
         <span class="dir-label">{{ '主目录' }}</span>
-        <code class="dir-path">{{ storageInfo?.primaryDir || '—' }}</code>
+        <!-- 【设计审计 #P1-5】原始路径是开发者信息 → 默认显示"内置目录", 完整路径 hover 查看 -->
+        <code class="dir-path" :title="storageInfo?.primaryDir || ''">
+          {{ '内置目录' }}
+        </code>
         <el-tag size="small" type="info">{{ storageInfo?.primaryCount ?? 0 }}</el-tag>
       </div>
 
@@ -173,6 +180,7 @@
         clearable
         :prefix-icon="Search"
         style="margin-bottom: var(--space-sm);"
+        @input="onHubQueryInput"
         @keyup.enter="searchHub"
         @clear="searchHub"
       />
@@ -180,6 +188,7 @@
       <!-- 索引状态:如实说明这是缓存还是刚拉的 —— 别让用户以为是实时结果 -->
       <p v-if="hubIndex" class="dir-empty">
         {{ '索引' }} {{ hubIndex.count }} {{ '条' }}
+        <template v-if="hubSearched"> · {{ '当前结果' }} {{ hubItems.length }} {{ '条' }}</template>
         <template v-if="hubIndex.fetchedAt">
           · {{ '更新于' }} {{ new Date(hubIndex.fetchedAt).toLocaleString('zh-CN') }}
         </template>
@@ -200,20 +209,34 @@
           <div class="hub-item-main">
             <div class="hub-item-title">
               <span class="hub-item-name">{{ item.name }}</span>
+              <el-tag v-if="item.official" size="small" type="warning" effect="dark">{{ '官方' }}</el-tag>
               <el-tag size="small" type="info">{{ item.sourceId }}</el-tag>
+              <el-tag v-if="isHubInstalled(item)" size="small" type="success" effect="plain">{{ '已安装' }}</el-tag>
               <el-tag v-for="t in (item.tags || []).slice(0, 4)" :key="t" size="small" type="success" style="margin-left: 4px;">
                 {{ t }}
               </el-tag>
             </div>
             <div class="hub-item-desc">{{ item.description }}</div>
+            <!-- 【P1 生态入口】元数据只在索引真实提供时展示; 没有评分就如实说"暂无评分" -->
+            <div class="hub-item-meta">
+              <template v-if="hubRating(item) !== null">
+                <span class="hub-rating">★ {{ hubRating(item)?.toFixed(1) }}</span>
+              </template>
+              <span v-else>{{ '暂无评分' }}</span>
+              <template v-if="item.downloads !== undefined"> · {{ item.downloads }} {{ '次下载' }}</template>
+              <template v-if="item.version"> · v{{ item.version }}</template>
+              <template v-if="item.category"> · {{ item.category }}</template>
+            </div>
+            <div v-if="hubInstallError === item.id" class="hub-item-error">{{ '安装失败，请检查网络后重试' }}</div>
           </div>
           <el-button
             size="small"
             type="primary"
+            :disabled="isHubInstalled(item)"
             :loading="hubInstalling === item.id"
             @click="installHubSkill(item.id)"
           >
-            {{ '下载安装' }}
+            {{ isHubInstalled(item) ? '已安装' : '下载安装' }}
           </el-button>
         </div>
       </div>
@@ -245,7 +268,9 @@
               text
               type="danger"
               @click="removeHubSource(scope?.row?.id)"
-            >删除</el-button>
+            >
+删除
+</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -381,7 +406,7 @@
         <p class="effectiveness-note">
           说明:「同类别不带」= 同类任务下、但没有应用该技能的运行。
           这是<span class="note-strong">观察性对比而非受控实验</span> —— 用户可能在任务变难时才想起用技能,
-          所以差值可能低估技能的贡献。样本不足时不给结论,也不会自动禁用任何技能。<br/>
+          所以差值可能低估技能的贡献。样本不足时不给结论,也不会自动禁用任何技能。<br />
           「用户接受度」= 用户对含该技能的答复的真实反应(点了「重新生成」= 不满意;
           下一条消息以纠正词开头 = 不满意;以认可词开头 = 满意)。
           「用户没再说话」<b>不算满意</b> —— 宁可少判,不要让效用统计偏乐观。
@@ -390,21 +415,20 @@
     </el-collapse>
 
     <!--
-      【M4-E】技能验证 —— 受控对照实验。
-      边际效用面板给的是【观察性对比】(有混杂);这里做的是**配对对照**:
-      同一个任务跑两遍,一遍允许用该技能、一遍禁止用(load_skill 会真的拒绝)。
-      两遍的差别只剩「有没有这个技能」—— 这才是干净的因果对比。
-
-      【成本必须先告知】每个任务跑两遍 → token 翻倍。跑之前弹确认说清楚。
+      【M4-E】技能验证 —— 受控对照实验（技能作者的专家工具）。
+      【设计审计 #P1-5】统计术语对普通用户是噪音 → 折叠进「技能作者工具」，默认收起。
+      成本必须先告知: 每个任务跑两遍 → token 翻倍。
     -->
-    <el-card class="skills-trial-card">
-      <div class="dir-header">
-        <h3>技能验证（对照实验）</h3>
-      </div>
-      <p class="dir-empty">
-        选一个技能，给出要验证的任务。每个任务会<b>跑两遍</b>（一遍带技能、一遍禁技能），
-        据此判断这个技能到底有没有用。<b>token 成本翻倍。</b>
-      </p>
+    <el-collapse class="skills-trial-collapse">
+      <el-collapse-item name="trial">
+        <template #title>
+          <span class="trial-collapse-title">技能作者工具 · 技能验证（对照实验）</span>
+        </template>
+        <el-card class="skills-trial-card" shadow="never">
+          <p class="dir-empty">
+            选一个技能，给出要验证的任务。每个任务会<b>跑两遍</b>（一遍带技能、一遍禁技能），
+            据此判断这个技能到底有没有用。<b>token 成本翻倍。</b>
+          </p>
 
       <el-form label-width="100px">
         <el-form-item label="技能">
@@ -521,7 +545,9 @@
           :title="trialResult.summary.judgeStatus.reason"
         />
       </div>
-    </el-card>
+        </el-card>
+      </el-collapse-item>
+    </el-collapse>
 
     <SkillImportDialog
       v-model="showImportDialog"
@@ -669,7 +695,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue';
-import { Upload, MagicStick, Box, SuccessFilled, Plus, Refresh, Search } from '@element-plus/icons-vue';
+import { Upload, Download, MagicStick, Box, SuccessFilled, Plus, Refresh, Search } from '@element-plus/icons-vue';
 import { useRouter } from 'vue-router';
 import { ElMessage } from "element-plus/es/components/message/index"
 // #007 H1: 提案超时阈值 (30 分钟, 订单既定)
@@ -960,13 +986,41 @@ const hubIndex = ref<any>(null);
 const hubRefreshing = ref(false);
 const hubInstalling = ref('');
 const hubSearched = ref(false);
+const hubInstallError = ref('');
+let hubSearchTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** 【P1 生态入口】即时搜索(300ms 防抖) —— 此前只有回车/清除才触发, 用户不知道要按回车 */
+const onHubQueryInput = (): void => {
+  if (hubSearchTimer) clearTimeout(hubSearchTimer);
+  hubSearchTimer = setTimeout(() => { void searchHub(); }, 300);
+};
+
+/** 评分只在索引真实提供时返回数字; 两个内置源都没有评分 → null → UI 显示"暂无评分" */
+const hubRating = (item: any): number | null => {
+  const v = item?.rating ?? item?.stars;
+  return typeof v === 'number' && Number.isFinite(v) ? v : null;
+};
+
+/** 已安装判定: 已装技能的 id 可能是 slug 或 name(见 SkillHub.installedSkillKeys) */
+const isHubInstalled = (item: any): boolean => {
+  if (!item?.id) return false;
+  const slug = String(item.slug ?? '').toLowerCase();
+  const name = String(item.name ?? '').toLowerCase();
+  return skills.value.some(s => {
+    const id = String(s.id ?? '').toLowerCase();
+    const n = String(s.name ?? '').toLowerCase();
+    return id === slug || id === name || id === String(item.id).toLowerCase() || n === name;
+  });
+};
 
 /** 搜索开源技能库（索引是本地缓存的 → 断网也能搜） */
 const searchHub = async (): Promise<void> => {
   hubSearched.value = true;
   const q = hubQuery.value.trim();
+  hubInstallError.value = '';
   try {
-    const res = await (window as any).electronAPI?.skills?.hubSearch?.({ q, limit: q ? 30 : 0 });
+    // 搜索要能看到"已安装"态(推荐则保持只推未装的) —— 让用户搜到时知道不用重复下
+    const res = await (window as any).electronAPI?.skills?.hubSearch?.({ q, limit: q ? 30 : 0, excludeInstalled: false });
     if (res?.success) hubItems.value = res.data ?? [];
   } catch (e) {
     console.error('searchHub failed', e);
@@ -1043,6 +1097,7 @@ const installHubSkill = async (id: string): Promise<void> => {
   }
 
   hubInstalling.value = id;
+  hubInstallError.value = '';
   try {
     const res = await (window as any).electronAPI?.skills?.hubInstall?.(id);
     if (res?.success) {
@@ -1051,10 +1106,12 @@ const installHubSkill = async (id: string): Promise<void> => {
       else await loadSkills();
       await loadHubRecommend();
     } else {
+      hubInstallError.value = id;
       ElMessage.error(res?.error || '安装失败');
     }
   } catch (e) {
     console.error('installHubSkill failed', e);
+    hubInstallError.value = id;
     ElMessage.error('安装失败');
   } finally {
     hubInstalling.value = '';
@@ -1217,6 +1274,23 @@ const handleDismissProposal = async () => {
     showProposalDetail.value = false;
   }
 };
+
+/** 导出全部技能为 zip（含 references/scripts/assets），本地闭环，不上传任何服务器 */
+async function handleExportSkills(): Promise<void> {
+  try {
+    const saved = await window.electronAPI.dialog.saveFile({
+      title: '导出全部技能',
+      defaultPath: 'newworld-skills.zip',
+      filters: [{ name: '技能包', extensions: ['zip'] }],
+    });
+    if (saved?.canceled || !saved.filePath) return;
+    const r = await window.electronAPI.backup.exportSkills(saved.filePath);
+    if (!r?.success) throw new Error(r?.error || '导出失败');
+    ElMessage.success(`已导出 ${r.data?.skillCount ?? 0} 个技能到 ${saved.filePath}`);
+  } catch (e) {
+    ElMessage.error(e instanceof Error ? e.message : String(e));
+  }
+}
 
 const handleDeduplicate = async () => {
   loadingDeduplicate.value = true;
@@ -1569,6 +1643,23 @@ onUnmounted(() => {
   display: -webkit-box;
   -webkit-line-clamp: 2;
   -webkit-box-orient: vertical;
+}
+.hub-item-meta {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--fg-quaternary, var(--fg-tertiary));
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+
+  .hub-rating {
+    color: var(--warning-color, #e6a23c);
+  }
+}
+.hub-item-error {
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--danger-color, #f56c6c);
 }
 
 .skills-trial-card {

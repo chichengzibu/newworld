@@ -1,5 +1,5 @@
 /**
- * PiPiClaw — OpenAI 兼容适配器的 thinking 开关（M4-J 回归）
+ * New World — OpenAI 兼容适配器的 thinking 开关（M4-J 回归）
  * ═══════════════════════════════════════════════════════════════════════
  * 【钉住的是什么】
  * ollama 的 OpenAI 兼容端点(`/v1/chat/completions`)**不认** `think` 字段 ——
@@ -22,7 +22,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 
 vi.mock('electron', () => ({
-  app: { getPath: vi.fn(() => '/tmp/pipiclaw-thinking-test') },
+  app: { getPath: vi.fn(() => '/tmp/newworld-thinking-test') },
 }))
 vi.mock('electron-log', () => ({
   default: {

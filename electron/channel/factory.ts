@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - Channel / factory (W8)
+ * New World - Channel / factory (W8)
  *
  * 根据 ChannelKind 构造对应 Channel 实例。
  * 统一所有 11 个 IM 通道的实例化入口,供 channel-config:test 与启动注册使用。

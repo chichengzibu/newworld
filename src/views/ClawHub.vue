@@ -57,9 +57,9 @@
       </div>
 
       <div v-else-if="registryList.length === 0" class="empty-hint">
-        <p>
-          {{ '仓库未连接。基址留空时用默认地址或环境变量 PIPICLAW_CLAWHUB_REGISTRY；' }}
-          {{ '签名公钥用 PIPICLAW_CLAWHUB_PUBKEY 或 userData/clawhub-pubkey.txt 提供。' }}
+        <!-- 【设计审计 #P1-5】环境变量/文件路径是运维细节 → 用户视角一句话, 细节收进 hover -->
+        <p :title="'基址: 环境变量 NW_CLAWHUB_REGISTRY 或页面内填写; 签名公钥: 环境变量 NW_CLAWHUB_PUBKEY 或 userData/clawhub-pubkey.txt'">
+          {{ '尚未连接私有技能仓库 — 在上方填入仓库地址并连接，即可浏览与安装签名技能包。' }}
         </p>
       </div>
 

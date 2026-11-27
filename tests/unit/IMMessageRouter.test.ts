@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest'
 
 vi.mock('electron', () => ({
-  app: { getPath: vi.fn(() => '/tmp/pipiclaw-router-test') },
+  app: { getPath: vi.fn(() => '/tmp/newworld-router-test') },
 }))
 
 vi.mock('electron-log', () => ({
@@ -66,7 +66,7 @@ describe('P0-04: IMMessageRouter 路由规则', () => {
       text: '今天日程',
       channel: 'im-feishu',
       from: 'u1',
-      to: 'piPiClaw',
+      to: 'nwWorld',
       ts: Date.now(),
     } as any)
     expect(decision.matchedRule?.id).toBe('high')
@@ -76,7 +76,7 @@ describe('P0-04: IMMessageRouter 路由规则', () => {
     const r = IMMessageRouter.getInstance()
     r.addRule({ id: 'r1', trigger: '日程', targetChannel: 'im-feishu' as any, targetUserId: 'u', priority: 50, enabled: false })
     const decision = await r.handleIncoming('ch1', 'im-feishu' as any, {
-      id: 'm1', text: '今天日程', channel: 'im-feishu', from: 'u1', to: 'piPiClaw', ts: Date.now(),
+      id: 'm1', text: '今天日程', channel: 'im-feishu', from: 'u1', to: 'nwWorld', ts: Date.now(),
     } as any)
     expect(decision.matchedRule).toBeUndefined()
   })
@@ -85,7 +85,7 @@ describe('P0-04: IMMessageRouter 路由规则', () => {
     const r = IMMessageRouter.getInstance()
     r.addRule({ id: 'bad', trigger: '[unclosed', targetChannel: 'im-feishu' as any, targetUserId: 'u', priority: 50, enabled: true })
     const decision = await r.handleIncoming('ch1', 'im-feishu' as any, {
-      id: 'm1', text: 'hello', channel: 'im-feishu', from: 'u1', to: 'piPiClaw', ts: Date.now(),
+      id: 'm1', text: 'hello', channel: 'im-feishu', from: 'u1', to: 'nwWorld', ts: Date.now(),
     } as any)
     expect(decision.allowed).toBe(true)
   })
@@ -93,7 +93,7 @@ describe('P0-04: IMMessageRouter 路由规则', () => {
   it('无匹配规则 → rejectReason no matching route rule', async () => {
     const r = IMMessageRouter.getInstance()
     const decision = await r.handleIncoming('ch1', 'im-feishu' as any, {
-      id: 'm1', text: 'no trigger', channel: 'im-feishu', from: 'u1', to: 'piPiClaw', ts: Date.now(),
+      id: 'm1', text: 'no trigger', channel: 'im-feishu', from: 'u1', to: 'nwWorld', ts: Date.now(),
     } as any)
     expect(decision.rejectReason).toContain('no matching route rule')
   })

@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - 执行模式切换器 (M1-E)
+ * New World - 执行模式切换器 (M1-E)
  *
  * 【为什么必须有这个组件】
  * 审计发现: executionMode store 定义了 safe/plan/craft 三档,
@@ -13,29 +13,27 @@
  */
 <template>
   <div class="mode-switch">
-    <el-tooltip
-      :content="tooltipText"
-      placement="top"
-      :show-after="200"
-    >
-      <button
-        class="mode-badge"
-        :class="[`mode-${currentMode}`, { 'is-high-risk': currentMode === 'craft' }]"
-        :aria-label="`执行模式:${config?.name ?? currentMode}`"
-        @click="dropdownVisible = !dropdownVisible"
-      >
-        <span class="mode-dot" aria-hidden="true"></span>
-        <span class="mode-name">{{ config?.name ?? currentMode }}</span>
-        <el-icon class="mode-caret"><ArrowDown /></el-icon>
-      </button>
-    </el-tooltip>
-
+    <!-- 【报错修复】el-dropdown 必须有默认插槽触发节点(否则 [ElOnlyChild] 警告)。
+         原来 button 在 el-tooltip 里、dropdown 无触发节点 → 现在 button 直接作为
+         dropdown 触发器, hover 提示改用原生 title(语义等价, 少一层 popper 机制) -->
     <el-dropdown
       v-model:visible="dropdownVisible"
       trigger="click"
       placement="top-start"
       @command="onSelect"
     >
+      <button
+        class="mode-badge"
+        :class="[`mode-${currentMode}`, { 'is-high-risk': currentMode === 'craft' }]"
+        :aria-label="`执行模式:${config?.name ?? currentMode}`"
+        :title="tooltipText"
+        @click="dropdownVisible = !dropdownVisible"
+      >
+        <span class="mode-dot" aria-hidden="true"></span>
+        <span class="mode-name">{{ config?.name ?? currentMode }}</span>
+        <el-icon class="mode-caret"><ArrowDown /></el-icon>
+      </button>
+
       <template #dropdown>
         <el-dropdown-menu>
           <el-dropdown-item
@@ -52,7 +50,9 @@
                   size="small"
                   type="danger"
                   effect="dark"
-                >{{ t('executionMode.riskTag') }}</el-tag>
+                >
+{{ t('executionMode.riskTag') }}
+</el-tag>
               </div>
               <div class="mode-option-desc">{{ t(m.descKey) }}</div>
             </div>
@@ -136,30 +136,38 @@ onMounted(() => { void store.fetchMode() })
 <style scoped>
 .mode-switch { position: relative; display: inline-flex; }
 
+/* 【P0 迭代】chip 语言统一: 与 ChatInput 的 memory-pill / provider-pill / model-pill
+   同底(透明)/同描边(1px border-base)/同圆角(9999px)/同高(28px)/同字号(12px),
+   模式状态只靠点的颜色(绿/橙/红)表达 */
 .mode-badge {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 10px;
-  border: 1px solid var(--el-border-color, #dcdfe6);
-  border-radius: 14px;
+  height: 28px;
+  padding: 0 12px;
+  border: 1px solid var(--border-base, var(--el-border-color, #dcdfe6));
+  border-radius: 9999px;
   background: transparent;
   cursor: pointer;
+  flex-shrink: 0; /* 工具栏 flex 环境中禁止被挤压换行 */
+  white-space: nowrap;
   font-size: 12px;
-  line-height: 1.6;
-  color: var(--el-text-color-regular, #606266);
-  transition: border-color .15s, background .15s;
+  line-height: 18px;
+  color: var(--fg-tertiary, var(--el-text-color-regular, #606266));
+  transition: border-color var(--duration-fast, 120ms) var(--ease-standard, ease), color .15s;
 }
-.mode-badge:hover { background: var(--el-fill-color-light, #f5f7fa); }
+.mode-badge:hover { border-color: var(--accent-base, var(--el-color-primary, #7c8db5)); }
 
-.mode-dot { width: 7px; height: 7px; border-radius: 50%; flex: none; }
+.mode-dot { width: 6px; height: 6px; border-radius: 50%; flex: none; }
 .mode-safe .mode-dot  { background: #67c23a; }  /* 绿:不执行 */
 .mode-plan  .mode-dot  { background: #e6a23c; }  /* 橙:确认后执行 */
 .mode-craft .mode-dot  { background: #f56c6c; }  /* 红:自动执行 */
 
+/* v4.9：高危模式的提示保留（安全语义），但降低饱和度 —— 不再是刺眼的高饱和红 */
 .mode-craft.is-high-risk {
   border-color: var(--el-color-danger, #f56c6c);
   color: var(--el-color-danger, #f56c6c);
+  opacity: 0.88;
 }
 .mode-caret { font-size: 11px; opacity: .6; }
 

@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - 日志管理器
+ * New World - 日志管理器
  * 
  * 职责：
  * 1. 统一日志输出（控制台+文件）
@@ -69,7 +69,7 @@ export class LogManager {
     const userDataPath = safeUserData();
     const logPath = join(userDataPath, 'logs');
 
-    log.transports.file.resolvePathFn = () => join(logPath, 'pipiclaw.log');
+    log.transports.file.resolvePathFn = () => join(logPath, 'newworld.log');
     log.transports.file.maxSize = 5 * 1024 * 1024;
     log.transports.file.format = '[{y}-{m}-{d} {h}:{i}:{s}.{ms}] [{level}] {text}';
     log.transports.console.format = '[{h}:{i}:{s}] [{level}] {text}';

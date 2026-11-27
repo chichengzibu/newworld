@@ -1,5 +1,5 @@
 /**
- * PiPiClaw — ProcessSandbox 测试（M3-C）
+ * New World — ProcessSandbox 测试（M3-C）
  * ═══════════════════════════════════════════════════════════════
  * 【这一批锁的是什么】
  * 此前命令走 execFile,超时/中止时 Node 只杀**直接子进程**。

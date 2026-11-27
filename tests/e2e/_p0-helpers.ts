@@ -13,7 +13,7 @@ const mainEntry = path.join(repoRoot, 'dist-electron', 'main.js')
 
 /** 给定 spec 名字, 生成 fresh userData 目录, 避免跨 spec 污染 */
 export function makeUserDataDir(tag: string): string {
-  return mkdtempSync(join(tmpdir(), `pipiclaw-p0-${tag}-`))
+  return mkdtempSync(join(tmpdir(), `newworld-p0-${tag}-`))
 }
 
 /** 用 node http.request 测 server, 不抛错, 返回 {status, headers, body} */
@@ -76,15 +76,20 @@ export async function probeGateway(): Promise<number> {
 
 /**
  * 启动 fresh Electron 并探测 OpenClawServer 端口。
- * 包含 env 注入 (PIPICLAW_E2E=1 强制 prod 路径)。
+ * 包含 env 注入 (NW_E2E=1 强制 prod 路径)。
  */
 export async function launchAndProbe(userDataDir: string, extraEnv: Record<string, string> = {}): Promise<{ app: ElectronApplication; win: import('@playwright/test').Page; gatewayPort: number }> {
+  // 【环境残留清除】宿主(WorkBuddy/CI)可能带 ELECTRON_RUN_AS_NODE=1,
+  // 会让 electron.exe 按 Node 模式启动 → "bad option: --remote-debugging-port=0",
+  // 所有走本 helper 的 p0-security spec 都会在 launch 阶段红。必须删除该键。
+  // (置空字符串在部分 Electron 版本仍按"存在"处理,所以解构丢弃)
+  const { ELECTRON_RUN_AS_NODE: _drop, ...cleanEnv } = process.env as Record<string, string | undefined>
   const app = await electron.launch({
     // args 顺序: Electron 自身开关 → main entry
     args: [`--user-data-dir=${userDataDir}`, '--no-sandbox', mainEntry],
     cwd: repoRoot,
     userDataDir,
-    env: { ...process.env, PIPICLAW_E2E: '1', ELECTRON_DISABLE_SECURITY_WARNINGS: '1', ...extraEnv },
+    env: { ...cleanEnv, NW_E2E: '1', ELECTRON_DISABLE_SECURITY_WARNINGS: '1', ...extraEnv },
     timeout: 30_000,
   })
   const win = await app.firstWindow({ timeout: 30_000 })

@@ -9,8 +9,8 @@
  *       - 首次安装默认 safe (least privilege), 不是 permissive
  *       - 满足以下任一才真重置:
  *         1) options.force === true (UI 主动, IPC permissions:reset)
- *         2) PIPICLAW_DEV=1 (dev only)
- *         3) PIPICLAW_RESET_PERMISSIONS=1
+ *         2) NW_DEV=1 (dev only)
+ *         3) NW_RESET_PERMISSIONS=1
  *       - 否则: 跳过, 尊重用户选择
  *       - 每次模式切换进 EventBus 'permission:mode-changed' (审计)
  *
@@ -18,7 +18,7 @@
  *   - Test A: fresh userData 启动 + 不设 env → 默认 safe (least privilege)
  *   - Test B: 同一 userData + 不设 env 重启 → activeSetId 已设 → 跳过 reset → 仍上次选的
  *            流程: 第一次启动调 setActive('preset_unrestricted') → 第二次启动验证 active 保持 unrestricted
- *   - Test C: 第二次启动 + 设 env PIPICLAW_DEV=1 → 启动时仍不自动 reset (M1 新行为)
+ *   - Test C: 第二次启动 + 设 env NW_DEV=1 → 启动时仍不自动 reset (M1 新行为)
  *            改测: 显式 IPC `permissions:reset` 仍能切到 unrestricted
  */
 

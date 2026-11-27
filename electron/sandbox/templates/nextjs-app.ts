@@ -6,7 +6,7 @@ export const nextjsApp: TemplateConfig = {
   description: 'Next.js 14 App Router + TypeScript + React Server Components',
   triggers: ['next', 'nextjs', 'next.js', 'app-router', 'react-server', '全栈', 'ssr', 'seo'],
   devPort: 3000,
-  image: 'pipiclaw/sandbox-base:latest',
+  image: 'newworld/sandbox-base:latest',
   files: [
     {
       path: 'package.json',
@@ -72,7 +72,7 @@ export default nextConfig
       content: `export default function Home() {
   return (
     <main>
-      <h1>Hello from Next.js 14 (PiPiClaw sandbox)</h1>
+      <h1>Hello from Next.js 14 (New World sandbox)</h1>
     </main>
   )
 }
@@ -80,7 +80,7 @@ export default nextConfig
     },
     {
       path: 'app/layout.tsx',
-      content: `export const metadata = { title: 'Next.js App', description: 'PiPiClaw sandbox' }
+      content: `export const metadata = { title: 'Next.js App', description: 'New World sandbox' }
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">

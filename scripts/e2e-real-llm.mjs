@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * PiPiClaw - 真实场景 E2E (Ollama + Vite proxy + 真实 LLM 流式)
+ * New World - 真实场景 E2E (Ollama + Vite proxy + 真实 LLM 流式)
  *
  * 工作流程:
  *   1. Vite dev server 启动 (proxy /ollama -> localhost:11434)
@@ -40,7 +40,7 @@ async function test(name, fn) {
 }
 
 async function main() {
-  console.log(`\n=== PiPiClaw Real-LLM E2E (qwen3.5:9b) ===\n`)
+  console.log(`\n=== New World Real-LLM E2E (qwen3.5:9b) ===\n`)
 
   await test('Ollama server reachable', async () => {
     const r = await fetch(`${OLLAMA}/api/tags`)
@@ -147,16 +147,16 @@ async function main() {
     await page.waitForTimeout(2000)
     await page.screenshot({ path: `${SCREENSHOT_DIR}/01-initial.png` })
     const title = await page.title()
-    if (!title.includes('PiPiClaw')) throw new Error(`Bad title: ${title}`)
+    if (!title.includes('New World')) throw new Error(`Bad title: ${title}`)
     return { note: title }
   })
 
-  // ====== 14 路由 ======
-  await test('All 14 routes render correctly', async () => {
+  // ====== 12 路由（v4.9：模型对比/帮助中心下线）======
+  await test('All 12 routes render correctly', async () => {
     const routes = [
-      '/dashboard','/chat','/skills','/clawhub','/models','/model-compare',
-      '/im-management','/tasks','/schedule','/permissions','/plugin-market',
-      '/remote-control','/settings','/help',
+      '/chat','/skills','/clawhub','/models',
+      '/im-management','/schedule','/permissions','/search','/voice',
+      '/remote-control','/settings','/settings/im-accounts',
     ]
     const failures = []
     for (const r of routes) {
@@ -356,15 +356,15 @@ async function main() {
     return { note: `last="${last.slice(0, 30)}..."` }
   })
 
-  // ====== Settings / Help / Model-Compare ======
-  await test('Settings/Help/Model-Compare render content', async () => {
-    for (const r of ['/settings', '/help', '/model-compare']) {
+  // ====== Settings / Permissions（v4.9：帮助中心与模型对比已下线）======
+  await test('Settings/Permissions render content', async () => {
+    for (const r of ['/settings', '/permissions']) {
       await page.goto(`${BASE}/#${r}`, { waitUntil: 'domcontentloaded' })
       await page.waitForTimeout(1500)
       const html = await page.locator('main').innerHTML()
       if (html.length < 200) throw new Error(`${r} too short: ${html.length}`)
     }
-    return { note: 'all 3 OK' }
+    return { note: 'all 2 OK' }
   })
 
   // ====== Final: zero pageerrors ======

@@ -2,7 +2,7 @@
  * NOVA #003-C · BootDirector 纯逻辑单测(第①笔)
  *
  * 口径(设计稿 F3/F5/F7 + 命令 #003-C 第①笔验收):
- *   - 阶段顺序 / progress 单调不减 / 2.8s 下限 / 跳过立即放行 / 10s 超时兜底 ≥6 例
+ *   - 阶段顺序 / progress 单调不减 / 真就绪即关(无最短展示) / 跳过立即放行 / 10s 超时兜底 ≥6 例
  *   - 三"无信号"子系统经 stageFactories 注入触发 .getInstance()(验证被调用且幂等)
  *   - 乱序 → throw + 转入 aborted(显式暴露接线错误)
  *
@@ -81,22 +81,27 @@ describe('NOVA #003-C BootDirector 纯逻辑', () => {
     expect(lines.some((l) => l.level === 'error' && /aborted/.test(l.msg))).toBe(true);
   });
 
-  it('T5: 2.8s 下限 — rendererReady 但 elapsed<minShow 时 canClose 仍 false; >=minShow 时点亮', () => {
+  it('T5: 真就绪即关 — 默认 minShowMs=0, rendererReady 后 t=0 立即点亮(无人为等待)', () => {
     let t = 0;
-    const bd = new BootDirector({ now: () => t, minShowMs: 2800 });
+    const bd = new BootDirector({ now: () => t });
+    expect(BootDirector.MIN_SHOW_MS_DEFAULT).toBe(0);
     bd.markSplashShown(); // t=0
-    bd.markRendererReady();
+    // 未 ready 时仍挂起
     expect(bd.decide()).toEqual({ close: false, reason: 'pending' });
-
-    t = 2799;
-    expect(bd.canCloseSplash()).toBe(false);
-
-    t = 2800;
+    bd.markRendererReady();
+    // 握手到达即刻放行, 不再等 2.8s
     expect(bd.decide()).toEqual({ close: true, reason: 'light-up' });
+    expect(bd.canCloseSplash()).toBe(true);
+
+    // 显式传 0 的等价性
+    const bd2 = new BootDirector({ now: () => t, minShowMs: 0 });
+    bd2.markSplashShown();
+    bd2.markRendererReady();
+    expect(bd2.decide()).toEqual({ close: true, reason: 'light-up' });
   });
 
   it('T6: 跳过 — markSkipped 后无视下限/renderer-ready, reason=skip 立即放行', () => {
-    let t = 0;
+    const t = 0;
     const bd = new BootDirector({ now: () => t });
     bd.markSplashShown(); // t=0
     bd.markSkipped('user-interaction');
@@ -120,7 +125,7 @@ describe('NOVA #003-C BootDirector 纯逻辑', () => {
   });
 
   it('T8: 失败路径 — markAborted 优先级最高, 即便 skip/ready 也 reason=aborted', () => {
-    let t = 0;
+    const t = 0;
     const bd = new BootDirector({ now: () => t });
     bd.markSplashShown();
     bd.markRendererReady();

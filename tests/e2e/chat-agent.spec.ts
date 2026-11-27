@@ -36,7 +36,7 @@ test.describe('Chat Agent integration', () => {
     await expect(cmdBtn).toHaveCount(1)
     await expect(cmdBtn).toBeVisible()
     // 品牌在标题栏
-    await expect(window.locator('.title-bar .app-name')).toHaveText(/PiPiClaw/i)
+    await expect(window.locator('.title-bar .app-name')).toHaveText(/New World/i)
   })
 
   test('Chat page shows empty state or sessions list', async ({ window }) => {

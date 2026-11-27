@@ -1,5 +1,5 @@
 /**
- * PiPiClaw — 裁判放行门禁测试（M4-V）
+ * New World — 裁判放行门禁测试（M4-V）
  * ═══════════════════════════════════════════════════════════════════════
  * 【这一批在测什么】
  * 门禁是 D7「裁判层保持默认关闭」从注释变成代码的那道门。
@@ -15,7 +15,7 @@
 import { describe, it, expect, vi } from 'vitest'
 
 vi.mock('electron', () => ({
-  app: { getPath: vi.fn((k: string) => `/tmp/pipiclaw-trust-${k}`) },
+  app: { getPath: vi.fn((k: string) => `/tmp/newworld-trust-${k}`) },
 }))
 vi.mock('electron-log', () => ({
   default: {

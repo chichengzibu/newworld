@@ -135,8 +135,10 @@ test.describe('T+60 设置 → 模型管理 CRUD', () => {
     await modelsTab.click()
     await window.waitForTimeout(500)
 
-    // 找第一个 provider card 的 switch
-    const switches = window.locator('.provider-card .el-switch, .el-switch')
+    // 找第一个 provider card 的 switch。
+    // M4.9：设置页「基础设置」新增了执行安全开关（自动审查），
+    // 全局 `.el-switch` 选择器会先匹配到它 —— 必须限定在 provider-card 内。
+    const switches = window.locator('.provider-card .el-switch')
     const count = await switches.count()
     if (count > 0) {
       await expect(switches.first()).toBeVisible()

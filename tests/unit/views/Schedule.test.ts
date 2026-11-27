@@ -142,7 +142,7 @@ describe('Schedule 行操作列 scope.row 修复 (行为级证据)', () => {
     const actionCols = wrapper.findAll('.el-col-stub')
     // 4 个 el-table-column: name/instruction/scheduleType/enabled/createTime/actions
     // 其中 actions 列才有 3 个 el-button
-    let actionButtons = wrapper.findAll('.el-button-stub')
+    const actionButtons = wrapper.findAll('.el-button-stub')
     // 页面顶部 "创建任务" 也是 el-button, 排除它
     const headerBtns = wrapper.findAll('.page-header .el-button-stub').length
     expect(actionButtons.length).toBeGreaterThan(headerBtns)

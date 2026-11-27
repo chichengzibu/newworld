@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - Vue应用入口
+ * New World - Vue应用入口
  *
  * 性能优化 (v4.5):
  * - JS: 不再 app.use(ElementPlus) 全量注册, 改为 unplugin-vue-components 按需注入组件;
@@ -20,6 +20,7 @@ import enUs from 'element-plus/dist/locale/en.mjs';
 import App from './App.vue';
 import router from './router';
 import i18n, { setLocale } from './locales';
+import { reportToLedger, isBenignWindowError } from './utils/reportLedger';
 import './styles/reset.scss';
 import './styles/global.scss';
 // 启动骨架屏(从 main.ts 引入,确保 vite build 把 css 打进 vendor 而非 <link>)
@@ -81,14 +82,18 @@ function paintFatalError(source: string, payload: unknown) {
     })();
     const box = document.createElement('div');
     box.style.cssText = 'position:fixed;inset:0;z-index:99999;background:#1a0f0f;color:#ffb4b4;font-family:monospace;padding:24px;overflow:auto;white-space:pre-wrap;line-height:1.5;border:2px solid #ff5252;';
-    box.innerText = `[PiPiClaw render error]\nsource: ${source}\n\n${text}\n\n— 截图给开发者定位 —`;
+    box.innerText = `[New World render error]\nsource: ${source}\n\n${text}\n\n— 截图给开发者定位 —`;
     root.appendChild(box);
   } catch { /* swallow */ }
 }
 
+// 【P0 工程规范·可观测性】渲染错误 → 本地台账的统一实现见 src/utils/reportLedger.ts，
+// 业务模块（Voice 等）与这里的全局钩子共用同一条 IPC 路径。
+
 app.config.errorHandler = (err, _instance, info) => {
-  // eslint-disable-next-line no-console
-  console.error('[PiPiClaw] Vue error:', err, info);
+   
+  console.error('[New World] Vue error:', err, info);
+  reportToLedger(`vue:${info}`, err);
   // 真实用户监控:Vue 渲染/逻辑错误上报到 Sentry(未配置 DSN 时 no-op)
   SentryRenderer.captureException(err instanceof Error ? err : new Error(String(err)), {
     contexts: { vue: { info } },
@@ -98,12 +103,16 @@ app.config.errorHandler = (err, _instance, info) => {
 
 window.addEventListener('error', (e) => {
   if (e?.error || e?.message) {
+    // 良性 ResizeObserver 通知不挂屏、不污染台账（判定见 reportLedger.isBenignWindowError）
+    if (isBenignWindowError(e.message ?? e.error?.message)) return;
+    reportToLedger('window.error', e.error ?? new Error(`${e.message} @ ${e.filename}:${e.lineno}`));
     paintFatalError('window.error', e.error?.stack ?? `${e.message} @ ${e.filename}:${e.lineno}:${e.colno}`);
   }
 });
 
 window.addEventListener('unhandledrejection', (e) => {
   const reason = e.reason instanceof Error ? `${e.reason.message}\n${e.reason.stack ?? ''}` : String(e.reason);
+  reportToLedger('unhandledrejection', e.reason);
   paintFatalError('unhandledrejection', reason);
 });
 

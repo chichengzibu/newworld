@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - #005 Step 0 (DEV-014 机制切除): contextKind 显式贯穿验证
+ * New World - #005 Step 0 (DEV-014 机制切除): contextKind 显式贯穿验证
  *
  * ═══ 被测机制 ═══
  *   入口 (ChatManager.dispatchToAgent 派生) → think(ctx.contextKind) → run(opts.contextKind)
@@ -28,7 +28,7 @@ import { BashTool } from '../../electron/agent/tools/BashTool'
 import { LlmAgentBrain } from '../../electron/agent/LlmAgentBrain'
 import type { LlmToolCall } from '../../electron/agent/LlmAgentBrain'
 import type { LlmStreamChunk } from '../../electron/llm/types'
-import { installToolConfirmation } from '../unit/auto-confirm'
+import { installToolConfirmation, activatePermissiveForTest } from '../unit/auto-confirm'
 
 // ─── 替身面 ───
 vi.mock('electron', () => ({
@@ -71,6 +71,7 @@ const execKinds: string[] = [] // execCommand 收到的 contextKind 顺序记录
 const CONFIRM_ALL = installToolConfirmation();
 
 beforeEach(() => {
+  activatePermissiveForTest() // v4.8: 本文件验证 contextKind 贯穿，非权限主题，显式放行 RBAC
   auditRows = []
   execKinds.length = 0
   // 探针 sink: 记录 contextKind + 不落盘 (setAuditSink 是 v3 既有注入面, 消费不新增)

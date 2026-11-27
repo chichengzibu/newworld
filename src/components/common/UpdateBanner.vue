@@ -81,7 +81,7 @@ const iconName = computed(() => {
 })
 
 const title = computed(() => {
-  if (type.value === 'info') return `PiPiClaw v${version.value} 已可用`
+  if (type.value === 'info') return `New World v${version.value} 已可用`
   if (type.value === 'success') return `v${version.value} 已下载完成`
   if (type.value === 'error') return '更新检查失败'
   return ''

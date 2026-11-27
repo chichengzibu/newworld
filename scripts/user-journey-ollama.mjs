@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * PiPiClaw - 真实用户全套功能测试 (electron prod + Ollama)
+ * New World - 真实用户全套功能测试 (electron prod + Ollama)
  *
  * 跑 prod build (dist-electron/main.js), 模拟用户用本地 Ollama 跑全功能.
  */
@@ -33,12 +33,12 @@ async function test(name, fn) {
 }
 
 async function main() {
-  console.log(`\n=== PiPiClaw 用户全套功能测试 (electron prod + Ollama 11434) ===\n`)
+  console.log(`\n=== New World 用户全套功能测试 (electron prod + Ollama 11434) ===\n`)
 
   const app = await electron.launch({
     args: [mainEntry, '--no-sandbox'],
     cwd: PROJECT,
-    env: { ...process.env, PIPICLAW_E2E: '1', ELECTRON_DISABLE_SECURITY_WARNINGS: '1' }
+    env: { ...process.env, NW_E2E: '1', ELECTRON_DISABLE_SECURITY_WARNINGS: '1' }
   })
 
   const win = await app.firstWindow({ timeout: 30_000 })
@@ -58,13 +58,13 @@ async function main() {
   await win.waitForTimeout(2000)
 
   // ============================================================
-  // 1. 14 路由可达
+  // 1. 12 路由可达（v4.9：模型对比/帮助中心下线）
   // ============================================================
-  console.log('\n--- 1. 14 路由可达 ---')
+  console.log('\n--- 1. 12 路由可达 ---')
   const routes = [
-    '/dashboard', '/chat', '/skills', '/models', '/tasks',
+    '/chat', '/skills', '/models', '/search', '/voice',
     '/im-management', '/schedule', '/permissions', '/settings',
-    '/help', '/clawhub', '/model-compare', '/plugin-market', '/remote-control'
+    '/clawhub', '/remote-control', '/settings/im-accounts'
   ]
   for (const r of routes) {
     await test(`route: ${r}`, async () => {
@@ -152,7 +152,7 @@ async function main() {
     }
     if (await win.locator('textarea').count() === 0) throw new Error('textarea 仍未出现 (新建对话后)')
     // 3. 输入
-    await win.locator('textarea').first().fill('用一句话介绍 PiPiClaw 是什么')
+    await win.locator('textarea').first().fill('用一句话介绍 New World 是什么')
     await win.waitForTimeout(300)
     // 4. 发送 (Enter)
     await win.locator('textarea').first().press('Enter')
@@ -303,7 +303,7 @@ async function main() {
   // 8. 其他路由可达
   // ============================================================
   console.log('\n--- 8. 其他路由 quick test ---')
-  for (const r of ['/tasks', '/im-management', '/schedule', '/permissions', '/clawhub', '/help']) {
+  for (const r of ['/im-management', '/schedule', '/permissions', '/clawhub', '/remote-control']) {
     await test(`其他 route: ${r}`, async () => {
       await win.evaluate((h) => { window.location.hash = h; }, r)
       await win.waitForTimeout(300)
@@ -324,7 +324,7 @@ async function main() {
   console.log(`\n=== 总结: ${pass}/${total} pass, ${fail} fail ===\n`)
   writeFileSync(join(OUT, 'report.json'), JSON.stringify(results, null, 2))
   writeFileSync(join(OUT, 'report.md'),
-    `# PiPiClaw 用户全套功能测试报告 (Ollama 本地链路)\n\n` +
+    `# New World 用户全套功能测试报告 (Ollama 本地链路)\n\n` +
     `- 开始: ${results.startTime}\n` +
     `- 结束: ${results.endTime}\n` +
     `- 结果: **${pass}/${total} pass, ${fail} fail**\n\n` +

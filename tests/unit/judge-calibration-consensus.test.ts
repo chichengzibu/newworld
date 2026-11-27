@@ -1,5 +1,5 @@
 /**
- * PiPiClaw — 顺序一致性分析 + 长度平凡基线（M4-V）
+ * New World — 顺序一致性分析 + 长度平凡基线（M4-V）
  * ═══════════════════════════════════════════════════════════════════════
  * 【这一批在测什么】
  * 两个**会决定"能不能接裁判"的数字**，必须有回归用例钉住：
@@ -21,7 +21,7 @@
 import { describe, it, expect, vi } from 'vitest'
 
 vi.mock('electron', () => ({
-  app: { getPath: vi.fn((k: string) => `/tmp/pipiclaw-calib-${k}`) },
+  app: { getPath: vi.fn((k: string) => `/tmp/newworld-calib-${k}`) },
 }))
 vi.mock('electron-log', () => ({
   default: {

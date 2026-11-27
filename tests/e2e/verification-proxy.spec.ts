@@ -28,19 +28,22 @@ test.describe('VERIFICATION E1 · 系统代理下不白屏', () => {
   test('E1: 代理指向死端口 → 主窗口仍正常渲染', async () => {
     const repoRoot = path.resolve(__dirname, '..', '..')
     const mainEntry = path.join(repoRoot, 'dist-electron', 'main.js')
-    const userDataDir = mkdtempSync(join(tmpdir(), 'pipiclaw-e2e-proxy-'))
+    const userDataDir = mkdtempSync(join(tmpdir(), 'newworld-e2e-proxy-'))
 
     let page: Page | null = null
     let app: Awaited<ReturnType<typeof electron.launch>> | null = null
     try {
+      // 【宿主环境清理】删除 ELECTRON_RUN_AS_NODE,否则 electron.exe 按 Node
+      // 模式启动 → "bad option: --remote-debugging-port=0",launch 阶段必红。
+      const { ELECTRON_RUN_AS_NODE: _drop, ...cleanEnv } = process.env as Record<string, string | undefined>
       app = await electron.launch({
         // 死代理:连 127.0.0.1:9 必然失败
         args: [mainEntry, '--no-sandbox', `--user-data-dir=${userDataDir}`, '--proxy-server=http://127.0.0.1:9'],
         cwd: repoRoot,
         env: {
-          ...process.env,
-          PIPICLAW_E2E: '1',
-          PIPICLAW_SKIP_SPLASH: '1',
+          ...cleanEnv,
+          NW_E2E: '1',
+          NW_SKIP_SPLASH: '1',
           ELECTRON_DISABLE_SECURITY_WARNINGS: '1',
         },
         timeout: 30_000,
@@ -59,7 +62,7 @@ test.describe('VERIFICATION E1 · 系统代理下不白屏', () => {
 
       // 2. 没有红屏兜底(渲染错误)
       const body = await page.evaluate(() => document.body.innerText)
-      expect(body, '出现红屏兜底').not.toContain('[PiPiClaw render error]')
+      expect(body, '出现红屏兜底').not.toContain('[New World render error]')
 
       // 3. 界面有实质内容(不是空壳)
       const visibleText = body.replace(/\s+/g, ' ').trim()

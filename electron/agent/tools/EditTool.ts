@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - EditTool (M1 v0.1)
+ * New World - EditTool (M1 v0.1)
  *
  * 精确编辑文件, 跟 ClaudeCode Edit tool 协议对齐:
  *   args: { file_path, old_string, new_string, replace_all?: boolean }

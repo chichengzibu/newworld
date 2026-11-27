@@ -1,23 +1,18 @@
 /**
- * PiPiClaw - FileTransferManager (P0-06)
+ * New World - FileTransferManager (P0-06 / Stage 1 明确占位)
  *
- * 真实实现 uploadToIM(),支持 6 平台的文件上传:
- *  - 飞书 (im-feishu):基于 Open API
- *  - 钉钉 (im-dingtalk):基于 webhook / Open API
- *  - 企业微信 (im-wechat-work):基于 Open API
- *  - Telegram (im-telegram):基于 Bot API
- *  - Slack (im-slack):基于 files.upload
- *  - Discord (im-discord):基于 REST API
+ * 文件存在性 / 平台体积上限 / 配置读取 + 结构化结果 + 进度回放。
  *
- * 协议:
- *  uploadToIM(args) → Promise<UploadResult>
- *  args: { platform, filePath, channelId, targetUserId, apiBaseUrl?, accessToken? }
- *  UploadResult: { ok, messageId?, fileId?, error? }
+ * ⚠️ 诚实边界（IM 真连通批次点名）：
+ *   本类 **不做真实网络上传**，校验通过后即返回 ok:true + mock messageId/fileId，
+ *   返回的 `stub: true` 就是给调用方的显式标记，任何 UI / agent 都不能把它
+ *   当作「文件已送达 IM 平台」的证据。真实 multipart 上传属 Stage 2：
+ *    - 飞书:https://open.feishu.cn/document/server-docs/im-v1/message-attachment
+ *    - Telegram:https://core.telegram.org/bots/api#senddocument
+ *    - Discord:https://discord.com/developers/docs/reference#multipart-file-upload
  *
- * 真实网络请求需要外部 SDK / fetch,本类为骨架,留 Stage 2 接入:
- *  - 飞书:https://open.feishu.cn/document/server-docs/im-v1/message-attachment
- *  - Telegram:https://core.telegram.org/bots/api#sending-files
- *  - Discord:https://discord.com/developers/docs/reference#multipart-file-upload
+ * 说明：本次「IM 真连通」范围是消息文本链路（入站接收 → agent → 出站发送），
+ * 文件上传不在此批次，故保留占位但改为显式可识别，不再伪装成真实交付。
  */
 
 import { LogManager } from '../core/LogManager'
@@ -52,6 +47,8 @@ export interface UploadResult {
   durationMs: number
   fileSize: number
   error?: string
+  /** true = 未真正上传网络，仅供本地校验/进度演练 */
+  stub: boolean
 }
 
 const PLATFORM_LIMITS: Record<SupportedUploadPlatform, number> = {
@@ -62,6 +59,8 @@ const PLATFORM_LIMITS: Record<SupportedUploadPlatform, number> = {
   'im-slack': 1024 * 1024 * 1024,        // 1GB
   'im-discord': 25 * 1024 * 1024,        // 25MB (Nitro boost 50MB)
 }
+
+const stubResult = (r: Omit<UploadResult, 'stub'>): UploadResult => ({ ...r, stub: true })
 
 export class FileTransferManager {
   private static instance: FileTransferManager
@@ -74,107 +73,93 @@ export class FileTransferManager {
     return FileTransferManager.instance
   }
 
-  /**
-   * 获取某平台的文件大小上限
-   */
+  /** 获取某平台的文件大小上限 */
   getMaxFileSize(platform: SupportedUploadPlatform): number {
     return PLATFORM_LIMITS[platform] ?? 0
   }
 
   /**
-   * 主入口:上传文件到 IM 平台
-   *
-   * Stage 1(本类):本地文件存在性 / 大小校验 / 配置读取 / 返回结构化结果
-   * Stage 2(后续 PR):接真 fetch + multipart/form-data + 平台特定字段
+   * Stage 1 主入口：校验 → 返回结构化结果（**不发起网络请求**）。
+   * Stage 2 需接真 fetch + multipart/form-data + 平台特定字段。
    */
   async uploadToIM(args: UploadArgs): Promise<UploadResult> {
     const start = Date.now()
     const id = randomUUID().slice(0, 8)
 
-    // 1. 平台支持检查
     if (!(args.platform in PLATFORM_LIMITS)) {
-      return {
+      return stubResult({
         ok: false,
         platform: args.platform,
         durationMs: Date.now() - start,
         fileSize: 0,
         error: `unsupported platform: ${args.platform}`,
-      }
+      })
     }
 
-    // 2. 文件存在性
     if (!fs.existsSync(args.filePath)) {
-      return {
+      return stubResult({
         ok: false,
         platform: args.platform,
         durationMs: Date.now() - start,
         fileSize: 0,
         error: `file not found: ${args.filePath}`,
-      }
+      })
     }
 
-    // 3. 大小校验
     const stat = fs.statSync(args.filePath)
     if (!stat.isFile()) {
-      return {
+      return stubResult({
         ok: false,
         platform: args.platform,
         durationMs: Date.now() - start,
         fileSize: 0,
         error: `not a file: ${args.filePath}`,
-      }
+      })
     }
     const maxSize = PLATFORM_LIMITS[args.platform]
     if (stat.size > maxSize) {
-      return {
+      return stubResult({
         ok: false,
         platform: args.platform,
         durationMs: Date.now() - start,
         fileSize: stat.size,
         error: `file too large: ${stat.size} bytes > ${maxSize} limit for ${args.platform}`,
-      }
+      })
     }
 
-    // 4. 配置读取(access token)
     let accessToken = args.accessToken
     if (!accessToken) {
-      const configStore = IMConfigStore.getInstance()
-      const config = configStore.get(args.platform)
+      const config = IMConfigStore.getInstance().get(args.platform)
       if (!config?.accessToken && !config?.botToken && !config?.appSecret) {
-        return {
+        return stubResult({
           ok: false,
           platform: args.platform,
           durationMs: Date.now() - start,
           fileSize: stat.size,
           error: `no access token configured for ${args.platform}`,
-        }
+        })
       }
       accessToken = config!.accessToken ?? config!.botToken ?? config!.appSecret
     }
 
-    // 5. 进度回报：真实传输需各通道对接其文件上传接口；当前为本地回放占位进度。
-    //    注意：本方法在校验通过后即返回 ok:true，并未真正把文件推送到 IM 平台，
-    //    属 Stage 1 占位实现，接入各通道真实上传 API 前请勿用于生产发送。
     if (args.onProgress) {
-      for (let p = 0; p <= 100; p += 25) {
-        args.onProgress(p)
-      }
+      for (let p = 0; p <= 100; p += 25) args.onProgress(p)
     }
 
-    this.log.info(`FileTransferManager: [${id}] ${path.basename(args.filePath)} (${stat.size}B) → ${args.platform}`)
-    return {
+    this.log.info(
+      `FileTransferManager: [${id}] ${path.basename(args.filePath)} (${stat.size}B) → ${args.platform} [STUB, 未上传]`,
+    )
+    return stubResult({
       ok: true,
       platform: args.platform,
       messageId: `mock-msg-${id}`,
       fileId: `mock-file-${id}`,
       durationMs: Date.now() - start,
       fileSize: stat.size,
-    }
+    })
   }
 
-  /**
-   * 列出所有支持上传的平台
-   */
+  /** 列出所有支持上传的平台 */
   listSupportedPlatforms(): SupportedUploadPlatform[] {
     return Object.keys(PLATFORM_LIMITS) as SupportedUploadPlatform[]
   }

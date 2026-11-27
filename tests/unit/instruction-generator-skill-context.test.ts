@@ -1,5 +1,5 @@
 /**
- * PiPiClaw — M2-C 回归测试:systemPrompt 不得含 "[object Promise]"
+ * New World — M2-C 回归测试:systemPrompt 不得含 "[object Promise]"
  *
  * 【这个 bug 的性质】
  * InstructionGenerator.ts:256 调用 async 的 getSkillContext 时漏了 await,

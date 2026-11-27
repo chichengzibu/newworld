@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - 鸿蒙 PC AbilityStage(进程级入口)
+ * New World - 鸿蒙 PC AbilityStage(进程级入口)
  *
  * 职责:
  *   1. 进程创建时做一次性初始化(日志域、app 资源目录解析)。
@@ -9,20 +9,20 @@
  *
  * 与既有代码的对接关系:
  *   - electron/main.ts 第 0 步调用 initHost(),内部 detect.ts 依次检查
- *       process.env.PIPICLAW_PLATFORM === 'ohos'
+ *       process.env.NW_PLATFORM === 'ohos'
  *       process.platform === 'ohos'
  *       /etc/os-release 含 HarmonyOS/OpenHarmony/OHOS
- *     只要 runtime 能注入 PIPICLAW_PLATFORM=ohos,HarmonyHost 即生效,
+ *     只要 runtime 能注入 NW_PLATFORM=ohos,HarmonyHost 即生效,
  *     Tray / GlobalShortcut / AutoUpdater / MiniWindow 自动降级为 no-op。
- *   - HarmonyHost 还会读取 PIPICLAW_APP_PATH / PIPICLAW_USER_DATA /
- *     PIPICLAW_VERSION,分别对应 app 资源根、可写数据目录、版本号。
+ *   - HarmonyHost 还会读取 NW_APP_PATH / NW_USER_DATA /
+ *     NW_VERSION,分别对应 app 资源根、可写数据目录、版本号。
  */
 
 import { AbilityStage } from '@kit.AbilityKit';
 import { hilog } from '@kit.PerformanceAnalysisKit';
 
 const DOMAIN: number = 0xF001;
-const TAG: string = 'PiPiClawStage';
+const TAG: string = 'NWStage';
 
 export default class AppAbilityStage extends AbilityStage {
   onCreate(): void {
@@ -45,10 +45,10 @@ export default class AppAbilityStage extends AbilityStage {
     //      例如 `${filesDir}/app`。若 runtime 支持直接读 rawfile 则可跳过。
     //
     //   2) 注入环境变量,供 electron/platform/detect.ts 与 HarmonyHost 读取:
-    //        PIPICLAW_PLATFORM = 'ohos'          // 决定 initHost() 选 HarmonyHost
-    //        PIPICLAW_APP_PATH = `${filesDir}/app`
-    //        PIPICLAW_USER_DATA = filesDir
-    //        PIPICLAW_VERSION  = <AppScope/app.json5 versionName>
+    //        NW_PLATFORM = 'ohos'          // 决定 initHost() 选 HarmonyHost
+    //        NW_APP_PATH = `${filesDir}/app`
+    //        NW_USER_DATA = filesDir
+    //        NW_VERSION  = <AppScope/app.json5 versionName>
     //
     //   3) 以 `${filesDir}/app/dist-electron/main.js` 为入口启动主进程。
     //      渲染进程加载 dist/index.html —— vite 已设 base:'./',相对路径
@@ -58,7 +58,7 @@ export default class AppAbilityStage extends AbilityStage {
     //   ElectronRuntime.start({
     //     appDir: `${filesDir}/app`,
     //     main: 'dist-electron/main.js',
-    //     env: { PIPICLAW_PLATFORM: 'ohos', PIPICLAW_APP_PATH: `${filesDir}/app` }
+    //     env: { NW_PLATFORM: 'ohos', NW_APP_PATH: `${filesDir}/app` }
     //   });
     // ================================================================
   }

@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - 系统托盘管理器
+ * New World - 系统托盘管理器
  * 
  * 职责：
  * 1. 创建和管理系统托盘图标
@@ -58,7 +58,7 @@ export class TrayManager {
       }
 
       this.tray = new Tray(icon);
-      this.tray.setToolTip('PiPiClaw - 桌面AI助手');
+      this.tray.setToolTip('New World - 桌面AI助手');
       
       this.updateContextMenu();
       

@@ -1,8 +1,7 @@
 <template>
   <el-config-provider :locale="epLocale">
-    <div id="pipiclaw-app">
+    <div id="nw-app">
       <AppLayout />
-      <FirstLaunchGuide v-model="appStore.showGuide" />
       <DevPanel />
       <CommandConfirmDialog />
     </div>
@@ -13,7 +12,6 @@
 import { computed } from 'vue';
 import { useI18n } from 'vue-i18n';
 import AppLayout from '@/components/layout/AppLayout.vue';
-import FirstLaunchGuide from '@/components/guide/FirstLaunchGuide.vue';
 import DevPanel from '@/components/dev/DevPanel.vue';
 import CommandConfirmDialog from '@/components/common/CommandConfirmDialog.vue';
 import { onMounted } from 'vue';
@@ -38,7 +36,7 @@ onMounted(() => {
 </script>
 
 <style lang="scss">
-#pipiclaw-app {
+#nw-app {
   width: 100%;
   height: 100%;
   overflow: hidden;

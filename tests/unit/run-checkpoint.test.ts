@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - #004 run 层 checkpoint 验证 (C-1..C-4)
+ * New World - #004 run 层 checkpoint 验证 (C-1..C-4)
  *
  * ═══ 红线 (冻结延续) ═══
  *   main.ts / IpcServer / commandDecide / BashTool 零改动;
@@ -47,7 +47,7 @@ import {
 import { LlmAgentBrain } from '../../electron/agent/LlmAgentBrain'
 import type { RunCheckpointEvent, LlmToolCall } from '../../electron/agent/LlmAgentBrain'
 import type { LlmStreamChunk } from '../../electron/llm/types'
-import { installToolConfirmation } from '../../tests/unit/auto-confirm'
+import { installToolConfirmation, activatePermissiveForTest } from '../../tests/unit/auto-confirm'
 
 // ─── 替身面 ───
 vi.mock('electron', () => ({
@@ -105,11 +105,12 @@ let tmpBase: string
 const CONFIRM_ALL = installToolConfirmation();
 
 beforeEach(() => {
+  activatePermissiveForTest() // v4.8: 非权限主题，显式授权写工具绕过 RBAC 默认 safe
   setConfirmTransport(null)
   const rows: Record<string, unknown>[] = []
   setAuditSink((entry) => { rows.push(entry) })
   // 每用例独立 run-checkpoints 目录
-  tmpBase = fs.mkdtempSync(path.join(os.tmpdir(), 'pipiclaw-ckpt-'))
+  tmpBase = fs.mkdtempSync(path.join(os.tmpdir(), 'newworld-ckpt-'))
   scriptState.callCount = 0
 })
 afterAll(() => {

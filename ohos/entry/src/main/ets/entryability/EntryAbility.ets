@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - 鸿蒙 PC 主 Ability
+ * New World - 鸿蒙 PC 主 Ability
  *
  * 说明:在官方 OHOS Electron runtime 下,真正的 UI 由 Electron 渲染进程
  * (ArkWeb)承载,本 Ability 主要负责窗口宿主与生命周期桥接。
@@ -13,7 +13,7 @@ import { window } from '@kit.ArkUI';
 import { BusinessError } from '@kit.BasicServicesKit';
 
 const DOMAIN: number = 0xF001;
-const TAG: string = 'PiPiClawAbility';
+const TAG: string = 'New WorldAbility';
 
 export default class EntryAbility extends UIAbility {
   onCreate(want: Want, launchParam: AbilityConstant.LaunchParam): void {

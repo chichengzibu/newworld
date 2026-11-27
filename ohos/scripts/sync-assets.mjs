@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * PiPiClaw - 把 vite / vite-plugin-electron 产物同步进鸿蒙 HAP 壳工程
+ * New World - 把 vite / vite-plugin-electron 产物同步进鸿蒙 HAP 壳工程
  *
  * 输入(需先执行 `vite build`):
  *   dist/                  渲染进程产物(vite base:'./',HAP 内相对路径不白屏)
@@ -12,7 +12,7 @@
  *   ohos/entry/assets/app/dist-electron/
  *
  * 输出目录可用环境变量覆盖:
- *   PIPICLAW_OHOS_ASSET_DIR=ohos/entry/src/main/resources/rawfile/app
+ *   NW_OHOS_ASSET_DIR=ohos/entry/src/main/resources/rawfile/app
  *
  * 说明:任务书要求「dist/ + dist-electron/preload.js」,这里同步的是整个
  * dist-electron/ —— 因为 dist-electron/main.js 才是 Electron 主进程入口
@@ -29,8 +29,8 @@ const ROOT = resolve(__dirname, '..', '..'); // 仓库根目录
 const DIST = join(ROOT, 'dist');
 const DIST_ELECTRON = join(ROOT, 'dist-electron');
 
-const OUT_APP = process.env.PIPICLAW_OHOS_ASSET_DIR
-  ? resolve(ROOT, process.env.PIPICLAW_OHOS_ASSET_DIR)
+const OUT_APP = process.env.NW_OHOS_ASSET_DIR
+  ? resolve(ROOT, process.env.NW_OHOS_ASSET_DIR)
   : join(ROOT, 'ohos', 'entry', 'assets', 'app');
 
 function log(msg) {
@@ -89,7 +89,7 @@ log(`dist-electron/ → ${relative(ROOT, join(OUT_APP, 'dist-electron'))}`);
 
 // ---- 3. 生成 Electron 应用清单 ----
 // runtime 若按 Node 约定从 app 根读 package.json 定位入口,此文件即为依据;
-// 同时它也是 HarmonyHost.getAppPath() 指向的目录(PIPICLAW_APP_PATH)。
+// 同时它也是 HarmonyHost.getAppPath() 指向的目录(NW_APP_PATH)。
 const rootPkg = JSON.parse(readFileSync(join(ROOT, 'package.json'), 'utf-8'));
 const appManifest = {
   name: rootPkg.name,
@@ -99,13 +99,13 @@ const appManifest = {
   author: rootPkg.author,
   license: rootPkg.license,
   // 提示 runtime 注入的环境变量(electron/platform/detect.ts 读取)
-  pipiclaw: {
+  newworld: {
     platform: 'ohos',
     renderer: 'dist/index.html',
     preload: 'dist-electron/preload.js',
     // TODO(需官方 OHOS Electron runtime 确认):
     // runtime 是否读取本字段未知,仅作为壳工程与主进程之间的约定记录。
-    requiredEnv: ['PIPICLAW_PLATFORM', 'PIPICLAW_APP_PATH', 'PIPICLAW_USER_DATA', 'PIPICLAW_VERSION'],
+    requiredEnv: ['NW_PLATFORM', 'NW_APP_PATH', 'NW_USER_DATA', 'NW_VERSION'],
   },
 };
 writeFileSync(join(OUT_APP, 'package.json'), `${JSON.stringify(appManifest, null, 2)}\n`, 'utf-8');

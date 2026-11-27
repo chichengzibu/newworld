@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - 定时任务管理器
+ * New World - 定时任务管理器
  */
 
 import { Notification } from 'electron';

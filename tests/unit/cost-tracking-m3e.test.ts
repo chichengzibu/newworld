@@ -1,5 +1,5 @@
 /**
- * PiPiClaw — 成本记账链路测试（M3-E）
+ * New World — 成本记账链路测试（M3-E）
  * ═══════════════════════════════════════════════════════════════
  * 【这一批修的三处记账失真】
  *
@@ -18,7 +18,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 vi.mock('electron', () => ({
-  app: { getPath: vi.fn((k: string) => `/tmp/pipiclaw-m3e-${k}`) },
+  app: { getPath: vi.fn((k: string) => `/tmp/newworld-m3e-${k}`) },
   ipcMain: { handle: () => {}, on: () => {}, removeHandler: () => {} },
   BrowserWindow: class {},
   dialog: { showMessageBox: () => {}, showOpenDialog: () => {} },
@@ -95,6 +95,48 @@ describe('M3-E 成本记账链路', () => {
     expect(payload.llmModel).toBeTruthy()
     expect(payload.promptTokens).toBe(30)
     expect(payload.completionTokens).toBe(10)
+  })
+
+  it('【P2】brain run()/think() 把 provider 真实回传的 reasoningTokens 带出来', async () => {
+    const mockStream = async function* () {
+      yield {
+        type: 'usage',
+        usage: { promptTokens: 30, completionTokens: 10, totalTokens: 40, reasoningTokens: 7 },
+      } as LlmStreamChunk
+      yield { type: 'content', delta: 'x', accumulated: 'x' } as LlmStreamChunk
+      yield { type: 'done' } as LlmStreamChunk
+    }
+    LlmClient.prototype.streamChat = mockStream as never
+
+    const r = await LlmAgentBrain.getInstance().run('你好', {
+      maxIterations: 1,
+      model: 'qwen3.5:9b',
+    } as any)
+    expect(r.reasoningTokens).toBe(7)
+
+    const d = await LlmAgentBrain.getInstance().think({
+      content: '你好',
+      conversationId: 'c1',
+    } as any)
+    expect((d.payload as any).reasoningTokens).toBe(7)
+  })
+
+  it('【P2】provider 未回传思考 token 时恒为 0，不拿 total 冒充', async () => {
+    const mockStream = async function* () {
+      yield {
+        type: 'usage',
+        usage: { promptTokens: 30, completionTokens: 10, totalTokens: 40 },
+      } as LlmStreamChunk
+      yield { type: 'content', delta: 'x', accumulated: 'x' } as LlmStreamChunk
+      yield { type: 'done' } as LlmStreamChunk
+    }
+    LlmClient.prototype.streamChat = mockStream as never
+
+    const r = await LlmAgentBrain.getInstance().run('你好', {
+      maxIterations: 1,
+      model: 'qwen3.5:9b',
+    } as any)
+    expect(r.reasoningTokens).toBe(0)
   })
 
   it('CostTracker 按模型归集 —— 真实模型名让 byModel 有意义', () => {

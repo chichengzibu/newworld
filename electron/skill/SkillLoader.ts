@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - 技能加载器
+ * New World - 技能加载器
  * 
  * 职责：
  * 1. 扫描 skills/ 目录下所有子文件夹
@@ -388,7 +388,7 @@ export class SkillLoader {
 
   /**
    * 解析技能 Markdown——双格式兼容：
-   * 1) PiPiClaw 原生：# 名称 / ## 描述 / ## 触发关键词 / ## 操作步骤（中文无 frontmatter）
+   * 1) New World 原生：# 名称 / ## 描述 / ## 触发关键词 / ## 操作步骤（中文无 frontmatter）
    * 2) OpenClaw / Claude Code 风：YAML frontmatter(name/description) + ## Triggers / ## Steps
    */
   private parseSkillMd(skillId: string, content: string): SkillDefinition | null {
@@ -903,7 +903,7 @@ export class SkillLoader {
       const isZip = /\.zip(\?.*)?$/i.test(url);
       if (isZip) {
         const buf = Buffer.from(await res.arrayBuffer());
-        const tmpZip = path.join(os.tmpdir(), `pipiclaw-url-${Date.now()}.zip`);
+        const tmpZip = path.join(os.tmpdir(), `newworld-url-${Date.now()}.zip`);
         fs.writeFileSync(tmpZip, buf);
         try {
           return await this.importSkillFromZip(tmpZip);
@@ -960,7 +960,7 @@ export class SkillLoader {
       const buffer = fs.readFileSync(zipPath);
       const zip = await JSZip.loadAsync(buffer);
 
-      const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pipiclaw-skill-'));
+      const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'newworld-skill-'));
 
       const writes: Promise<void>[] = [];
       zip.forEach((relativePath, file) => {

@@ -1,5 +1,5 @@
 /**
- * PiPiClaw — LLM 裁判层测试（M4-F）
+ * New World — LLM 裁判层测试（M4-F）
  * ═══════════════════════════════════════════════════════════════
  * 【这一批在测什么】
  * 裁判层是**可选**的第四层。测三件事:
@@ -12,7 +12,7 @@
 import { describe, it, expect, vi } from 'vitest'
 
 vi.mock('electron', () => ({
-  app: { getPath: vi.fn((k: string) => `/tmp/pipiclaw-judge-${k}`) },
+  app: { getPath: vi.fn((k: string) => `/tmp/newworld-judge-${k}`) },
 }))
 vi.mock('electron-log', () => ({
   default: {

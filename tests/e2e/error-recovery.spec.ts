@@ -79,11 +79,17 @@ test.describe('T+480 Chat 错误处理 / 降级 UX', () => {
     const bubble = window.locator('.message.assistant, .assistant-message, [class*="message"][class*="assistant"]').first()
     const bubbleText = (await bubble.innerText()).toLowerCase()
     expect(bubbleText).toMatch(/error|错误|connect|timeout|refused|econnrefused|失败|fetch failed/)
-    // 没卡在 streaming:按钮从「停止」变回「发送」
-    // (注意:「发送」在输入框为空时是 disabled —— 那是**正确行为**,没得发;
-    //  所以这里断的是按钮形态,不是 enabled)
-    await expect(window.locator('.input-area button:has-text("停止")'), '仍卡在生成中').toHaveCount(0)
-    await expect(window.locator('.input-area button:has-text("发送")').first()).toBeVisible({ timeout: 15_000 })
+    // 没卡在 streaming:生成态的 danger 停止键消失,恢复成 primary 圆形发送键。
+    // 【v4.6 修】发送键是圆形 icon 按钮(.send-btn),**没有「发送」文字**;
+    // 旧写法 button:has-text("发送") / ("停止") 永远匹配不到 → 前者假通过、
+    // 后者 toBeVisible 超时。现按 Element Plus 的 type class 判断真实形态。
+    await expect(
+      window.locator('.input-area .send-btn.el-button--danger'),
+      '仍卡在生成中',
+    ).toHaveCount(0)
+    await expect(
+      window.locator('.input-area .send-btn.el-button--primary').first(),
+    ).toBeVisible({ timeout: 15_000 })
   })
 
   test('ER2: 错误后切回正确 Ollama provider → 可继续发消息', async ({ window }) => {

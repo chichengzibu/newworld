@@ -20,11 +20,11 @@ import { homedir, tmpdir } from 'node:os'
 
 function findUserDataPath(): string {
   // Electron 30 + 没有 productName,默认 userData = %APPDATA%/Electron
-  // 也可能写到 pipiclaw / PiPiClaw(legacy)
+  // 也可能写到 newworld / New World(legacy)
   const candidates = [
     join(homedir(), 'AppData', 'Roaming', 'Electron'),
-    join(homedir(), 'AppData', 'Roaming', 'pipiclaw'),
-    join(homedir(), 'AppData', 'Roaming', 'PiPiClaw'),
+    join(homedir(), 'AppData', 'Roaming', 'newworld'),
+    join(homedir(), 'AppData', 'Roaming', 'New World'),
   ]
   for (const c of candidates) {
     if (existsSync(c)) return c

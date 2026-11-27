@@ -1,7 +1,7 @@
 {
-  "name": "pipiclaw",
+  "name": "new-world",
   "version": "4.5.0-alpha",
-  "description": "国产桌面AI自动化助手 - 受 OpenClaw 启发自研",
+  "description": "New World (NW) - 下一代桌面 AI 自动化助手",
   "main": "dist-electron/main.js",
   "scripts": {
     "dev": "vite",
@@ -42,10 +42,12 @@
     "electron-log": "^5.1.1",
     "electron-updater": "^6.8.9",
     "element-plus": "^2.5.4",
+    "exceljs": "^4.4.0",
     "highlight.js": "^11.11.1",
     "jszip": "^3.10.1",
     "marked": "^18.0.0",
     "pinia": "^2.1.7",
+    "pptxgenjs": "^4.0.1",
     "vue": "^3.4.15",
     "vue-i18n": "^9.14.5",
     "vue-router": "^4.2.5"
@@ -76,7 +78,7 @@
     "vue-eslint-parser": "^9.4.3",
     "vue-tsc": "^3.3.7"
   },
-  "author": "PiPiClaw Team",
+  "author": "New World Team",
   "license": "MIT",
   "overrides": {
     "app-builder-lib": {

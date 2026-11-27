@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - 错误人话化工具 (P4-T4.2)
+ * New World - 错误人话化工具 (P4-T4.2)
  *
  * 把技术错误(EADDRINUSE / 401 / etc)翻译成用户能懂的提示。
  * 配套 use:
@@ -55,8 +55,8 @@ const PATTERNS: Array<{
     test: /401|unauthorized|invalid api key|authentication/i,
     kind: 'auth',
     userMessage: 'API Key 不对,或没填',
-    hint: '去 Settings → LLM 配置 检查 API Key',
-    action: { label: '打开 LLM 配置', route: '/settings/llm-config' },
+    hint: '去 模型管理 检查 API Key',
+    action: { label: '打开模型管理', route: '/models' },
   },
   {
     test: /403|forbidden|permission denied/i,
@@ -86,8 +86,8 @@ const PATTERNS: Array<{
     test: /no.*provider|apiKey missing|not configured/i,
     kind: 'config',
     userMessage: '还没配置 LLM provider',
-    hint: '先去 Settings → LLM 配置 添加 provider',
-    action: { label: '打开 LLM 配置', route: '/settings/llm-config' },
+    hint: '先去 模型管理 添加 provider',
+    action: { label: '打开模型管理', route: '/models' },
   },
 ]
 

@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - Skill / A5ComputerUse (W8.2)
+ * New World - Skill / A5ComputerUse (W8.2)
  *
  * A5 Computer Use v1 minimal demo skill.
  * 流程:ComputerUseHandler.run() → 循环截屏+思考+执行

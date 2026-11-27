@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 /**
- * PiPiClaw sandbox selfcheck 脚本(W10.3)
+ * New World sandbox selfcheck 脚本(W10.3)
  * 用法: pnpm sandbox:selfcheck  或  node scripts/sandbox-selfcheck.mjs
  *
  * 5 项检查:
  * 1. docker installed (docker --version)
  * 2. docker daemon up (docker info)
- * 3. base image exists (docker image inspect pipiclaw/sandbox-base:latest)
+ * 3. base image exists (docker image inspect newworld/sandbox-base:latest)
  * 4. can run hello (docker run hello-world, timeout 30s)
  * 5. self-test L1 (本地 SandboxL1 stub 不可用, 标记 skip)
  */
@@ -42,7 +42,7 @@ check('docker-daemon-up', () => {
 
 check('base-image-exists', () => {
   try {
-    execSync('docker image inspect pipiclaw/sandbox-base:latest', { encoding: 'utf-8', stdio: 'pipe', timeout: 5000 })
+    execSync('docker image inspect newworld/sandbox-base:latest', { encoding: 'utf-8', stdio: 'pipe', timeout: 5000 })
     console.log('  → image exists')
     return true
   } catch {

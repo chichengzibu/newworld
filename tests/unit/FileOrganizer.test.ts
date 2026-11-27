@@ -4,7 +4,7 @@ import * as path from 'node:path'
 import * as os from 'node:os'
 
 vi.mock('electron', () => ({
-  app: { getPath: vi.fn(() => '/tmp/pipiclaw-fileorganizer-test') },
+  app: { getPath: vi.fn(() => '/tmp/newworld-fileorganizer-test') },
 }))
 
 vi.mock('electron-log', () => ({
@@ -91,7 +91,7 @@ describe('P3-T3.1: organizeDirectory', () => {
   let tmpDir: string
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pipiclaw-organize-'))
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'newworld-organize-'))
   })
 
   it('扫描空目录返回 0 moved', async () => {

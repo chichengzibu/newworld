@@ -1,5 +1,5 @@
 /**
- * PiPiClaw - 聊天状态管理 (Pinia Store)
+ * New World - 聊天状态管理 (Pinia Store)
  * 
  * 核心功能：
  * 1. 会话管理（创建、删除、归档、置顶）
@@ -11,6 +11,7 @@ import { defineStore } from 'pinia';
 import { ref, computed, watch } from 'vue';
 import { ElMessage } from "element-plus/es/components/message/index";
 import { classifyAcceptance } from '@/utils/acceptanceSignal';
+import type { ProducedArtifact } from '@/types/electron-api';
 
 // ========== 类型定义 ==========
 
@@ -23,6 +24,10 @@ export interface ChatMessage {
   role: MessageRole;
   content: string;
   thinking?: string;
+  /** 【P2】provider 真实回传的思考 token 数；缺失时 ThinkingBlock 不显示计数 */
+  thinkingTokens?: number;
+  /** agent 真实落盘的成品（stat 过的路径/大小），刷新后仍可打开 */
+  artifacts?: ProducedArtifact[];
   timestamp: number;
   status: MessageStatus;
   modelId?: string;
@@ -60,6 +65,22 @@ export interface AgentTraceEntry {
   args?: Record<string, unknown>
   ok?: boolean
   durationMs?: number
+  error?: string
+}
+
+/**
+ * 【P3】并行子任务轨迹 —— 与工具调用轨迹分开：
+ * 子任务有自己的生命周期（started/done/failed）和子 runId，按 subtaskId 归并。
+ */
+export interface SubtaskTraceEntry {
+  id: string
+  parentRunId: string
+  childRunId: string
+  index: number
+  instruction: string
+  status: 'running' | 'done' | 'failed'
+  durationMs?: number
+  tokens?: number
   error?: string
 }
 
@@ -220,10 +241,13 @@ export const useChatStore = defineStore('chat', () => {
    */
   const agentTrace = ref<AgentTraceEntry[]>([])
   const agentTraceConvId = ref<string | null>(null)
+  /** 【P3】并行子任务轨迹，同样按会话隔离 */
+  const subtaskTrace = ref<SubtaskTraceEntry[]>([])
 
-  /** 切换会话时清空轨迹 —— 避免 A 会话的工具调用显示在 B 会话 */
+  /** 切换会话时清空轨迹 —— 避免 A 会话的工具调用/子任务显示在 B 会话 */
   function resetAgentTrace(conversationId: string | null): void {
     agentTrace.value = []
+    subtaskTrace.value = []
     agentTraceConvId.value = conversationId
   }
 
@@ -1145,6 +1169,17 @@ export const useChatStore = defineStore('chat', () => {
     if (msg.status !== 'streaming') {
       msg.status = 'streaming';
     }
+
+    // ===== NW 语义化生命体征: 每个 token chunk 驱动一次神经脉冲/粒子喷射 =====
+    // 仅当前会话 + content 类型计入"输出 token", 避免后台会话串扰。
+    // 惰性 import 避免 store 初始化环 (chat store 初始化时 orb store 可能未就绪)。
+    if (conversationId === currentConversationId.value && type === 'content' && delta) {
+      import('@/stores/orb').then(({ useOrbStore }) => {
+        const orb = useOrbStore();
+        orb.setState('speaking', 'nw token stream'); // thinking → speaking (优先级更高, 允许)
+        orb.noteToken(delta.length);
+      }).catch(() => { /* orb store 不可用时静默降级, 不影响聊天主链路 */ });
+    }
   }
 
   /**
@@ -1176,6 +1211,8 @@ export const useChatStore = defineStore('chat', () => {
   let unsubscribeMessage: (() => void) | null = null;
   let unsubscribeConversation: (() => void) | null = null;
   let unsubscribeStream: (() => void) | null = null;
+  /** 【NW】真实 token usage (主进程 CostTracker 同源) */
+  let unsubscribeUsage: (() => void) | null = null;
   /** 【M1-D】任务计划确认 + 步骤流 */
   let unsubscribeTaskPlan: (() => void) | null = null;
   let unsubscribeTaskStep: (() => void) | null = null;
@@ -1211,6 +1248,10 @@ export const useChatStore = defineStore('chat', () => {
       unsubscribeStream();
       console.log('[ChatStore] 清理旧的流式监听器');
     }
+    if (unsubscribeUsage) {
+      unsubscribeUsage();
+      console.log('[ChatStore] 清理旧的 usage 监听器');
+    }
 
     // 注册 IPC 事件监听
     unsubscribeMessage = electronAPI?.chat?.onMessage?.((data: { conversationId: string; message: ChatMessage }) => {
@@ -1226,6 +1267,24 @@ export const useChatStore = defineStore('chat', () => {
     unsubscribeStream = electronAPI?.chat?.onStreamUpdate?.((data: { conversationId: string; messageId: string; delta: string; type: 'content' | 'thinking' }) => {
       console.log('[ChatStore] 收到 onStreamUpdate 事件:', data.conversationId, data.messageId, 'delta:', data.delta?.length, 'type:', data.type);
       handleStreamChunkEvent(data);
+    }) || null;
+
+    // ===== 【NW】真实 token usage → 生命体 Orb 精确遥测 =====
+    // 主进程 dispatchToAgent 完成后广播, 与 CostTracker 记账同源。
+    unsubscribeUsage = electronAPI?.chat?.onUsage?.((data: {
+      conversationId: string;
+      usage: { promptTokens: number; completionTokens: number; totalTokens: number; reasoningTokens?: number; model: string };
+    }) => {
+      if (data?.conversationId !== currentConversationId.value || !data?.usage) return;
+      import('@/stores/orb').then(({ useOrbStore }) => {
+        useOrbStore().setExactUsage({
+          promptTokens: data.usage.promptTokens,
+          completionTokens: data.usage.completionTokens,
+          totalTokens: data.usage.totalTokens,
+          model: data.usage.model,
+          reasoningTokens: data.usage.reasoningTokens,
+        });
+      }).catch(() => { /* orb store 不可用静默降级 */ });
     }) || null;
 
     // ===== 【M1-D】任务计划确认事件订阅 =====
@@ -1261,6 +1320,41 @@ export const useChatStore = defineStore('chat', () => {
       if (agentTraceConvId.value !== data.conversationId) {
         agentTraceConvId.value = data.conversationId;
         agentTrace.value = [];
+        subtaskTrace.value = [];
+      }
+
+      // 【P3】并行子任务：started 建档，done/failed 按 subtaskId 原地更新
+      if (ev.type === 'subtask.started' || ev.type === 'subtask.done' || ev.type === 'subtask.failed') {
+        const d = ev.data as {
+          subtaskId?: string; childRunId?: string; parentRunId?: string; index?: number
+          instruction?: string; durationMs?: number; tokens?: number; error?: string
+        };
+        const id = String(d.subtaskId ?? '');
+        if (id) {
+          const existing = subtaskTrace.value.find(s => s.id === id);
+          if (existing) {
+            if (ev.type === 'subtask.done') {
+              existing.status = 'done';
+              existing.durationMs = Number(d.durationMs ?? 0);
+              existing.tokens = Number(d.tokens ?? 0);
+            } else if (ev.type === 'subtask.failed') {
+              existing.status = 'failed';
+              existing.durationMs = Number(d.durationMs ?? 0);
+              existing.error = d.error;
+            }
+          } else if (ev.type === 'subtask.started') {
+            subtaskTrace.value.push({
+              id,
+              parentRunId: String(d.parentRunId ?? ev.runId ?? ''),
+              childRunId: String(d.childRunId ?? ''),
+              index: Number(d.index ?? 0),
+              instruction: String(d.instruction ?? ''),
+              status: 'running',
+            });
+          }
+          subtaskTrace.value = [...subtaskTrace.value];
+        }
+        return;
       }
 
       if (ev.type === 'tool_call') {
@@ -1362,6 +1456,7 @@ export const useChatStore = defineStore('chat', () => {
     showTaskConfirmDialog,
     pendingTaskPlan,
     agentTrace,
+    subtaskTrace,
     resetAgentTrace,
     rejectExecuteTask,
     cancelExecuteTask,

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest'
 import * as fs from 'node:fs'
 
 vi.mock('electron', () => ({
-  app: { getPath: vi.fn((k: string) => `/tmp/pipiclaw-set-${k}`) },
+  app: { getPath: vi.fn((k: string) => `/tmp/newworld-set-${k}`) },
 }))
 
 vi.mock('electron-log', () => ({
