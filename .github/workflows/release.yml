@@ -128,7 +128,7 @@ jobs:
           cat SHA256SUMS.txt
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           # push tag 时 github.ref_name 即 tag;workflow_dispatch 时 ref_name 是分支名,
           # 必须回落到 inputs.tag,否则会创建名为 "master" 的 Release。
