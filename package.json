@@ -38,7 +38,7 @@
     "@sentry/electron": "^7.16.0",
     "@tanstack/vue-virtual": "^3.13.35",
     "@webcontainer/api": "latest",
-    "docx": "^8.5.0",
+    "docx": "^9.16.0",
     "electron-log": "^5.1.1",
     "electron-updater": "^6.8.9",
     "element-plus": "^2.5.4",
