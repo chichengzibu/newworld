@@ -17,7 +17,7 @@
         "arch": ["x64"]
       }
     ],
-    "artifactName": "${productName}-${version}-Setup.${ext}",
+    "artifactName": "NewWorld-${version}-Setup.${ext}",
     "icon": "resources/icon.ico"
   },
   "mac": {
@@ -27,7 +27,7 @@
         "arch": ["x64", "arm64"]
       }
     ],
-    "artifactName": "${productName}-${version}-${arch}.${ext}",
+    "artifactName": "NewWorld-${version}-${arch}.${ext}",
     "category": "public.app-category.productivity",
     "icon": "resources/icon.icns",
     "identity": null,
@@ -50,9 +50,9 @@
         "arch": ["x64"]
       }
     ],
-    "artifactName": "${productName}-${version}-${arch}.${ext}",
     "category": "Office",
     "icon": "resources/icon.png",
+    "artifactName": "NewWorld-${version}-${arch}.${ext}",
     "synopsis": "New World (NW) - Desktop AI Automation Assistant",
     "description": "New World (NW) - 下一代桌面 AI 自动化助手,基于 Electron"
   },
