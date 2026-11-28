@@ -127,7 +127,25 @@ describe('① gen-update-metadata：latest.yml 格式正确', () => {
     const r = spawnSync(process.execPath, [GEN_SCRIPT, `--dir=${dir}`], { encoding: 'utf-8', cwd: repoRoot })
     expect(r.status).toBe(0)
     expect(fs.readFileSync(path.join(dir, 'latest.yml'), 'utf-8')).toBe('ORIGINAL_CONTENT')
-    expect(r.stdout).toContain('无需补写')
+    expect(r.stdout).toContain('跳过补写')
+  })
+
+  it('已有 latest.yml + blockmap 时，SHA256SUMS.txt 仍要生成（不能被一起跳过）', () => {
+    // 【回归】原实现把两者打包在一个 early-return 里 —— EB 正常构建后
+    // release/ 里只有 latest.yml + blockmap，没有校验文件（实测踩到）。
+    const dir = path.join(sandboxDir, 'release')
+    fs.mkdirSync(dir, { recursive: true })
+    const exe = makeFakeInstaller(dir, 'NewWorld-4.5.0-alpha-Setup.exe')
+    fs.writeFileSync(`${exe}.blockmap`, 'dummy')
+    fs.writeFileSync(path.join(dir, 'latest.yml'), 'ORIGINAL_CONTENT')
+
+    spawnSync(process.execPath, [GEN_SCRIPT, `--dir=${dir}`], { encoding: 'utf-8', cwd: repoRoot })
+
+    const sumsPath = path.join(dir, 'SHA256SUMS.txt')
+    expect(fs.existsSync(sumsPath)).toBe(true)
+    const sums = fs.readFileSync(sumsPath, 'utf-8')
+    expect(sums).toContain('NewWorld-4.5.0-alpha-Setup.exe')
+    expect(/[0-9a-f]{64}/.test(sums)).toBe(true)
   })
 
   it('blockmap 缺失时如实告警，不静默', () => {

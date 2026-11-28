@@ -184,14 +184,29 @@ function main() {
   const hasBlockmap = fs.existsSync(blockmapPath)
   const alreadyHasLatest = fs.existsSync(latestPath)
 
+  /**
+   * 【v4.14 修】SHA256SUMS.txt 必须**无条件**生成 —— 它跟 latest.yml 无关。
+   *
+   * 原实现把两者打包在一个 early-return 里：只要 EB 自己产出了 latest.yml
+   * 就整段跳过，结果 SHA256SUMS.txt 根本没生成（实测踩到：EB 正常构建后
+   * release/ 里只有 latest.yml + blockmap，没有校验文件）。
+   * 两者用途不同：latest.yml 给 updater 读，SHA256SUMS 给人核对下载完整性。
+   */
+  const sha256 = sha256Hex(installer.full)
+  const sums = buildSha256Sums({ fileName: installer.name, sha256 })
+  if (!dry) {
+    fs.writeFileSync(sumsPath, sums, 'utf-8')
+    console.log(`[update-meta] ✓ 已写 SHA256SUMS.txt`)
+    console.log(`[update-meta]   sha256: ${sha256}`)
+  }
+
   if (alreadyHasLatest && hasBlockmap) {
     // electron-builder 自己产出了 —— 不覆盖它的结果（它的 blockmap 索引更权威）
-    console.log(`[update-meta] latest.yml 与 blockmap 已由 electron-builder 生成，无需补写`)
+    console.log(`[update-meta] latest.yml 与 blockmap 已由 electron-builder 生成，跳过补写`)
     return
   }
 
   const sha512 = sha512Base64(installer.full)
-  const sha256 = sha256Hex(installer.full)
   const releaseDate = new Date().toISOString()
 
   const yml = buildLatestYml({
@@ -201,7 +216,6 @@ function main() {
     size: installer.size,
     releaseDate,
   })
-  const sums = buildSha256Sums({ fileName: installer.name, sha256 })
 
   if (dry) {
     console.log(`[update-meta] (dry) 会写 latest.yml:\n${yml}`)
@@ -209,11 +223,8 @@ function main() {
   }
 
   fs.writeFileSync(latestPath, yml, 'utf-8')
-  fs.writeFileSync(sumsPath, sums, 'utf-8')
 
   console.log(`[update-meta] ✓ 已补写 latest.yml（${installer.name}, ${(installer.size / 1048576).toFixed(1)}MB）`)
-  console.log(`[update-meta] ✓ 已写 SHA256SUMS.txt`)
-  console.log(`[update-meta]   sha256: ${sha256}`)
 
   if (!hasBlockmap) {
     console.warn(
