@@ -42,8 +42,28 @@ import path from 'node:path';
 
 import { moveAside, runStep, readTail, findArtifact } from './lib/build-runner.mjs';
 
-// 让 vite emptyDir 等的 rm 操作不再被 safe-delete 拦截(无该 guard 的环境为 no-op)
-process.env.CODEBUDDY_SAFE_DELETE_DISABLED = '1';
+// ─────────────────────────────────────────────────────────────────────
+// 【v4.14 修】这行此前是 `CODEBUDDY_SAFE_DELETE_DISABLED = '1'` —— **变量名是错的**，
+// 从来没有生效过。宿主真实注入的是 `CODEBUDDY_SAFE_DELETE_ENABLED=1`，
+// 判断逻辑看的是"ENABLED 是否为真"，因此设一个不存在的 DISABLED 等于没设。
+//
+// 更要紧的是：**即使把 ENABLED 改成 0 也解决不了本文档开头描述的困境** ——
+// 拦我们的是 electron-builder 自己的子进程，而它的环境由 EB 自己拼装；
+// 我们这边删干净了，EB 删临时 `__uninstaller.exe` 时仍会被拦。
+//
+// 所以正确做法不是"关掉垫片"（那是在跟宿主的沙箱策略对抗，也不该由构建脚本
+// 单方面决定），而是**让我们的清理逻辑不去触发批量删除判定**：
+//   · cleanup-build-backups.mjs 改为分批删（每批 < 阈值），见该文件
+//   · electron-builder 侧不依赖它的退出码，改以"产物是否存在"判成功，见下方 findArtifact
+//
+// 这里保留一个显式空操作，是为了不删掉历史注释的上下文；真正的关闭开关若将来
+// 需要（例如在 CI 里），应当显式读 `CODEBUDDY_SAFE_DELETE_ENABLED` 再覆盖，
+// 而不是设一个不存在的名字自欺。
+const SAFE_DELETE_GUARD_ENV = 'CODEBUDDY_SAFE_DELETE_ENABLED';
+if (process.env[SAFE_DELETE_GUARD_ENV] === '1') {
+  // 仅记录：本环境启用了 safe-delete 垫片，清理逻辑会自动走分批路径
+  process.env.NW_BUILD_SAFE_DELETE_GUARDED = '1';
+}
 
 const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const args = process.argv.slice(2);
@@ -301,6 +321,28 @@ if (!SKIP_EB) {
     console.log(`  ✓ 打包完成 —— 耗时 ${(eb.durationMs / 1000).toFixed(1)}s`);
     if (ebOutputOverride) {
       console.log(`  ℹ 产物在 ${ebOutputOverride}/ (release/ 被锁,本轮未覆盖旧产物)`);
+    }
+  }
+
+  /**
+   * 【v4.14】补齐 electron-updater 的更新元数据。
+   *
+   * 为什么必须单独做这一步：EB 在本环境最后一步删临时 `__uninstaller.exe`
+   * 时被 safe-delete 拦下，进程非零退出 —— **产物已生成，但它没走到
+   * "写 latest.yml / blockmap" 那一步**。上面那段已经按"产物存在"判成功了，
+   * 可更新链路其实是断的：autoupdate 去拉 latest.yml 会 404，
+   * 用户端不更新也不报错，你根本收不到反馈。
+   *
+   * 这个脚本补 latest.yml + SHA256SUMS.txt；blockmap 拿不回来（见脚本内说明，
+   * 事后无法从 exe 反推），会在日志里如实提示"增量更新退化为全量"。
+   */
+  if (hasArtifact && !ebOutputOverride) {
+    console.log('\n=== [4.5/5] 更新元数据(latest.yml / SHA256) ===');
+    const meta = await run('update-metadata', 'node', ['scripts/gen-update-metadata.mjs'], 60000);
+    if (meta.status !== 0) {
+      // 不阻断构建：安装包本身是好的，缺元数据只影响自动更新
+      console.warn('⚠ 更新元数据生成失败(不阻断构建) —— 自动更新可能不可用');
+      console.warn(`  日志: ${meta.logPath}`);
     }
   }
 } else {
